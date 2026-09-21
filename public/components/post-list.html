@@ -1,0 +1,27 @@
+<script type="application/json" data-cms="meta">
+{
+  "title": "Post list",
+  "description": "The latest posts as cards, with paging (?page=N).",
+  "props": {
+    "heading": { "type": "string", "label": "Heading" },
+    "per_page": { "type": "number", "label": "Posts per page", "default": 10 }
+  },
+  "api": [{ "name": "posts", "url": "/api/public/content/post?per_page={{ per_page | default: 10 }}&page={{ query.page | default: 1 }}" }]
+}
+</script>
+<style>
+  :host { display: block; }
+  .wrap { max-width: 68rem; margin: 0 auto; padding: 2rem 1.25rem; }
+  h2 { margin: 0 0 1.25rem; }
+  .grid { display: grid; gap: 1.25rem; grid-template-columns: repeat(auto-fill, minmax(17rem, 1fr)); }
+  .empty { color: var(--muted, #5d7076); }
+</style>
+<section class="wrap">
+  {% if heading != blank %}<h2>{{ heading }}</h2>{% endif %}
+  {% if api.posts.items.size > 0 %}
+    <div class="grid">{% for post in api.posts.items %}{% render "post-card", post: post %}{% endfor %}</div>
+    {% render "pagination", page: api.posts.page, pages: api.posts.pages %}
+  {% else %}
+    <p class="empty">{{ 'blog.empty' | t: 'Nothing published yet.' }}</p>
+  {% endif %}
+</section>

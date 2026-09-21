@@ -1,0 +1,16 @@
+{
+  "id": "midnight",
+  "name": "Midnight",
+  "version": "1.0.0",
+  "description": "A dark theme built only from the site-tree anatomy (layouts, components, styles, locales). Pages and components keep their content; the frame around them changes.",
+  "author": "SmartinfoLogiks",
+  "styles": ["midnight.css"],
+  "settings": {
+    "accent_color": {
+      "type": "string",
+      "label": "Accent colour",
+      "default": "#7aa2ff",
+      "help": "Links and buttons. Any CSS colour."
+    }
+  }
+}

@@ -1,0 +1,32 @@
+<script type="application/json" data-cms="meta">
+{
+  "title": "Posts in a category or tag",
+  "description": "The posts of one taxonomy term. 404 when the term does not exist.",
+  "props": {
+    "taxonomy": { "type": "string", "label": "Taxonomy id", "default": "category" },
+    "slug": { "type": "string", "label": "Term slug" }
+  },
+  "api": [
+    { "name": "term", "url": "/api/public/terms/{{ taxonomy | default: 'category' }}/{{ slug | url_encode }}", "required": true },
+    { "name": "posts", "url": "/api/public/content/post?{{ taxonomy | default: 'category' }}={{ slug | url_encode }}&page={{ query.page | default: 1 }}" }
+  ]
+}
+</script>
+<style>
+  :host { display: block; }
+  .wrap { max-width: 68rem; margin: 0 auto; padding: 2rem 1.25rem; }
+  .kind { margin: 0; color: var(--muted, #5d7076); text-transform: capitalize; font-size: 0.9rem; }
+  h1 { margin: 0.1rem 0 1.5rem; }
+  .grid { display: grid; gap: 1.25rem; grid-template-columns: repeat(auto-fill, minmax(17rem, 1fr)); }
+</style>
+{% seo title: api.term.term.name %}
+<section class="wrap">
+  <p class="kind">{{ taxonomy | default: "category" }}</p>
+  <h1>{{ api.term.term.name }}</h1>
+  {% if api.posts.items.size > 0 %}
+    <div class="grid">{% for post in api.posts.items %}{% render "post-card", post: post %}{% endfor %}</div>
+    {% render "pagination", page: api.posts.page, pages: api.posts.pages %}
+  {% else %}
+    <p>{{ 'blog.nothing_here' | t: 'Nothing here yet.' }}</p>
+  {% endif %}
+</section>

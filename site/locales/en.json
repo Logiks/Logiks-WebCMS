@@ -1,0 +1,31 @@
+{
+  "blog": {
+    "title": "Blog",
+    "latest": "Latest posts",
+    "empty": "Nothing published yet.",
+    "nothing_here": "Nothing here yet.",
+    "all_posts": "All posts"
+  },
+  "pagination": { "label": "Pages", "newer": "Newer", "older": "Older" },
+  "search": {
+    "title": "Search",
+    "placeholder": "Search",
+    "prompt": "Type something in the search box.",
+    "none": "Nothing matched. Try different words.",
+    "results_for": "results for"
+  },
+  "contact": {
+    "title": "Contact us",
+    "name": "Your name",
+    "email": "Your email",
+    "message": "Message",
+    "send": "Send message",
+    "sent": "Thanks. Your message has been sent."
+  },
+  "notfound": {
+    "title": "Page not found",
+    "text": "The page you were looking for isn't here. It may have moved.",
+    "home": "Go to the home page"
+  },
+  "entry": { "breadcrumbs": "Breadcrumbs" }
+}

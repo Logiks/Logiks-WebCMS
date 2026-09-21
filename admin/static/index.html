@@ -1,0 +1,864 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>Admin</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%232b59c3'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/admin/vendor/bootstrap/css/bootstrap.min.css">
+  <link rel="stylesheet" href="/admin/vendor/bootstrap-icons/bootstrap-icons.min.css">
+  <link rel="stylesheet" href="/admin/vendor/plex-sans/latin-400.css">
+  <link rel="stylesheet" href="/admin/vendor/plex-sans/latin-500.css">
+  <link rel="stylesheet" href="/admin/vendor/plex-sans/latin-600.css">
+  <link rel="stylesheet" href="/admin/vendor/plex-mono/latin-400.css">
+  <link rel="stylesheet" href="/admin/vendor/plex-mono/latin-500.css">
+  <link rel="stylesheet" href="/admin/static/admin.css">
+  <script src="/admin/static/app.js" defer></script>
+  <script src="/admin/vendor/alpine/cdn.min.js" defer></script>
+</head>
+<body x-data="app" x-cloak @profile-updated="setUser($event.detail)">
+
+<div class="toaster" aria-live="polite">
+  <template x-for="t in toasts" :key="t.id"><div class="toast-x" :class="t.type" x-text="t.msg"></div></template>
+</div>
+
+<!-- Media picker: used by the editor's image fields and blocks -->
+<div class="modal-x" x-show="picker.open" style="display:none" role="dialog" aria-modal="true" aria-label="Choose from the media library" @keydown.escape.window="picker.open && closePicker()">
+  <div class="modal-card">
+    <div class="d-flex gap-2 mb-2 flex-wrap">
+      <input class="form-control" style="max-width:16rem" placeholder="Search files" aria-label="Search files" x-model="picker.q" @input.debounce.300ms="loadPicker()">
+      <label class="btn btn-outline-secondary mb-0">Upload <input type="file" hidden multiple accept="image/jpeg,image/png,image/gif,image/webp,image/avif,application/pdf" @change="pickerUpload($event.target.files); $event.target.value = ''"></label>
+      <button type="button" class="btn btn-outline-secondary ms-auto" @click="closePicker()">Close</button>
+    </div>
+    <div class="text-danger small mb-2" role="alert" x-show="picker.error" x-text="picker.error"></div>
+    <div class="empty" x-show="!picker.items.length">No files yet. Upload one to get started.</div>
+    <div class="media-grid">
+      <template x-for="m in picker.items" :key="m.id">
+        <button type="button" class="media-tile" @click="choose(m)"><span class="ph"><img x-show="m.kind === 'image'" :src="thumb(m)" :alt="m.alt" loading="lazy"><i class="bi bi-file-earmark-pdf" x-show="m.kind !== 'image'"></i></span><span class="nm" x-text="m.filename"></span></button>
+      </template>
+    </div>
+  </div>
+</div>
+
+<!-- ───────── Sign in ───────── -->
+<template x-if="view === 'login'">
+  <div class="login">
+    <div class="login-side">
+      <h1 x-text="siteName || 'Admin'"></h1>
+      <p>Sign in to manage content, settings and the servers behind this site.</p>
+    </div>
+    <form class="login-form" @submit.prevent="signIn()">
+      <h2 class="h4 mb-4">Sign in</h2>
+      <div class="mb-3">
+        <label class="form-label" for="email">Email</label>
+        <input id="email" type="email" class="form-control" autocomplete="username" required x-model="login.email" autofocus>
+      </div>
+      <div class="mb-3">
+        <label class="form-label" for="pw">Password</label>
+        <input id="pw" type="password" class="form-control" autocomplete="current-password" required x-model="login.password">
+      </div>
+      <div class="text-danger small mb-3" role="alert" x-show="login.error" x-text="login.error"></div>
+      <button class="btn btn-primary" :disabled="login.busy"><span x-text="login.busy ? 'Signing in…' : 'Sign in'"></span></button>
+      <a href="#/forgot" class="ms-3 small" x-show="passwordReset">Forgot your password?</a>
+    </form>
+  </div>
+</template>
+
+<!-- ───────── Forgot password ───────── -->
+<template x-if="view === 'forgot'">
+  <div class="login">
+    <div class="login-side">
+      <h1 x-text="siteName || 'Admin'"></h1>
+      <p>We'll email you a link to choose a new password.</p>
+    </div>
+    <form class="login-form" @submit.prevent="submitForgot()">
+      <h2 class="h4 mb-4">Reset your password</h2>
+      <template x-if="!forgot.sent">
+        <div>
+          <div class="mb-3">
+            <label class="form-label" for="fp-email">Email</label>
+            <input id="fp-email" type="email" class="form-control" autocomplete="username" required x-model="forgot.email" autofocus>
+          </div>
+          <div class="text-danger small mb-3" role="alert" x-show="forgot.error" x-text="forgot.error"></div>
+          <button class="btn btn-primary" :disabled="forgot.busy"><span x-text="forgot.busy ? 'Sending…' : 'Send reset link'"></span></button>
+        </div>
+      </template>
+      <div class="alert alert-success" role="status" x-show="forgot.sent">If that email belongs to an account, a reset link is on its way. It expires soon, so check your inbox.</div>
+      <div class="mt-4"><a href="#/">Back to sign in</a></div>
+    </form>
+  </div>
+</template>
+
+<!-- ───────── Choose a new password (from the emailed link) ───────── -->
+<template x-if="view === 'reset'">
+  <div class="login">
+    <div class="login-side">
+      <h1 x-text="siteName || 'Admin'"></h1>
+      <p>Choose a password you don't use anywhere else.</p>
+    </div>
+    <form class="login-form" @submit.prevent="submitReset()">
+      <h2 class="h4 mb-4">Choose a new password</h2>
+      <div class="muted" x-show="reset.valid === null && !reset.done">Checking your link…</div>
+      <div class="alert alert-warning" role="alert" x-show="reset.valid === false && !reset.done">This reset link is invalid or has expired. <a href="#/forgot" x-show="passwordReset">Request a new one</a></div>
+      <template x-if="reset.valid === true && !reset.done">
+        <div>
+          <div class="mb-3">
+            <label class="form-label" for="rp-new">New password</label>
+            <input id="rp-new" type="password" class="form-control" autocomplete="new-password" required x-model="reset.password" autofocus>
+            <div class="form-text" x-text="'At least ' + minLength + ' characters.'"></div>
+          </div>
+          <div class="mb-3">
+            <label class="form-label" for="rp-confirm">Repeat the new password</label>
+            <input id="rp-confirm" type="password" class="form-control" autocomplete="new-password" required x-model="reset.confirm">
+          </div>
+          <div class="text-danger small mb-3" role="alert" x-show="reset.error" x-text="reset.error"></div>
+          <button class="btn btn-primary" :disabled="reset.busy"><span x-text="reset.busy ? 'Saving…' : 'Set new password'"></span></button>
+        </div>
+      </template>
+      <div class="alert alert-success" role="status" x-show="reset.done">Password changed, and every device was signed out. <a href="#/">Sign in</a></div>
+    </form>
+  </div>
+</template>
+
+<!-- ───────── Shell ───────── -->
+<template x-if="view === 'app'">
+<div class="shell">
+  <aside class="sidebar">
+    <div class="brand"><span x-text="siteName || 'Admin'"></span><small>Admin console</small></div>
+    <nav>
+      <template x-for="n in nav" :key="n.id">
+        <div class="nav-item-x">
+          <template x-if="!n.items">
+            <a class="nav-link-x" :class="{active: route === n.id}" :href="'#/' + n.id"><i class="bi" :class="n.icon"></i><span x-text="n.label"></span></a>
+          </template>
+          <template x-if="n.items">
+            <div>
+              <button type="button" class="nav-link-x nav-group-btn" :class="{'has-active': groupActive(n)}" :aria-expanded="groupOpen(n)" :aria-controls="'nav-' + n.id" @click="toggleGroup(n)"><i class="bi" :class="n.icon"></i><span x-text="n.label"></span><i class="bi bi-chevron-down chev" :class="{open: groupOpen(n)}"></i></button>
+              <div class="nav-sub" :id="'nav-' + n.id" x-show="groupOpen(n)">
+                <template x-for="c in n.items" :key="c.id">
+                  <a class="nav-link-x nav-sub-link" :class="{active: path === c.id}" :href="'#/' + c.id" x-text="c.label"></a>
+                </template>
+              </div>
+            </div>
+          </template>
+        </div>
+      </template>
+    </nav>
+    <div class="me">
+      <a href="#/account" class="text-white text-decoration-none" :class="{'fw-semibold': route === 'account'}" x-text="user.name" title="My account"></a>
+      <small class="muted d-block" x-text="user.role"></small>
+      <button class="btn btn-link" @click="signOut()">Sign out</button>
+    </div>
+  </aside>
+
+  <main class="main">
+
+    <!-- Overview -->
+    <template x-if="route === 'overview'">
+      <section x-data="overviewPage">
+        <div class="page-head"><h1>Overview</h1><p>What's running, and what changed recently.</p></div>
+        <div class="alert alert-warning" x-show="maintenance">Maintenance mode is on. Visitors see a maintenance page; the admin is unaffected. <a href="#/settings/general">Turn it off</a></div>
+        <div class="row g-3 mb-3" x-show="cluster">
+          <div class="col-md-4"><div class="panel p-3 h-100"><div class="muted small mb-2">Config version</div><div class="bigver" x-text="cluster?.dbConfigVersion"></div><div class="muted small mt-2">Bumps on every settings change</div></div></div>
+          <div class="col-md-4"><div class="panel p-3 h-100"><div class="muted small mb-2">Servers up</div><div class="bigver"><span x-text="up"></span><span class="muted" style="font-size:1.4rem"> / <span x-text="cluster?.nodes.length"></span></span></div><div class="small mt-2" :class="drifted ? 'text-warning' : 'muted'" x-text="drifted ? drifted + ' behind on config' : 'All on the latest config'"></div></div></div>
+          <div class="col-md-4"><div class="panel p-3 h-100"><div class="muted small mb-2">Runtime</div>
+            <div class="small"><span class="mono" x-text="cluster?.runtime.database"></span> database · <span class="mono" x-text="cluster?.runtime.bus"></span> bus</div>
+            <div class="small"><span class="mono" x-text="cluster?.runtime.sessions"></span> sessions · <span class="mono" x-text="cluster?.runtime.jobs"></span> jobs</div>
+            <div class="small mt-2 muted" x-show="cluster && !cluster.runtime.redis">Redis isn't configured. Fine for development; production clusters need it.</div></div></div>
+        </div>
+        <div class="panel" x-show="can('audit.read')">
+          <div class="panel-h">Recent activity <a class="small fw-normal" href="#/audit">View all</a></div>
+          <div class="empty" x-show="!recent.length">Nothing yet. Changes to settings, users and roles show up here.</div>
+          <table class="table" x-show="recent.length"><tbody><template x-for="e in recent" :key="e.id">
+            <tr><td class="mono" x-text="e.action"></td><td x-text="e.actor"></td><td class="muted text-end" x-text="ago(e.at)"></td></tr></template></tbody></table>
+        </div>
+      </section>
+    </template>
+
+    <!-- Settings -->
+    <template x-if="route === 'settings'">
+      <section x-data="settingsPage">
+        <div class="page-head"><h1>Settings</h1><p>Stored in the database and applied on every server within seconds. No restart, no deploy.</p></div>
+        <div class="settings-grid" x-show="loaded">
+          <nav class="subnav">
+            <template x-for="n in namespaces" :key="n.namespace">
+              <a href="#" :class="{active: ns === n.namespace}" @click.prevent="select(n.namespace)"><span x-text="n.title"></span><span class="dirty-dot" x-show="dirtyCount(n.namespace)" title="Unsaved changes"></span></a>
+            </template>
+            <a href="#" class="mt-3" :class="{active: ns === '__history'}" @click.prevent="showHistory()"><i class="bi bi-clock-history me-1"></i>History</a>
+          </nav>
+
+          <div>
+            <!-- form -->
+            <div class="panel" x-show="current && ns !== '__history'">
+              <div class="panel-h"><span x-text="current?.title"></span>
+                <span class="muted small fw-normal" x-text="current?.description"></span></div>
+              <template x-for="f in (current?.fields || [])" :key="f.key">
+                <div class="frow" :class="{changed: isDirty(f)}">
+                  <div>
+                    <label class="title" :for="'f_' + f.key" x-text="f.label"></label>
+                    <span class="tag" x-show="st(f).locked">Set by environment</span>
+                    <span class="tag warn" x-show="f.restartRequired">Needs restart</span>
+                    <span class="tag ok" x-show="f.secret && st(f).isSet && !isRemoved(f)">Saved</span>
+                    <div class="key" x-text="ns + '.' + f.key"></div>
+                    <div class="help" x-show="f.help" x-text="f.help"></div>
+                  </div>
+                  <div class="ctl">
+                    <template x-if="(f.type === 'string') && !f.secret"><input :id="'f_' + f.key" class="form-control" :class="{'is-invalid': errors[f.key]}" :value="val(f)" :disabled="st(f).locked" :placeholder="f.placeholder || ''" @input="set(f, $event.target.value)"></template>
+                    <template x-if="f.type === 'string' && f.secret">
+                      <div>
+                        <input :id="'f_' + f.key" type="password" autocomplete="new-password" class="form-control" :class="{'is-invalid': errors[f.key]}" :value="val(f)" :disabled="st(f).locked || isRemoved(f)" :placeholder="st(f).isSet ? '••••••••  (leave blank to keep)' : 'Not set'" @input="set(f, $event.target.value)">
+                        <button type="button" class="btn btn-link btn-sm px-0" x-show="st(f).isSet && !isRemoved(f) && !st(f).locked" @click="remove(f)">Remove saved value</button>
+                        <span class="small text-warning" x-show="isRemoved(f)">Will be removed when you save. <a href="#" @click.prevent="undoRemove(f)">Undo</a></span>
+                      </div>
+                    </template>
+                    <template x-if="f.type === 'text'"><textarea :id="'f_' + f.key" rows="3" class="form-control" :class="{'is-invalid': errors[f.key]}" :value="val(f)" :disabled="st(f).locked" @input="set(f, $event.target.value)"></textarea></template>
+                    <template x-if="f.type === 'number'"><input :id="'f_' + f.key" type="number" class="form-control" style="max-width:10rem" :class="{'is-invalid': errors[f.key]}" :value="val(f)" :min="f.min" :max="f.max" :disabled="st(f).locked" @input="set(f, $event.target.value === '' ? '' : Number($event.target.value))"></template>
+                    <template x-if="f.type === 'boolean'"><div class="form-check form-switch"><input :id="'f_' + f.key" type="checkbox" class="form-check-input" role="switch" :checked="val(f)" :disabled="st(f).locked" @change="set(f, $event.target.checked)"><label class="form-check-label muted" :for="'f_' + f.key" x-text="val(f) ? 'On' : 'Off'"></label></div></template>
+                    <template x-if="f.type === 'select'"><select :id="'f_' + f.key" class="form-select" :disabled="st(f).locked" @change="set(f, $event.target.value)"><template x-for="o in f.options" :key="o.value"><option :value="o.value" :selected="o.value === val(f)" x-text="o.label"></option></template></select></template>
+                    <template x-if="f.type === 'list'"><textarea :id="'f_' + f.key" rows="3" class="form-control mono" placeholder="One per line" :value="listText(f)" :disabled="st(f).locked" @input="setList(f, $event.target.value)"></textarea></template>
+                    <div class="invalid-feedback d-block" x-show="errors[f.key]" x-text="errors[f.key]"></div>
+                    <button type="button" class="btn btn-link btn-sm px-0 muted" x-show="st(f).source === 'db' && !f.secret && !st(f).locked && !isDirty(f)" @click="resetToDefault(f)">Reset to default</button>
+                  </div>
+                </div>
+              </template>
+              <div class="frow" x-show="current?.tests?.length">
+                <div><span class="title">Check settings</span><div class="help">Tries the values above without saving them.</div></div>
+                <div class="ctl"><template x-for="t in current?.tests || []" :key="t.id"><button class="btn btn-outline-secondary btn-sm" :disabled="testing" @click="runTest(t)" x-text="testing ? 'Testing…' : t.label"></button></template>
+                  <div class="small mt-2" :class="testResult?.ok ? 'text-success' : 'text-danger'" x-show="testResult" x-text="testResult?.message"></div></div>
+              </div>
+            </div>
+
+            <!-- history -->
+            <div class="panel" x-show="ns === '__history'">
+              <div class="panel-h">Change history</div>
+              <div class="empty" x-show="!history.length">No changes yet.</div>
+              <table class="table" x-show="history.length"><thead><tr><th>Setting</th><th>Change</th><th>By</th><th></th></tr></thead><tbody>
+                <template x-for="r in history" :key="r.id"><tr>
+                  <td class="mono" x-text="r.namespace + '.' + r.key"></td>
+                  <td><span class="diff" x-show="!r.secret"><del x-text="show(r.from)"></del> → <ins x-text="r.wasReset ? 'default' : show(r.to)"></ins></span><span class="muted" x-show="r.secret">Secret value changed</span></td>
+                  <td class="muted"><span x-text="r.by"></span><br><small x-text="ago(r.at)"></small></td>
+                  <td class="text-end"><button class="btn btn-sm btn-outline-secondary" x-show="r.restorable" @click="restore(r)">Restore previous</button></td>
+                </tr></template></tbody></table>
+            </div>
+          </div>
+        </div>
+
+        <div class="savebar" x-show="dirtyCount(ns) > 0">
+          <span><strong x-text="dirtyCount(ns)"></strong> unsaved change<span x-show="dirtyCount(ns) !== 1">s</span></span>
+          <span class="ms-auto"></span>
+          <button class="btn btn-outline-secondary" @click="discard()">Discard</button>
+          <button class="btn btn-primary" :disabled="saving" @click="save()" x-text="saving ? 'Saving…' : 'Save changes'"></button>
+        </div>
+      </section>
+    </template>
+
+    <!-- Users -->
+    <template x-if="route === 'users'">
+      <section x-data="usersPage">
+        <div class="page-head d-flex justify-content-between align-items-end"><div><h1>Users</h1><p>People who can sign in to the admin.</p></div>
+          <button class="btn btn-primary" x-show="can('users.write')" @click="edit()">Add user</button></div>
+
+        <form class="panel mb-3" x-show="form" @submit.prevent="save()">
+          <div class="panel-h" x-text="form?.id ? 'Edit user' : 'New user'"></div>
+          <template x-if="form"><div class="p-3 row g-3">
+            <div class="col-md-6"><label class="form-label">Name</label><input class="form-control" required x-model="form.name"></div>
+            <div class="col-md-6"><label class="form-label">Email</label><input type="email" class="form-control" required x-model="form.email"></div>
+            <div class="col-md-4"><label class="form-label">Role</label><select class="form-select" x-model.number="form.roleId"><template x-for="r in roles" :key="r.id"><option :value="r.id" :selected="r.id === form.roleId" x-text="r.name"></option></template></select></div>
+            <div class="col-md-4"><label class="form-label">Status</label><select class="form-select" x-model="form.status"><option value="active">Active</option><option value="disabled">Disabled</option></select></div>
+            <div class="col-md-4" x-show="!form.invite"><label class="form-label" x-text="form.id ? 'New password' : 'Password'"></label><input type="password" autocomplete="new-password" class="form-control" :required="!form.id && !form.invite" :placeholder="form.id ? 'Leave blank to keep' : ''" x-model="form.password"></div>
+            <div class="col-12" x-show="!form.id"><div class="form-check"><input class="form-check-input" type="checkbox" id="u-invite" x-model="form.invite"><label class="form-check-label" for="u-invite">Email them a link to choose their own password</label></div></div>
+            <div class="col-12 text-danger small" x-show="error" x-text="error" role="alert"></div>
+            <div class="col-12 d-flex gap-2"><button class="btn btn-primary" :disabled="busy" x-text="form.invite ? 'Send invitation' : 'Save user'"></button><button type="button" class="btn btn-outline-secondary" @click="form = null">Cancel</button>
+              <button type="button" class="btn btn-link" x-show="form.id && form.locked" @click="unlock()">Unlock account</button>
+              <button type="button" class="btn btn-link" x-show="form.id" @click="sendLink()">Email a password link</button>
+              <button type="button" class="btn btn-link" x-show="form.id" @click="signOutEverywhere()">Sign out everywhere</button></div>
+          </div></template>
+        </form>
+
+        <div class="panel"><table class="table">
+          <thead><tr><th>Name</th><th>Role</th><th>Status</th><th>Last sign-in</th><th></th></tr></thead>
+          <tbody><template x-for="u in users" :key="u.id"><tr>
+            <td><div x-text="u.name"></div><div class="muted small" x-text="u.email"></div></td>
+            <td x-text="u.role"></td>
+            <td><span class="tag" :class="u.status === 'active' ? 'ok' : ''" x-text="u.lockedUntil ? 'Locked' : u.status"></span></td>
+            <td class="muted" x-text="u.lastLoginAt ? ago(u.lastLoginAt) : 'Never'"></td>
+            <td class="text-end text-nowrap"><template x-if="can('users.write')"><span><button class="btn btn-sm btn-outline-secondary" @click="edit(u)">Edit</button> <button class="btn btn-sm btn-outline-danger" @click="remove(u)">Delete</button></span></template></td>
+          </tr></template></tbody></table></div>
+      </section>
+    </template>
+
+    <!-- Roles -->
+    <template x-if="route === 'roles'">
+      <section x-data="rolesPage">
+        <div class="page-head d-flex justify-content-between align-items-end"><div><h1>Roles and permissions</h1><p>A role is a set of permissions. Every user has one role.</p></div>
+          <button class="btn btn-primary" x-show="can('roles.write')" @click="edit()">Add role</button></div>
+
+        <form class="panel mb-3" x-show="form" @submit.prevent="save()">
+          <div class="panel-h" x-text="form?.id ? (form.isSystem ? form.name : 'Edit role') : 'New role'"></div>
+          <template x-if="form">
+          <div>
+            <div class="p-3 row g-3">
+              <div class="col-md-5"><label class="form-label">Name</label><input class="form-control" required :disabled="form.isSystem" x-model="form.name"></div>
+              <div class="col-md-7"><label class="form-label">Description</label><input class="form-control" x-model="form.description"></div>
+            </div>
+            <div class="muted px-3 pb-3" x-show="form.isSystem">This is a system role with full access. Its permissions can't be changed.</div>
+            <template x-if="!form.isSystem"><div>
+              <template x-for="g in groups" :key="g.group"><div class="perm-group">
+                <div class="fw-semibold mb-1" x-text="g.group"></div>
+                <template x-for="p in g.permissions" :key="p.key"><div class="form-check"><input class="form-check-input" type="checkbox" :id="'p_' + p.key" :checked="form.permissions.includes(p.key)" @change="toggle(p.key, $event.target.checked)"><label class="form-check-label" :for="'p_' + p.key"><span x-text="p.label"></span> <span class="mono muted" x-text="p.key"></span></label></div></template>
+              </div></template></div></template>
+            <div class="p-3 text-danger small" x-show="error" x-text="error" role="alert"></div>
+            <div class="p-3 d-flex gap-2"><button class="btn btn-primary" :disabled="busy" x-show="!form.isSystem && can('roles.write')">Save role</button><button type="button" class="btn btn-outline-secondary" @click="form = null">Close</button></div>
+          </div></template>
+        </form>
+
+        <div class="panel"><table class="table">
+          <thead><tr><th>Role</th><th>Permissions</th><th>Users</th><th></th></tr></thead>
+          <tbody><template x-for="r in roles" :key="r.id"><tr>
+            <td><div x-text="r.name"></div><div class="muted small" x-text="r.description"></div></td>
+            <td class="muted" x-text="r.permissions.includes('*') ? 'Everything' : r.permissions.length + ' permissions'"></td>
+            <td x-text="r.userCount"></td>
+            <td class="text-end text-nowrap"><button class="btn btn-sm btn-outline-secondary" @click="edit(r)" x-text="can('roles.write') && !r.isSystem ? 'Edit' : 'View'"></button> <button class="btn btn-sm btn-outline-danger" x-show="can('roles.write') && !r.isSystem" @click="remove(r)">Delete</button></td>
+          </tr></template></tbody></table></div>
+      </section>
+    </template>
+
+    <!-- Audit -->
+    <template x-if="route === 'audit'">
+      <section x-data="auditPage">
+        <div class="page-head"><h1>Audit log</h1><p>Who changed what, and when. Secret values are never recorded.</p></div>
+        <div class="mb-3"><input class="form-control" style="max-width:20rem" placeholder="Filter by action, e.g. settings" x-model="filter" @input.debounce.400ms="load(true)"></div>
+        <div class="panel">
+          <div class="empty" x-show="!entries.length">No entries match.</div>
+          <table class="table" x-show="entries.length"><thead><tr><th>Action</th><th>Detail</th><th>By</th><th>When</th></tr></thead><tbody>
+            <template x-for="e in entries" :key="e.id"><tr>
+              <td class="mono" x-text="e.action"></td>
+              <td class="small"><span x-html="detail(e)"></span></td>
+              <td x-text="e.actor"></td>
+              <td class="muted text-nowrap" x-text="ago(e.at)" :title="new Date(e.at).toLocaleString()"></td></tr></template></tbody></table>
+        </div>
+        <div class="text-center mt-3"><button class="btn btn-outline-secondary" x-show="more" @click="load(false)">Load older</button></div>
+      </section>
+    </template>
+
+    <!-- Cluster -->
+    <template x-if="route === 'cluster'">
+      <section x-data="clusterPage">
+        <div class="page-head"><h1>Cluster</h1><p>Every server reports the config version it has applied. A server that falls behind shows in amber and heals itself.</p></div>
+        <div class="d-flex align-items-baseline gap-3 mb-3"><div class="bigver" x-text="data ? data.dbConfigVersion : '–'"></div><div class="muted">current config version<br><span class="small">refreshes every 5 seconds</span></div></div>
+        <div class="panel">
+          <div class="empty" x-show="data && !data.nodes.length">No servers have reported in yet.</div>
+          <template x-for="n in (data ? data.nodes : [])" :key="n.id">
+            <div class="node">
+              <div><div><span class="dot" :class="n.status"></span><strong x-text="n.host"></strong> <span class="tag" x-show="n.self">this server</span></div>
+                <div class="muted small mono" x-text="n.role + ' · pid ' + n.pid + ' · v' + n.version"></div></div>
+              <div><div class="rail" :class="{drift: n.drift}"><div class="fill" :style="'width:' + railPct(n) + '%'"></div><div class="tick" title="Current version"></div></div>
+                <div class="rail-label"><span :class="n.drift ? 'text-warning fw-medium' : ''" x-text="n.drift ? 'config v' + n.configVersion + ' — ' + (data.dbConfigVersion - n.configVersion) + ' behind' : 'config v' + n.configVersion + ' — up to date'"></span></div></div>
+              <div class="text-end small muted"><span x-text="n.status"></span><br><span x-text="'up ' + since(n.startedAt)"></span></div>
+            </div>
+          </template>
+        </div>
+        <div class="panel mt-3 p-3 small" x-show="data">
+          <div class="fw-semibold mb-1">This server</div>
+          <div class="muted">Applied <span class="mono" x-text="data?.thisNode.settingsStats.busApplied"></span> change(s) from the bus, <span class="mono" x-text="data?.thisNode.settingsStats.pollHeals"></span> healed by polling, <span class="mono" x-text="data?.thisNode.settingsStats.fullReloads"></span> full reload(s).</div>
+        </div>
+      </section>
+    </template>
+
+
+    <!-- Updates -->
+    <template x-if="route === 'updates'">
+      <section x-data="updatesPage">
+        <div class="page-head"><h1>Updates</h1><p>Pull the latest code from git and restart servers. Every server keeps its own copy of the code, so update them one at a time and the load balancer keeps the others serving.</p></div>
+
+        <div class="small muted mb-3" x-show="data">
+          <span x-show="data?.restartMode === 'supervisor'">Restart makes the process exit, so it must run under systemd, PM2 or Docker with a restart policy, or it stays down.</span>
+          <span x-show="data?.restartMode === 'self'">Restart starts a new copy of the process by itself. Under a supervisor, set the restart method in <a href="#/settings/updates">Settings</a>.</span>
+        </div>
+
+        <div class="panel mb-3">
+          <div class="panel-h">Servers <label class="form-check mb-0 fw-normal small" x-show="can('system.restart')"><input class="form-check-input" type="checkbox" id="restart-after" x-model="restartAfter"> <span class="form-check-label" for="restart-after">Restart a server after updating it</span></label></div>
+          <div class="empty" x-show="!data">Loading…</div>
+          <div class="empty" x-show="data && !data.nodes.length">No servers have reported in yet.</div>
+          <template x-for="n in (data ? data.nodes : [])" :key="n.id">
+            <div class="upd">
+              <div class="upd-main">
+                <div><span class="dot" :class="n.status"></span><strong x-text="n.host"></strong> <span class="tag" x-show="n.self">this server</span><span class="tag" :class="state(n).tone" x-text="state(n).label"></span></div>
+                <div class="muted small mono" x-text="running(n)"></div>
+                <div class="small mt-1" :class="n.update?.status === 'failed' ? 'text-danger' : 'muted'" x-show="message(n)" x-text="message(n)" role="status"></div>
+                <ul class="upd-log" x-show="incoming(n).length"><template x-for="c in incoming(n)" :key="c.sha"><li><span class="mono" x-text="c.sha"></span> <span x-text="c.subject"></span> <span class="muted" x-text="'· ' + c.author + ' · ' + ago(c.at)"></span></li></template></ul>
+                <div class="small text-warning mt-1" x-show="notes(n)" x-text="notes(n)"></div>
+                <div class="small muted mt-1" x-show="checkedAt(n)" x-text="checkedAt(n)"></div>
+              </div>
+              <div class="upd-actions">
+                <button class="btn btn-sm btn-outline-secondary" :disabled="!actionable(n)" @click="check(n)">Check for updates</button>
+                <button class="btn btn-sm btn-primary" :disabled="!actionable(n)" @click="update(n)">Update</button>
+                <button class="btn btn-sm btn-outline-danger" x-show="can('system.restart')" :disabled="!actionable(n)" @click="restart(n)">Restart</button>
+              </div>
+            </div>
+          </template>
+        </div>
+
+        <div class="panel">
+          <div class="panel-h">Recent activity</div>
+          <div class="empty" x-show="!history.length">Nothing yet. Checks, updates and restarts show up here.</div>
+          <table class="table" x-show="history.length"><tbody><template x-for="e in history" :key="e.id">
+            <tr><td x-text="describe(e)"></td><td x-text="e.actor"></td><td class="muted text-end text-nowrap" x-text="ago(e.at)"></td></tr></template></tbody></table>
+        </div>
+      </section>
+    </template>
+
+    <!-- Content: a list of one type, or the editor for one entry -->
+    <template x-if="route === 'content'">
+      <div>
+        <template x-for="v in contentViews" :key="v.key"><div>
+
+          <template x-if="v.kind === 'list'">
+            <section x-data="contentList(v.type)">
+              <div class="page-head d-flex justify-content-between align-items-end flex-wrap gap-2"><div><h1 x-text="type.plural"></h1><p x-text="'Every ' + type.label.toLowerCase() + ', newest changes first.'"></p></div>
+                <a class="btn btn-primary" x-show="type.can.write" :href="'#/content/' + typeId + '/new'" x-text="'New ' + type.label.toLowerCase()"></a></div>
+              <div class="d-flex gap-2 mb-3 flex-wrap">
+                <input class="form-control" style="max-width:18rem" placeholder="Search titles" aria-label="Search titles" x-model="q" @input.debounce.300ms="load(true)">
+                <select class="form-select" style="max-width:12rem" aria-label="Filter by status" x-model="status" @change="load(true)"><option value="">All statuses</option><option value="draft">Draft</option><option value="scheduled">Scheduled</option><option value="published">Published</option><option value="archived">Archived</option></select>
+              </div>
+              <div class="alert alert-danger" role="alert" x-show="error" x-text="error"></div>
+              <div class="panel">
+                <div class="empty" x-show="loaded && !entries.length">Nothing here yet.</div>
+                <table class="table" x-show="entries.length"><thead><tr><th>Title</th><th>Status</th><th>By</th><th>Changed</th></tr></thead><tbody>
+                  <template x-for="e in entries" :key="e.id"><tr>
+                    <td><a :href="'#/content/' + typeId + '/' + e.id" :style="'padding-left:' + (depth(e) * 1.25) + 'rem'" x-text="e.title"></a><div class="muted small mono" :style="'padding-left:' + (depth(e) * 1.25) + 'rem'" x-text="'/' + e.path"></div></td>
+                    <td><span class="tag" :class="e.status === 'published' ? 'ok' : (e.status === 'scheduled' ? 'warn' : '')" x-text="statusLabel(e)"></span></td>
+                    <td class="muted" x-text="e.author || '–'"></td>
+                    <td class="muted text-nowrap" x-text="ago(e.updatedAt)"></td>
+                  </tr></template></tbody></table>
+              </div>
+              <div class="d-flex justify-content-between align-items-center mt-3" x-show="total > limit">
+                <button class="btn btn-outline-secondary" :disabled="offset === 0" @click="prev()">Newer</button>
+                <span class="muted small" x-text="(offset + 1) + '–' + Math.min(offset + limit, total) + ' of ' + total"></span>
+                <button class="btn btn-outline-secondary" :disabled="offset + limit >= total" @click="next()">Older</button>
+              </div>
+            </section>
+          </template>
+
+          <template x-if="v.kind === 'edit'">
+            <section x-data="contentEditor(v.type, v.id)">
+              <div class="page-head d-flex justify-content-between align-items-end flex-wrap gap-2"><div><h1 x-text="isNew ? 'New ' + type.label.toLowerCase() : (entry ? entry.title : 'Loading…')"></h1><p x-show="!isNew && entry" x-text="'Version ' + (entry ? entry.version : '') + ' · saved ' + (entry ? ago(entry.updatedAt) : '')"></p></div>
+                <a :href="'#/content/' + typeId" class="btn btn-outline-secondary">Back to the list</a></div>
+              <div class="alert alert-danger" role="alert" x-show="error" x-text="error"></div>
+              <div class="row g-3" x-show="!loading">
+                <div class="col-lg-8">
+                  <div class="panel p-3 mb-3">
+                    <label class="form-label" for="e-title">Title</label>
+                    <input id="e-title" class="form-control form-control-lg" maxlength="255" :class="{'is-invalid': errors.title}" x-model="form.title" @input="slugFromTitle($event.target.value)">
+                    <div class="invalid-feedback d-block" x-show="errors.title" x-text="errors.title"></div>
+                  </div>
+
+                  <template x-for="f in type.fields" :key="f.key">
+                    <div class="panel p-3 mb-3">
+                      <label class="form-label fw-semibold" :for="'f-' + f.key" x-text="f.label"></label>
+                      <div class="help small muted mb-1" x-show="f.help" x-text="f.help"></div>
+                      <template x-if="f.type === 'string'"><input :id="'f-' + f.key" class="form-control" :maxlength="f.max || 500" x-model="form.data[f.key]"></template>
+                      <template x-if="f.type === 'text'"><textarea :id="'f-' + f.key" rows="3" class="form-control" :maxlength="f.max || 20000" x-model="form.data[f.key]"></textarea></template>
+                      <template x-if="f.type === 'number'"><input :id="'f-' + f.key" type="number" class="form-control" style="max-width:10rem" x-model.number="form.data[f.key]"></template>
+                      <template x-if="f.type === 'boolean'"><div class="form-check form-switch"><input :id="'f-' + f.key" type="checkbox" class="form-check-input" role="switch" x-model="form.data[f.key]"><label class="form-check-label muted" :for="'f-' + f.key" x-text="form.data[f.key] ? 'Yes' : 'No'"></label></div></template>
+                      <template x-if="f.type === 'select'"><select :id="'f-' + f.key" class="form-select" x-model="form.data[f.key]"><template x-for="o in f.options" :key="o.value"><option :value="o.value" x-text="o.label"></option></template></select></template>
+                      <template x-if="f.type === 'list'"><textarea :id="'f-' + f.key" rows="3" class="form-control mono" placeholder="One per line" :value="listText(f)" @input="setList(f, $event.target.value)"></textarea></template>
+                      <template x-if="f.type === 'media'">
+                        <div class="d-flex align-items-center gap-3">
+                          <span class="ph thumb" x-show="form.data[f.key]"><img x-show="media[form.data[f.key]] && media[form.data[f.key]].kind === 'image'" :src="thumb(media[form.data[f.key]])" alt=""></span>
+                          <span class="muted small" x-show="form.data[f.key]" x-text="media[form.data[f.key]] ? media[form.data[f.key]].filename : ''"></span>
+                          <button type="button" class="btn btn-outline-secondary btn-sm" @click="pick(f)" x-text="form.data[f.key] ? 'Change' : 'Choose from the library'"></button>
+                          <button type="button" class="btn btn-link btn-sm" x-show="form.data[f.key]" @click="form.data[f.key] = null">Remove</button>
+                        </div>
+                      </template>
+                      <template x-if="f.type === 'blocks'">
+                        <div class="blocks">
+                          <template x-for="(b, i) in blocksOf(f)" :key="b._id">
+                            <div class="block">
+                              <div class="block-bar">
+                                <span class="tag" x-text="b.type"></span>
+                                <span class="ms-auto"></span>
+                                <button type="button" class="btn btn-sm btn-link" @click="moveBlock(f, i, -1)" aria-label="Move up" title="Move up"><i class="bi bi-arrow-up"></i></button>
+                                <button type="button" class="btn btn-sm btn-link" @click="moveBlock(f, i, 1)" aria-label="Move down" title="Move down"><i class="bi bi-arrow-down"></i></button>
+                                <button type="button" class="btn btn-sm btn-link text-danger" @click="removeBlock(f, i)" aria-label="Remove block" title="Remove"><i class="bi bi-x-lg"></i></button>
+                              </div>
+                              <template x-if="b.type === 'paragraph'">
+                                <div>
+                                  <div class="rich-tools"><button type="button" class="btn btn-sm btn-outline-secondary" @mousedown.prevent="format('bold')" aria-label="Bold"><i class="bi bi-type-bold"></i></button> <button type="button" class="btn btn-sm btn-outline-secondary" @mousedown.prevent="format('italic')" aria-label="Italic"><i class="bi bi-type-italic"></i></button> <button type="button" class="btn btn-sm btn-outline-secondary" @mousedown.prevent="link()" aria-label="Link"><i class="bi bi-link-45deg"></i></button></div>
+                                  <div class="rich form-control" contenteditable="true" role="textbox" aria-label="Paragraph text" x-init="initRich($el, b)" @input="syncRich($el, b)"></div>
+                                </div>
+                              </template>
+                              <template x-if="b.type === 'header'"><div class="d-flex gap-2"><input class="form-control" aria-label="Heading text" placeholder="Heading" maxlength="500" x-model="b.data.text"><select class="form-select" style="max-width:6rem" aria-label="Heading level" x-model.number="b.data.level"><option value="1">H1</option><option value="2">H2</option><option value="3">H3</option><option value="4">H4</option></select></div></template>
+                              <template x-if="b.type === 'list'"><div><select class="form-select mb-1" style="max-width:12rem" aria-label="List style" x-model="b.data.style"><option value="unordered">Bulleted</option><option value="ordered">Numbered</option></select><textarea class="form-control" rows="4" aria-label="List items" placeholder="One item per line" :value="blockLines(b)" @input="setBlockLines(b, $event.target.value)"></textarea></div></template>
+                              <template x-if="b.type === 'quote'"><div><textarea class="form-control mb-1" rows="3" aria-label="Quote" placeholder="Quote" x-model="b.data.text"></textarea><input class="form-control" aria-label="Who said it" placeholder="Who said it (optional)" x-model="b.data.caption"></div></template>
+                              <template x-if="b.type === 'code'"><textarea class="form-control mono" rows="6" aria-label="Code" x-model="b.data.code"></textarea></template>
+                              <template x-if="b.type === 'delimiter'"><hr class="my-2"></template>
+                              <template x-if="b.type === 'image'">
+                                <div class="d-flex gap-3 flex-wrap">
+                                  <span class="ph thumb"><img x-show="b.data.mediaId && media[b.data.mediaId]" :src="thumb(media[b.data.mediaId])" alt=""></span>
+                                  <div class="flex-grow-1" style="min-width:14rem">
+                                    <button type="button" class="btn btn-outline-secondary btn-sm mb-2" @click="pickBlockImage(b)" x-text="b.data.mediaId ? 'Change image' : 'Choose an image'"></button>
+                                    <input class="form-control mb-1" aria-label="Image description for screen readers" placeholder="Describe the image (alt text)" maxlength="500" x-model="b.data.alt">
+                                    <input class="form-control" aria-label="Caption" placeholder="Caption (optional)" maxlength="500" x-model="b.data.caption">
+                                  </div>
+                                </div>
+                              </template>
+                            </div>
+                          </template>
+                          <div class="block-add"><span class="muted small me-1">Add:</span>
+                            <template x-for="t in ['paragraph','header','list','quote','image','code','delimiter']" :key="t"><button type="button" class="btn btn-sm btn-outline-secondary" @click="addBlock(f, t)" x-text="t"></button></template></div>
+                        </div>
+                      </template>
+                      <div class="invalid-feedback d-block" x-show="errors['data.' + f.key]" x-text="errors['data.' + f.key]"></div>
+                    </div>
+                  </template>
+                </div>
+
+                <div class="col-lg-4">
+                  <div class="panel p-3 mb-3 sticky-side">
+                    <div class="fw-semibold mb-2">Publishing</div>
+                    <label class="form-label" for="e-status">Status</label>
+                    <select id="e-status" class="form-select mb-2" :disabled="!canPublish" x-model="form.status"><template x-for="o in statuses" :key="o[0]"><option :value="o[0]" :selected="o[0] === form.status" x-text="o[1]"></option></template></select>
+                    <div class="small muted mb-2" x-show="!canPublish">You can save drafts. Someone with the Publish permission makes them live.</div>
+                    <div class="mb-2" x-show="form.status === 'scheduled'"><label class="form-label" for="e-when">Go live at</label><input id="e-when" type="datetime-local" class="form-control" :class="{'is-invalid': errors.publishAt}" x-model="form.publishAt"><div class="invalid-feedback d-block" x-show="errors.publishAt" x-text="errors.publishAt"></div></div>
+                    <label class="form-label" for="e-slug">Address</label>
+                    <input id="e-slug" class="form-control mono mb-1" :class="{'is-invalid': errors.slug}" x-model="form.slug" @input="slugTouched = true" placeholder="made from the title">
+                    <div class="invalid-feedback d-block" x-show="errors.slug" x-text="errors.slug"></div>
+                    <div class="small muted mono mb-2" x-text="addressPreview"></div>
+                    <div class="mb-2" x-show="type.hierarchical"><label class="form-label" for="e-parent">Parent page</label><select id="e-parent" class="form-select" x-model.number="form.parentId"><option :value="null">None (top level)</option><template x-for="p in parents" :key="p.id"><option :value="p.id" :selected="p.id === form.parentId" x-text="'/' + p.path"></option></template></select></div>
+                    <div class="d-flex gap-2 flex-wrap mt-3">
+                      <button type="button" class="btn btn-primary" :disabled="busy" @click="save()" x-text="busy ? 'Saving…' : 'Save'"></button>
+                      <button type="button" class="btn btn-outline-secondary" x-show="!isNew" @click="preview()">Preview</button>
+                    </div>
+                    <div class="small text-warning mt-2" x-show="dirty">You have unsaved changes.</div>
+                  </div>
+
+                  <template x-for="t in type.taxonomies" :key="t.id">
+                    <div class="panel p-3 mb-3">
+                      <div class="fw-semibold mb-2" x-text="t.plural"></div>
+                      <template x-for="term in (terms[t.id] || [])" :key="term.id"><div class="form-check"><input class="form-check-input" type="checkbox" :id="'t-' + term.id" :checked="hasTerm(term.id)" @change="toggleTerm(term.id, $event.target.checked)"><label class="form-check-label" :for="'t-' + term.id" x-text="term.name"></label></div></template>
+                      <div class="d-flex gap-1 mt-2" x-show="type.can.write"><input class="form-control form-control-sm" :aria-label="'New ' + t.label.toLowerCase()" :placeholder="'New ' + t.label.toLowerCase()" x-model="newTerm[t.id]" @keydown.enter.prevent="addTerm(t.id)"><button type="button" class="btn btn-sm btn-outline-secondary" @click="addTerm(t.id)">Add</button></div>
+                    </div>
+                  </template>
+
+                  <div class="panel p-3" x-show="!isNew">
+                    <button type="button" class="btn btn-link px-0" @click="loadRevisions()" x-text="showRevisions ? 'Hide history' : 'History'"></button>
+                    <div x-show="showRevisions">
+                      <template x-for="r in revisions" :key="r.id"><div class="d-flex justify-content-between align-items-center small py-1 border-top"><div><span x-text="'v' + r.version"></span> · <span class="muted" x-text="(r.by || 'system') + ', ' + ago(r.at)"></span><div class="muted" x-show="r.note" x-text="r.note"></div></div><button type="button" class="btn btn-sm btn-outline-secondary" @click="restore(r)">Restore</button></div></template>
+                    </div>
+                    <hr>
+                    <button type="button" class="btn btn-outline-danger btn-sm" x-show="type.can.delete" @click="remove()">Delete</button>
+                  </div>
+                </div>
+              </div>
+              <div class="muted" x-show="loading">Loading…</div>
+            </section>
+          </template>
+
+        </div></template>
+      </div>
+    </template>
+
+    <!-- Categories and tags -->
+    <template x-if="route === 'terms'">
+      <section x-data="termsPage">
+        <div class="page-head"><h1>Categories and tags</h1><p>Group posts so visitors can browse them. Deleting one never deletes a post.</p></div>
+        <div class="alert alert-danger" role="alert" x-show="error" x-text="error"></div>
+        <div class="row g-3">
+          <template x-for="t in taxonomies" :key="t.id">
+            <div class="col-md-6"><div class="panel">
+              <div class="panel-h" x-text="t.plural"></div>
+              <div class="empty" x-show="!(terms[t.id] || []).length" x-text="'No ' + t.plural.toLowerCase() + ' yet.'"></div>
+              <table class="table" x-show="(terms[t.id] || []).length"><tbody><template x-for="term in (terms[t.id] || [])" :key="term.id"><tr><td><span x-text="term.name"></span><div class="muted small mono" x-text="term.slug"></div></td><td class="muted" x-text="term.uses + (term.uses === 1 ? ' use' : ' uses')"></td><td class="text-end text-nowrap"><button class="btn btn-sm btn-outline-secondary" @click="rename(t, term)">Rename</button> <button class="btn btn-sm btn-outline-danger" @click="remove(t, term)">Delete</button></td></tr></template></tbody></table>
+              <form class="p-3 d-flex gap-2" @submit.prevent="add(t)"><input class="form-control" :aria-label="'New ' + t.label.toLowerCase()" :placeholder="'New ' + t.label.toLowerCase()" required x-model="names[t.id]"><button class="btn btn-primary">Add</button></form>
+            </div></div>
+          </template>
+        </div>
+      </section>
+    </template>
+
+    <!-- Media -->
+    <template x-if="route === 'media'">
+      <section x-data="mediaPage" @dragover.prevent="dragging = true" @dragleave="dragging = false" @drop.prevent="dragging = false; can('media.upload') && upload($event.dataTransfer.files)">
+        <div class="page-head d-flex justify-content-between align-items-end flex-wrap gap-2"><div><h1>Media</h1><p>Images and documents. Images get a private copy without camera data and smaller sizes for fast pages.</p></div>
+          <label class="btn btn-primary mb-0" x-show="can('media.upload')">Upload files <input type="file" hidden multiple accept="image/jpeg,image/png,image/gif,image/webp,image/avif,application/pdf" @change="upload($event.target.files); $event.target.value = ''"></label></div>
+        <div class="alert alert-warning" x-show="!available">Image processing isn't installed on this server, so images can't be uploaded. Run <span class="mono">npm install</span> without <span class="mono">--omit=optional</span>.</div>
+        <div class="alert alert-danger" role="alert" x-show="error" x-text="error"></div>
+        <div class="d-flex gap-2 mb-3 flex-wrap">
+          <input class="form-control" style="max-width:18rem" placeholder="Search files" aria-label="Search files" x-model="q" @input.debounce.300ms="load()">
+          <select class="form-select" style="max-width:10rem" aria-label="Type" x-model="kind" @change="load()"><option value="">All</option><option value="image">Images</option><option value="file">Documents</option></select>
+          <span class="muted align-self-center small" x-show="busy">Uploading…</span>
+        </div>
+        <div class="row g-3">
+          <div :class="current ? 'col-lg-8' : 'col-12'">
+            <div class="dropzone" :class="{on: dragging}">
+              <div class="empty" x-show="!items.length">No files yet. Upload some, or drop them here.</div>
+              <div class="media-grid">
+                <template x-for="m in items" :key="m.id"><button type="button" class="media-tile" :class="{sel: current && current.id === m.id}" @click="open(m)"><span class="ph"><img x-show="m.kind === 'image'" :src="thumb(m)" :alt="m.alt" loading="lazy"><i class="bi bi-file-earmark-pdf" x-show="m.kind !== 'image'"></i></span><span class="nm" x-text="m.filename"></span></button></template>
+              </div>
+            </div>
+          </div>
+          <template x-if="current"><div class="col-lg-4">
+            <div class="panel p-3">
+              <div class="ph big mb-2" x-show="current && current.kind === 'image'"><img :src="current ? '/media/' + current.id + '/' + current.originalFile : ''" :alt="current ? current.alt : ''"></div>
+              <div class="fw-semibold" x-text="current ? current.filename : ''"></div>
+              <div class="muted small mb-2" x-text="current ? (current.mime + ' · ' + bytes(current.size) + (current.width ? ' · ' + current.width + '×' + current.height : '')) : ''"></div>
+              <div class="small mono mb-2" x-text="current ? current.url : ''"></div>
+              <label class="form-label" for="m-alt">Description for screen readers (alt text)</label>
+              <input id="m-alt" class="form-control mb-2" maxlength="500" :disabled="!can('media.upload')" x-model="current.alt" x-show="current">
+              <div class="d-flex gap-2 flex-wrap"><button class="btn btn-primary btn-sm" x-show="can('media.upload')" @click="saveAlt()">Save description</button><button class="btn btn-outline-danger btn-sm" x-show="can('media.delete')" @click="remove()">Delete</button></div>
+              <div class="small muted mt-2" x-text="usage ? 'Used in ' + usage + (usage === 1 ? ' entry.' : ' entries.') : 'Not used anywhere yet.'"></div>
+            </div>
+          </div></template>
+        </div>
+      </section>
+    </template>
+
+    <!-- Themes -->
+    <template x-if="route === 'themes'">
+      <section x-data="themesPage">
+        <div class="page-head"><h1>Themes</h1><p>A theme controls how the public site looks. Switching applies on every server within seconds.</p></div>
+        <div class="alert alert-danger" role="alert" x-show="error" x-text="error"></div>
+        <div class="panel">
+          <template x-for="t in themes" :key="t.id">
+            <div class="node" style="grid-template-columns: 1fr auto">
+              <div><strong x-text="t.name"></strong> <span class="tag" x-text="'v' + t.version"></span> <span class="tag ok" x-show="t.active">Live</span> <span class="tag" x-show="t.source === 'disk'">Built in</span>
+                <div class="muted small" x-text="t.description"></div><div class="muted small" x-show="t.author" x-text="'By ' + t.author"></div></div>
+              <div class="text-nowrap"><a class="btn btn-sm btn-outline-secondary" x-show="t.hasSettings && can('settings.read')" :href="'#/settings/' + t.settingsNamespace">Theme settings</a>
+                <button class="btn btn-sm btn-primary" x-show="!t.active && can('themes.manage')" @click="activate(t)">Make live</button>
+                <button class="btn btn-sm btn-outline-danger" x-show="!t.active && t.source === 'db' && can('themes.manage')" @click="remove(t)">Remove</button></div>
+            </div>
+          </template>
+        </div>
+        <div class="panel mt-3 p-3" x-show="can('themes.manage')">
+          <div class="fw-semibold mb-1">Install a theme</div>
+          <div class="muted small mb-2" x-text="'Upload a .zip (up to ' + maxZipMb + ' MB). It is checked before anything is saved: file types, paths, sizes and every template. ' + (allowJs ? 'Scripts are allowed.' : 'Themes with JavaScript are refused.')"></div>
+          <label class="btn btn-outline-secondary mb-0" :class="{disabled: busy}">Choose a .zip <input type="file" hidden accept=".zip,application/zip" @change="upload($event.target.files[0]); $event.target.value = ''"></label>
+          <span class="muted small ms-2" x-show="busy">Checking and installing…</span>
+        </div>
+      </section>
+    </template>
+
+    <!-- Menus -->
+    <template x-if="route === 'menus'">
+      <section x-data="menusPage">
+        <div class="page-head"><h1>Menus</h1><p>Navigation your theme shows, like the main menu and the footer. Pages you link stay correct if you rename them.</p></div>
+        <div class="alert alert-danger" role="alert" x-show="error" x-text="error"></div>
+        <div class="d-flex gap-2 flex-wrap align-items-center mb-3">
+          <template x-for="m in menus" :key="m.name"><button type="button" class="btn btn-sm" :class="name === m.name ? 'btn-primary' : 'btn-outline-secondary'" @click="select(m.name)" x-text="m.title || m.name"></button></template>
+          <form class="d-flex gap-1" @submit.prevent="create()"><input class="form-control form-control-sm" style="width:9rem" placeholder="New menu name" aria-label="New menu name" x-model="newName"><button class="btn btn-sm btn-outline-secondary">Add menu</button></form>
+        </div>
+        <div class="panel" x-show="name">
+          <div class="panel-h">Items in “<span x-text="name"></span>” <span class="muted small fw-normal">Themes reach it as <span class="mono" x-text="'menus.' + name"></span></span></div>
+          <div class="empty" x-show="!items.length">No items yet.</div>
+          <template x-for="row in flat" :key="row.item._id">
+            <div class="frow" :style="'padding-left:' + (1.25 + row.depth * 1.5) + 'rem'" style="grid-template-columns: 1fr">
+              <div class="d-flex gap-2 flex-wrap align-items-center">
+                <select class="form-select" style="width:8rem" aria-label="Link to" x-model="row.item.kind"><option value="entry" x-show="pages.length">A page</option><option value="url">An address</option></select>
+                <select class="form-select" style="max-width:16rem" aria-label="Page" x-show="row.item.kind === 'entry'" x-model.number="row.item.entryId"><template x-for="p in pages" :key="p.id"><option :value="p.id" :selected="p.id === row.item.entryId" x-text="'/' + p.path"></option></template></select>
+                <input class="form-control" style="max-width:16rem" aria-label="Address" placeholder="/about or https://…" x-show="row.item.kind === 'url'" x-model="row.item.url">
+                <input class="form-control" style="max-width:14rem" aria-label="Label" placeholder="Label" x-model="row.item.label">
+                <button type="button" class="btn btn-sm btn-link" @click="move(row, -1)" aria-label="Move up"><i class="bi bi-arrow-up"></i></button>
+                <button type="button" class="btn btn-sm btn-link" @click="move(row, 1)" aria-label="Move down"><i class="bi bi-arrow-down"></i></button>
+                <button type="button" class="btn btn-sm btn-link" x-show="row.depth < 2" @click="add(row.item.children)">Add sub-item</button>
+                <button type="button" class="btn btn-sm btn-link text-danger" @click="remove(row)" aria-label="Remove item"><i class="bi bi-x-lg"></i></button>
+              </div>
+            </div>
+          </template>
+          <div class="p-3 d-flex gap-2"><button type="button" class="btn btn-outline-secondary" @click="add()">Add item</button><span class="ms-auto"></span><button type="button" class="btn btn-outline-danger" @click="del()">Delete menu</button><button type="button" class="btn btn-primary" :disabled="busy" @click="save()" x-text="busy ? 'Saving…' : 'Save menu'"></button></div>
+        </div>
+      </section>
+    </template>
+
+    <!-- Translations -->
+    <template x-if="route === 'locales'">
+      <section x-data="localesPage">
+        <div class="page-head"><h1>Translations</h1><p>The words your site and its theme show to visitors, in each language. What you type here is your own wording: it wins over the theme, and switching themes keeps it.</p></div>
+        <div class="panel p-3 mb-3 d-flex gap-2 flex-wrap align-items-center">
+          <label class="me-1" for="lang">Language</label>
+          <select id="lang" class="form-select" style="max-width:16rem" :value="code" @change="open($event.target.value)"><template x-for="l in languages" :key="l.code"><option :value="l.code" :selected="l.code === code" x-text="l.name + ' (' + l.code + ')'"></option></template></select>
+          <span class="mx-2 muted">or</span>
+          <input class="form-control" style="max-width:8rem" aria-label="New language code" placeholder="fr" x-model="newCode" @keydown.enter.prevent="addLanguage()">
+          <button class="btn btn-outline-secondary" type="button" @click="addLanguage()">Add language</button>
+          <div class="text-danger small w-100" role="alert" x-show="error" x-text="error"></div>
+        </div>
+        <div class="panel">
+          <div class="panel-h d-flex gap-3 align-items-center flex-wrap">
+            <span x-text="name || 'Translations'"></span>
+            <input class="form-control form-control-sm" style="max-width:14rem" aria-label="Filter" placeholder="Filter" x-model="filter">
+            <div class="form-check mb-0"><input id="only-missing" class="form-check-input" type="checkbox" x-model="onlyMissing"><label class="form-check-label small" for="only-missing">Only missing (<span x-text="missing"></span>)</label></div>
+          </div>
+          <div class="empty" x-show="loaded && !entries.length">This site has no translatable text yet.</div>
+          <table class="table" x-show="entries.length"><thead><tr><th>Text</th><th>Default language</th><th>Theme</th><th>Site default</th><th>Your wording</th></tr></thead><tbody>
+            <template x-for="e in shown" :key="e.key"><tr>
+              <td class="mono small" x-text="e.key"></td>
+              <td class="muted" x-text="e.reference ?? '–'"></td>
+              <td class="muted" x-text="e.theme ?? '–'"></td>
+              <td class="muted" x-text="e.shipped ?? '–'"></td>
+              <td><input class="form-control form-control-sm" :aria-label="'Your wording for ' + e.key" :placeholder="e.shipped ?? e.theme ?? e.reference ?? ''" x-model="e.edit"></td>
+            </tr></template></tbody></table>
+          <div class="p-3 d-flex gap-2 align-items-center" x-show="can('locales.write')">
+            <button class="btn btn-primary" :disabled="busy || !dirty" @click="save()">Save translations</button>
+            <span class="muted small" x-show="dirty" x-text="dirty + ' changed'"></span>
+          </div>
+        </div>
+      </section>
+    </template>
+
+    <!-- Redirects -->
+    <template x-if="route === 'redirects'">
+      <section x-data="redirectsPage">
+        <div class="page-head"><h1>Redirects</h1><p>Send visitors from an old address to a new one. Use a permanent (301) redirect when a page has moved for good.</p></div>
+        <form class="panel p-3 mb-3 d-flex gap-2 flex-wrap align-items-start" @submit.prevent="add()">
+          <input class="form-control" style="max-width:16rem" aria-label="Old address" placeholder="/old-page" required x-model="form.from">
+          <span class="align-self-center">→</span>
+          <input class="form-control" style="max-width:20rem" aria-label="New address" placeholder="/new-page or https://…" required x-model="form.to">
+          <select class="form-select" style="max-width:12rem" aria-label="Type" x-model="form.status"><option value="301">Permanent (301)</option><option value="302">Temporary (302)</option><option value="308">Permanent, keep method (308)</option><option value="307">Temporary, keep method (307)</option></select>
+          <button class="btn btn-primary">Add redirect</button>
+          <div class="text-danger small w-100" role="alert" x-show="error" x-text="error"></div>
+        </form>
+        <div class="panel">
+          <div class="empty" x-show="!redirects.length">No redirects yet.</div>
+          <table class="table" x-show="redirects.length"><thead><tr><th>From</th><th>To</th><th>Type</th><th></th></tr></thead><tbody>
+            <template x-for="r in redirects" :key="r.id"><tr><td class="mono" x-text="r.from"></td><td class="mono" x-text="r.to"></td><td x-text="r.status"></td><td class="text-end"><button class="btn btn-sm btn-outline-danger" @click="remove(r)">Remove</button></td></tr></template></tbody></table>
+        </div>
+      </section>
+    </template>
+
+    <!-- Contact messages -->
+    <template x-if="route === 'messages'">
+      <section x-data="messagesPage">
+        <div class="page-head"><h1>Messages</h1><p>Sent through the contact form on your site. They are also emailed when email is set up.</p></div>
+        <div class="panel">
+          <div class="empty" x-show="loaded && !messages.length">No messages yet.</div>
+          <template x-for="m in messages" :key="m.id">
+            <div class="frow" style="grid-template-columns: 1fr auto">
+              <div><strong x-text="m.name"></strong> <a :href="'mailto:' + m.email" x-text="m.email"></a> <span class="muted small" x-text="ago(m.at)"></span> <span class="tag" x-show="!m.emailed">Not emailed</span>
+                <div class="pre" x-text="m.message"></div><div class="muted small" x-show="m.page" x-text="'From ' + m.page"></div></div>
+              <div><button class="btn btn-sm btn-outline-danger" @click="remove(m)">Delete</button></div>
+            </div>
+          </template>
+        </div>
+      </section>
+    </template>
+
+    <!-- My account -->
+    <template x-if="route === 'account'">
+      <section x-data="accountPage">
+        <div class="page-head"><h1>My account</h1><p>Your sign-in details, your password, and the devices you're signed in on.</p></div>
+
+        <div class="panel mb-3">
+          <div class="panel-h">Profile</div>
+          <form class="frow" id="profile-form" @submit.prevent="saveName()">
+            <div><label class="title" for="profile-name">Name</label></div>
+            <div class="ctl d-flex gap-2 flex-wrap"><input id="profile-name" class="form-control" style="max-width:20rem" maxlength="128" required :class="{'is-invalid': nameError}" x-model="profile.name" autocomplete="name">
+              <button class="btn btn-primary" :disabled="savingName || !nameDirty">Save name</button>
+              <div class="invalid-feedback d-block" x-show="nameError" x-text="nameError"></div></div>
+          </form>
+          <div class="frow"><div><span class="title">Email</span></div><div class="ctl" x-text="me.email"></div></div>
+          <div class="frow"><div><span class="title">Role</span></div><div class="ctl" x-text="me.role"></div></div>
+        </div>
+
+        <form class="panel mb-3" @submit.prevent="changePassword()" id="password-form">
+          <div class="panel-h">Change password</div>
+          <div class="frow">
+            <div><label class="title" for="pw-current">Current password</label></div>
+            <div class="ctl"><input id="pw-current" type="password" class="form-control" :class="{'is-invalid': errors.current}" autocomplete="current-password" required x-model="form.current"><div class="invalid-feedback d-block" x-show="errors.current" x-text="errors.current"></div></div>
+          </div>
+          <div class="frow">
+            <div><label class="title" for="pw-new">New password</label><div class="help" x-text="'At least ' + minLength + ' characters.'"></div></div>
+            <div class="ctl"><input id="pw-new" type="password" class="form-control" :class="{'is-invalid': errors.next}" autocomplete="new-password" required x-model="form.next"><div class="invalid-feedback d-block" x-show="errors.next" x-text="errors.next"></div></div>
+          </div>
+          <div class="frow">
+            <div><label class="title" for="pw-confirm">Repeat the new password</label></div>
+            <div class="ctl"><input id="pw-confirm" type="password" class="form-control" :class="{'is-invalid': errors.confirm}" autocomplete="new-password" required x-model="form.confirm"><div class="invalid-feedback d-block" x-show="errors.confirm" x-text="errors.confirm"></div></div>
+          </div>
+          <div class="frow">
+            <div class="help">Changing your password signs you out on every other device.</div>
+            <div class="ctl"><button class="btn btn-primary" :disabled="busy"><span x-text="busy ? 'Saving…' : 'Change password'"></span></button></div>
+          </div>
+        </form>
+
+        <div class="panel">
+          <div class="panel-h">Where you're signed in <button class="btn btn-sm btn-outline-secondary fw-normal" x-show="others > 0" @click="revokeOthers()">Sign out all other devices</button></div>
+          <div class="empty" x-show="loaded && !sessions.length">No active sessions.</div>
+          <table class="table" x-show="sessions.length"><thead><tr><th>Device</th><th>Address</th><th>Signed in</th><th>Last active</th><th></th></tr></thead><tbody>
+            <template x-for="s in sessions" :key="s.id"><tr>
+              <td><span x-text="s.device"></span> <span class="tag ok" x-show="s.current">This device</span></td>
+              <td class="mono" x-text="s.ip || '–'"></td>
+              <td class="muted" x-text="s.createdAt ? ago(s.createdAt) : '–'"></td>
+              <td class="muted" x-text="s.lastSeen ? ago(s.lastSeen) : '–'"></td>
+              <td class="text-end"><button class="btn btn-sm btn-outline-secondary" x-show="!s.current" @click="revoke(s)">Sign out</button></td>
+            </tr></template></tbody></table>
+        </div>
+      </section>
+    </template>
+
+    <!-- System -->
+    <template x-if="route === 'system'">
+      <section x-data="systemPage">
+        <div class="page-head"><h1>System</h1><p>Health of the pieces this site depends on, the cache, and background work. Shows the server that answered this page.</p></div>
+
+        <div class="panel mb-3">
+          <div class="panel-h">Components</div>
+          <div class="empty" x-show="!data">Loading…</div>
+          <table class="table" x-show="data"><tbody>
+            <tr><td>Database</td><td class="mono" x-text="data?.components.database.kind"></td>
+              <td><span class="tag" :class="data?.components.database.ok ? 'ok' : 'warn'" x-text="data?.components.database.ok ? 'Up · ' + data.components.database.ms + ' ms' : 'Down'"></span></td></tr>
+            <tr><td>Redis</td><td class="muted" x-text="data?.components.redis ? 'Cache, sessions, queue, rate limits' : 'Not configured'"></td>
+              <td><span class="tag" :class="data?.components.redis ? (data.components.redis.ok ? 'ok' : 'warn') : ''" x-text="data?.components.redis ? (data.components.redis.ok ? 'Up · ' + data.components.redis.ms + ' ms' : 'Down') : 'Off'"></span></td></tr>
+            <tr><td>Background queue</td><td class="mono" x-text="data?.components.queue.driver"></td>
+              <td><span class="tag" :class="data?.components.queue.ok ? 'ok' : 'warn'" x-text="data?.components.queue.ok ? 'Up' : 'Down'"></span></td></tr>
+            <tr><td>Email</td><td class="muted" x-text="data?.components.mail.enabled ? 'Sending through ' + data.components.mail.transport : 'Not sending. Password reset is hidden.'"></td>
+              <td><a href="#/settings/mail" class="small">Email settings</a></td></tr>
+            <tr><td>Metrics</td><td class="muted" x-text="data?.components.metrics.enabled ? 'Served at /metrics with a bearer token' : 'Off'"></td>
+              <td><a href="#/settings/system" class="small">System settings</a></td></tr>
+          </tbody></table>
+        </div>
+
+        <div class="panel mb-3">
+          <div class="panel-h">Cache <button class="btn btn-sm btn-outline-danger fw-normal" x-show="can('cache.flush')" @click="flush()">Flush cache</button></div>
+          <div class="p-3 row g-3" x-show="data">
+            <div class="col-6 col-md-3"><div class="muted small">Backend</div><div class="mono" x-text="data?.cache.backend"></div></div>
+            <div class="col-6 col-md-3"><div class="muted small">Hit rate on this server</div><div class="mono" x-text="hitRate"></div></div>
+            <div class="col-6 col-md-3"><div class="muted small">In memory</div><div class="mono" x-text="data?.cache.l1Entries + ' / ' + data?.cache.l1Max"></div></div>
+            <div class="col-6 col-md-3"><div class="muted small">Invalidations</div><div class="mono" x-text="data?.cache.invalidations"></div></div>
+            <div class="col-12 small warn" x-show="data && !data.cache.enabled"><span class="tag warn">Cache is turned off in settings</span></div>
+          </div>
+        </div>
+
+        <div class="panel mb-3">
+          <div class="panel-h">Background jobs</div>
+          <div class="p-3 row g-3" x-show="data">
+            <template x-for="k in ['waiting','active','delayed','completed','failed']" :key="k">
+              <div class="col-6 col-md"><div class="muted small" x-text="k"></div><div class="bigver" style="font-size:1.6rem" :class="k === 'failed' && data?.components.queue.counts?.failed ? 'text-danger' : ''" x-text="data?.components.queue.counts?.[k] ?? 0"></div></div>
+            </template>
+          </div>
+          <table class="table" x-show="data?.components.queue.scheduled?.length"><thead><tr><th>Scheduled job</th><th>Runs</th></tr></thead><tbody>
+            <template x-for="j in data?.components.queue.scheduled || []" :key="j.name"><tr><td class="mono" x-text="j.name"></td><td class="muted" x-text="every(j.everyMs)"></td></tr></template></tbody></table>
+        </div>
+
+        <div class="panel mb-3" x-show="failed.length">
+          <div class="panel-h">Failed jobs</div>
+          <table class="table"><thead><tr><th>Job</th><th>Reason</th><th>When</th><th></th></tr></thead><tbody>
+            <template x-for="j in failed" :key="j.id"><tr>
+              <td><span class="mono" x-text="j.name"></span><div class="muted small" x-text="j.attemptsMade + ' attempts'"></div></td>
+              <td class="small" x-text="j.failedReason"></td>
+              <td class="muted" x-text="j.at ? ago(j.at) : ''"></td>
+              <td class="text-end text-nowrap"><template x-if="can('jobs.manage')"><span><button class="btn btn-sm btn-outline-secondary" @click="retry(j)">Run again</button> <button class="btn btn-sm btn-outline-danger" @click="discard(j)">Discard</button></span></template></td>
+            </tr></template></tbody></table>
+        </div>
+
+        <div class="panel p-3 small" x-show="data">
+          <div class="fw-semibold mb-1">This server</div>
+          <div class="muted mono" x-text="'v' + data?.version + ' · ' + data?.role + ' · node ' + data?.process.node + ' · up ' + since(Date.now() - data?.uptimeSeconds * 1000) + ' · ' + data?.process.rssMb + ' MB memory'"></div>
+        </div>
+      </section>
+    </template>
+
+  </main>
+</div>
+</template>
+</body>
+</html>

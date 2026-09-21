@@ -1,0 +1,27 @@
+{
+  "id": "default",
+  "name": "Default",
+  "version": "1.1.0",
+  "description": "A clean, fast, responsive theme for a company site and blog.",
+  "author": "SmartinfoLogiks",
+  "settings": {
+    "accent_color": {
+      "type": "string",
+      "label": "Accent colour",
+      "default": "#2b59c3",
+      "help": "Links and buttons. Any CSS colour, for example #2b59c3."
+    },
+    "show_dates": {
+      "type": "boolean",
+      "label": "Show dates on posts",
+      "default": true
+    },
+    "footer_text": {
+      "type": "string",
+      "label": "Footer text",
+      "default": "",
+      "help": "Shown at the bottom of every page."
+    }
+  },
+  "styles": ["site.css"]
+}

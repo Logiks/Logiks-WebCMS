@@ -1,0 +1,15 @@
+<style>
+  :host { display: block; margin-top: 4rem; border-top: 1px solid var(--line, #dde3e1); background: var(--soft, #f5f7f6); color: var(--muted, #5d7076); }
+  .inner { max-width: 68rem; margin: 0 auto; padding: 1.5rem 1.25rem; }
+  ul { list-style: none; display: flex; gap: 1.1rem; margin: 0 0 0.75rem; padding: 0; flex-wrap: wrap; }
+  a { color: inherit; }
+  p { margin: 0; font-size: 0.9rem; }
+</style>
+<footer>
+  <div class="inner">
+    {% if menus.footer.size > 0 %}
+      <ul>{% for item in menus.footer %}<li><a href="{{ item.url }}">{{ item.label }}</a></li>{% endfor %}</ul>
+    {% endif %}
+    <p>{% if settings.footer_text != blank %}{{ settings.footer_text }}{% else %}© {{ site.year }} {{ site.name }}{% endif %}</p>
+  </div>
+</footer>

@@ -1,0 +1,29 @@
+<script type="application/json" data-cms="meta">
+{
+  "title": "Post",
+  "description": "One post: title, date, image, body and terms. 404 when the post does not exist.",
+  "props": { "slug": { "type": "string", "label": "Post slug" } },
+  "api": [{ "name": "post", "url": "/api/public/content/post/{{ slug | url_encode }}", "required": true }]
+}
+</script>
+<style>
+  :host { display: block; }
+  article { max-width: 46rem; margin: 0 auto; padding: 2.5rem 1.25rem; }
+  h1 { margin: 0 0 0.5rem; line-height: 1.2; }
+  .meta { color: var(--muted, #5d7076); font-size: 0.9rem; margin: 0 0 1.5rem; }
+  .hero { display: block; width: 100%; height: auto; border-radius: 10px; margin: 0 0 1.5rem; }
+  .body img { max-width: 100%; height: auto; }
+</style>
+{% assign post = api.post.item %}
+{% seo item: post %}
+<article>
+  <h1>{{ post.title }}</h1>
+  <p class="meta">
+    {% if settings.show_dates != false %}<time datetime="{{ post.publishedAt }}">{{ post.publishedAt | date: '%-d %B %Y' }}</time>{% endif %}
+    {% if post.author != blank %} · {{ post.author }}{% endif %}
+    {% for t in post.terms %}{% if t.url %} · <a href="{{ t.url }}">{{ t.name }}</a>{% endif %}{% endfor %}
+  </p>
+  {% if post.featuredImage %}<img class="hero" src="{{ post.featuredImage.src }}"{% if post.featuredImage.srcset != blank %} srcset="{{ post.featuredImage.srcset }}" sizes="(min-width: 900px) 900px, 100vw"{% endif %} alt="{{ post.featuredImage.alt }}">{% endif %}
+  <div class="body">{{ post.fields.body.html }}</div>
+  <p><a href="/blog">← {{ 'blog.all_posts' | t: 'All posts' }}</a></p>
+</article>

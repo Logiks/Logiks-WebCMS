@@ -1,0 +1,33 @@
+<style>
+  .bar { display: flex; align-items: center; gap: 1.5rem; flex-wrap: wrap; max-width: 68rem; margin: 0 auto; padding: 0.9rem 1.25rem; }
+  .brand { font-weight: 650; font-size: 1.1rem; color: var(--ink, #1c2b2f); text-decoration: none; }
+  ul { list-style: none; display: flex; gap: 1.1rem; margin: 0; padding: 0; flex-wrap: wrap; }
+  nav { flex: 1; }
+  nav a { color: var(--ink, #1c2b2f); text-decoration: none; padding: 0.25rem 0; border-bottom: 2px solid transparent; }
+  nav a:hover, nav a[aria-current] { border-bottom-color: var(--accent, #2b59c3); }
+  :host { display: block; border-bottom: 1px solid var(--line, #dde3e1); background: var(--bg, #fff); }
+  li { position: relative; }
+  .sub { display: none; position: absolute; left: 0; top: 100%; flex-direction: column; gap: 0.25rem; background: var(--bg, #fff); border: 1px solid var(--line, #dde3e1); border-radius: 8px; padding: 0.5rem 0.9rem; min-width: 10rem; z-index: 5; }
+  li:hover > .sub, li:focus-within > .sub { display: flex; }
+  form { margin-left: auto; }
+  input[type='search'] { font: inherit; padding: 0.35rem 0.6rem; border: 1px solid var(--line, #dde3e1); border-radius: 6px; }
+  .sr { position: absolute; left: -9999px; }
+</style>
+<header>
+  <div class="bar">
+    <a class="brand" href="/">{{ site.name }}</a>
+    <nav aria-label="{{ 'layout.main_menu' | t }}">
+      <ul>
+        {% for item in menus.main %}
+          <li><a href="{{ item.url }}"{% if item.active %} aria-current="page"{% endif %}>{{ item.label }}</a>
+            {% if item.children.size > 0 %}<ul class="sub">{% for child in item.children %}<li><a href="{{ child.url }}"{% if child.active %} aria-current="page"{% endif %}>{{ child.label }}</a></li>{% endfor %}</ul>{% endif %}
+          </li>
+        {% endfor %}
+      </ul>
+    </nav>
+    <form action="/search" method="get" role="search">
+      <label class="sr" for="q">{{ 'search.label' | t }}</label>
+      <input id="q" name="q" type="search" placeholder="{{ 'search.placeholder' | t }}" value="{{ request.query.q }}">
+    </form>
+  </div>
+</header>

@@ -1,0 +1,20 @@
+<script type="application/json" data-cms="meta">
+{
+  "title": "Call to action",
+  "props": {
+    "heading": { "type": "string", "label": "Heading", "default": "Ready to talk?" },
+    "button_label": { "type": "string", "label": "Button label", "default": "Contact us" },
+    "button_url": { "type": "string", "label": "Button link", "default": "/contact" }
+  }
+}
+</script>
+<style>
+  :host { display: block; }
+  .box { max-width: 68rem; margin: 3rem auto; padding: 2rem 1.25rem; border: 1px solid var(--line, #dde3e1); border-radius: 12px; text-align: center; }
+  h2 { margin: 0 0 1rem; }
+  a { display: inline-block; background: var(--accent, #2b59c3); color: #fff; padding: 0.65rem 1.2rem; border-radius: 8px; text-decoration: none; font-weight: 600; }
+</style>
+<div class="box">
+  <h2>{{ heading | default: "Ready to talk?" }}</h2>
+  <a href="{{ button_url | default: '/contact' }}">{{ button_label | default: "Contact us" }}</a>
+</div>

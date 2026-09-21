@@ -1,0 +1,7 @@
+---
+title: Blog
+description: Latest posts.
+---
+{% assign heading = 'blog.title' | t: 'Blog' %}
+{% seo title: heading %}
+{% render "post-list", heading: heading, per_page: site.posts_per_page %}

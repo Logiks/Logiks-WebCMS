@@ -1,0 +1,27 @@
+<script type="application/json" data-cms="meta">
+{
+  "title": "Home",
+  "description": "Shows the content page named in Settings → Site → Home page; when there is none, a welcome banner and the latest posts.",
+  "api": [{ "name": "home", "url": "/api/public/content/page/{{ site.home_page | default: 'home' }}" }]
+}
+</script>
+<style>
+  :host { display: block; }
+  article { max-width: 46rem; margin: 0 auto; padding: 2.5rem 1.25rem; }
+  h1 { margin: 0 0 1rem; line-height: 1.2; }
+  .hero { display: block; width: 100%; height: auto; border-radius: 10px; margin: 0 0 1.5rem; }
+  .body img { max-width: 100%; height: auto; }
+</style>
+{% if api.home.item %}
+  {% seo item: api.home.item, title: "" %}
+  <article>
+    {% assign e = api.home.item %}
+    <h1>{{ e.title }}</h1>
+  {% if e.featuredImage %}<img class="hero" src="{{ e.featuredImage.src }}"{% if e.featuredImage.srcset != blank %} srcset="{{ e.featuredImage.srcset }}" sizes="(min-width: 900px) 900px, 100vw"{% endif %} alt="{{ e.featuredImage.alt }}">{% endif %}
+    <div class="body">{{ api.home.item.fields.body.html }}</div>
+  </article>
+{% else %}
+  {% render "hero", heading: site.name, text: site.tagline %}
+  {% assign latest = 'blog.latest' | t: 'Latest posts' %}
+  {% render "post-list", heading: latest, per_page: 6 %}
+{% endif %}

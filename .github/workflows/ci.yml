@@ -1,0 +1,72 @@
+# Lint + typecheck once, then the whole suite on every database we support, always with a real Redis.
+# The tests create a throw-away database per test through the `mysql` / `psql` CLIs (see test/helpers.js).
+name: CI
+
+on:
+  push:
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  static:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 24, cache: npm }
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npx prettier --check .
+
+  test:
+    needs: static
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        db: [sqlite, mysql, postgres]
+    services:
+      redis:
+        image: redis:7
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping" --health-interval 5s --health-timeout 3s --health-retries 20
+      mysql:
+        image: mysql:8.4
+        ports: ['3306:3306']
+        env: { MYSQL_ALLOW_EMPTY_PASSWORD: 'yes' }
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1" --health-interval 5s --health-timeout 3s --health-retries 20
+      postgres:
+        image: postgres:16
+        ports: ['5432:5432']
+        env: { POSTGRES_HOST_AUTH_METHOD: trust }
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 3s --health-retries 20
+    env:
+      TEST_REDIS_URL: redis://127.0.0.1:6379/15
+      # sqlite → unset (the helpers use a temp file); the others point at the service container.
+      TEST_DB_URL: ${{ matrix.db == 'mysql' && 'mysql://root@127.0.0.1:3306' || matrix.db == 'postgres' && 'postgres://postgres@127.0.0.1:5432' || '' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 24, cache: npm }
+      - name: Database client tools
+        run: sudo apt-get update && sudo apt-get install -y mysql-client postgresql-client
+      - run: npm ci
+      - run: npm test
+
+  docker:
+    needs: static
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Image builds and the compose file is valid
+        run: |
+          docker build -t cms-platform .
+          APP_MASTER_KEY=ci-only docker compose config --quiet
