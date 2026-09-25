@@ -64,6 +64,16 @@ export function defineCorePermissions(permissions) {
     'components.write': 'Create, edit and delete site components',
     'locales.read': 'View the site’s translations (public/locales)',
     'locales.write': 'Edit the site’s translations',
+    'services.read': 'View Services (admin-defined API endpoints)',
+    'services.write': 'Create and edit query-builder Services',
+    // A SQL-mode service (or a query-builder one reading a raw table) can read any table, so this is stronger
+    // than pages.write/components.write: don't grant it in a seed role other than the wildcard administrator.
+    'services.sql':
+      'Create and edit raw-SQL Services, or a query-builder Service over a database table',
+    // A script Service runs full, unsandboxed Node.js with complete access to the platform — the database,
+    // decrypted settings (including secrets), email, everything. Same trust level as shell access to the server.
+    // Never grant this in a seed role other than the wildcard administrator (D-046).
+    'services.script': 'Create and edit Node.js script Services (full server access, no sandbox)',
   });
   permissions.define('Appearance', {
     'themes.read': 'View themes',
@@ -71,6 +81,25 @@ export function defineCorePermissions(permissions) {
     'menus.manage': 'Edit navigation menus',
     'redirects.manage': 'Manage redirects',
     'site.messages': 'Read contact form messages',
+  });
+  permissions.define('SEO', {
+    'seo.read': 'View SEO Manager rules',
+    'seo.write': 'Create, edit and delete SEO Manager rules',
+  });
+  permissions.define('Automation', {
+    'events.read': 'View the events log',
+    // Firing a test event can trigger real webhooks with real side effects at the receiving end, so it's gated
+    // separately from just viewing the log — same reasoning as services.sql sitting above services.write.
+    'events.write': 'Fire a test event',
+    'webhooks.read': 'View webhooks',
+    'webhooks.write': 'Create, edit and delete webhooks',
+  });
+  permissions.define('Database', {
+    'dbms.read': 'Browse database tables, their data and structure',
+    'dbms.write': 'Add, edit and delete records; create and drop tables',
+    // Runs literally anything the database engine allows — no keyword blocklist, no read-only restriction, same
+    // trust tier as services.script. Never grant this in a seed role other than the wildcard administrator (D-047).
+    'dbms.query': 'Run raw SQL in the database console',
   });
   permissions.define('System', {
     'audit.read': 'View the audit log',

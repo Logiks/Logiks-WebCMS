@@ -84,5 +84,178 @@ export function dialect(knex) {
     async ping() {
       await knex.raw('select 1');
     },
+    /** Every table and view in this database (Services' table-source query mode, `src/modules/services/`). */
+    async listTables() {
+      if (kind === 'sqlite') {
+        const rows = await knex.raw(
+          "select name, type from sqlite_master where type in ('table','view') and name not like 'sqlite_%'",
+        );
+        return rows.map((r) => ({ name: r.name, view: r.type === 'view' }));
+      }
+      if (kind === 'mysql') {
+        const [rows] = await knex.raw(
+          'select table_name as name, table_type as type from information_schema.tables where table_schema = database()',
+        );
+        return rows.map((r) => ({ name: r.name, view: r.type === 'VIEW' }));
+      }
+      const { rows } = await knex.raw(
+        "select table_name as name, table_type as type from information_schema.tables where table_schema = 'public'",
+      );
+      return rows.map((r) => ({ name: r.name, view: r.type === 'VIEW' }));
+    },
+    /**
+     * Run a validated read-only SELECT (Services, `src/modules/services/`) with named `:param` bindings, a
+     * per-dialect statement timeout where the engine actually supports one, and a cap on the rows returned.
+     * What this does and does NOT protect against is asymmetric across engines — see `src/modules/services/sql.js`.
+     * @param {string} sql @param {Record<string, unknown>} bindings @param {{timeoutMs: number, rowLimit: number}} limits
+     */
+    async runSelect(sql, bindings, { timeoutMs, rowLimit }) {
+      // PostgreSQL's SET does not accept a bound parameter ("syntax error at or near $1"), so the number is
+      // inlined — safe because it is our own settings value, never attacker input, and forced to a plain integer.
+      const ms = Math.max(0, Math.floor(Number(timeoutMs)) || 0);
+      if (kind === 'pg') {
+        return knex.transaction(async (trx) => {
+          await trx.raw(`SET LOCAL statement_timeout = ${ms}`); // self-resets when the transaction ends
+          const { rows } = await trx.raw(sql, bindings);
+          return rows.slice(0, rowLimit);
+        });
+      }
+      if (kind === 'mysql') {
+        return knex.transaction(async (trx) => {
+          await trx.raw('SET SESSION MAX_EXECUTION_TIME = ?', [timeoutMs]);
+          try {
+            const [rows] = await trx.raw(sql, bindings);
+            return rows.slice(0, rowLimit);
+          } finally {
+            // SET SESSION, unlike Postgres's SET LOCAL, outlives the transaction on the pooled connection.
+            await trx.raw('SET SESSION MAX_EXECUTION_TIME = 0');
+          }
+        });
+      }
+      // SQLite (better-sqlite3) is synchronous: nothing can interrupt a running query from outside it. Dev/test
+      // only (D-018) — the keyword blocklist and row cap are what stand in for a timeout here.
+      const rows = await knex.raw(sql, bindings);
+      return rows.slice(0, rowLimit);
+    },
+    /**
+     * A table's columns (System → Database, `src/modules/dbms/`). `table` is interpolated directly for SQLite's
+     * PRAGMA (which does not accept a bound parameter there) — safe only because every caller has already
+     * checked it against a real, introspected table name, never raw user text.
+     * @param {string} table
+     */
+    async columnDetails(table) {
+      if (kind === 'sqlite') {
+        const rows = await knex.raw(`PRAGMA table_info("${table}")`);
+        return rows.map((r) => ({
+          name: r.name,
+          type: r.type,
+          nullable: !r.notnull,
+          default: r.dflt_value,
+          primaryKey: r.pk > 0,
+          autoIncrement: r.pk === 1 && /int/i.test(r.type),
+        }));
+      }
+      if (kind === 'mysql') {
+        const [rows] = await knex.raw(
+          'select column_name, data_type, is_nullable, column_default, column_key, extra from information_schema.columns where table_schema = database() and table_name = ? order by ordinal_position',
+          [table],
+        );
+        return rows.map((r) => ({
+          name: r.COLUMN_NAME,
+          type: r.DATA_TYPE,
+          nullable: r.IS_NULLABLE === 'YES',
+          default: r.COLUMN_DEFAULT,
+          primaryKey: r.COLUMN_KEY === 'PRI',
+          autoIncrement: String(r.EXTRA).includes('auto_increment'),
+        }));
+      }
+      const { rows } = await knex.raw(
+        "select column_name, data_type, is_nullable, column_default from information_schema.columns where table_schema = 'public' and table_name = ? order by ordinal_position",
+        [table],
+      );
+      const { rows: pkRows } = await knex.raw(
+        'select a.attname from pg_index i join pg_attribute a on a.attrelid = i.indrelid and a.attnum = any(i.indkey) where i.indrelid = ?::regclass and i.indisprimary',
+        [table],
+      );
+      const pk = new Set(pkRows.map((r) => r.attname));
+      return rows.map((r) => ({
+        name: r.column_name,
+        type: r.data_type,
+        nullable: r.is_nullable === 'YES',
+        default: r.column_default,
+        primaryKey: pk.has(r.column_name),
+        autoIncrement: /^nextval\(/.test(r.column_default || ''),
+      }));
+    },
+    /** A table's indexes: { name, columns, unique }[]. Same interpolation note as columnDetails. */
+    async indexList(table) {
+      if (kind === 'sqlite') {
+        const idx = await knex.raw(`PRAGMA index_list("${table}")`);
+        const out = [];
+        for (const i of idx) {
+          const cols = await knex.raw(`PRAGMA index_info("${i.name}")`);
+          out.push({ name: i.name, unique: !!i.unique, columns: cols.map((c) => c.name) });
+        }
+        return out;
+      }
+      if (kind === 'mysql') {
+        const [rows] = await knex.raw(
+          'select index_name, column_name, non_unique from information_schema.statistics where table_schema = database() and table_name = ? order by index_name, seq_in_index',
+          [table],
+        );
+        const byName = new Map();
+        for (const r of rows) {
+          const e = byName.get(r.INDEX_NAME) ?? {
+            name: r.INDEX_NAME,
+            unique: !r.NON_UNIQUE,
+            columns: [],
+          };
+          e.columns.push(r.COLUMN_NAME);
+          byName.set(r.INDEX_NAME, e);
+        }
+        return [...byName.values()];
+      }
+      const { rows } = await knex.raw(
+        'select indexname, indexdef from pg_indexes where tablename = ?',
+        [table],
+      );
+      // indexdef is a full CREATE INDEX statement; the column list is the only part worth showing here.
+      return rows.map((r) => ({
+        name: r.indexname,
+        unique: /create unique index/i.test(r.indexdef),
+        columns: (/\(([^)]+)\)/.exec(r.indexdef)?.[1] ?? '')
+          .split(',')
+          .map((s) => s.trim())
+          .filter(Boolean),
+      }));
+    },
+    /**
+     * Run ANY statement — the System → Database console (`dbms.query`). No restriction on statement type: that
+     * is the point of a console. Normalises the very different per-driver result shapes into one: SELECT-like
+     * results get `rows`; INSERT/UPDATE/DELETE get `rowCount` (and `lastInsertRowid` where the engine gives one).
+     * @param {string} sql
+     */
+    async runAny(sql) {
+      const r = await knex.raw(sql);
+      if (kind === 'sqlite') {
+        if (Array.isArray(r)) return { rows: r, rowCount: r.length, command: 'SELECT' };
+        return {
+          rows: [],
+          rowCount: r.changes ?? 0,
+          command: 'WRITE',
+          lastInsertRowid: r.lastInsertRowid,
+        };
+      }
+      if (kind === 'mysql') {
+        if (Array.isArray(r[0])) return { rows: r[0], rowCount: r[0].length, command: 'SELECT' };
+        return {
+          rows: [],
+          rowCount: r[0]?.affectedRows ?? 0,
+          command: 'WRITE',
+          lastInsertRowid: r[0]?.insertId || undefined,
+        };
+      }
+      return { rows: r.rows ?? [], rowCount: r.rowCount ?? 0, command: r.command ?? 'SELECT' };
+    },
   };
 }

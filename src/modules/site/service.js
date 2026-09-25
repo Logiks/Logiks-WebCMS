@@ -15,6 +15,7 @@ export function createSiteService({
   cache,
   audit,
   mailer,
+  events,
   log,
   pages,
 }) {
@@ -276,6 +277,7 @@ export function createSiteService({
         emailed: false,
         created_at: now(),
       });
+      await events.emit('contact.submitted', { id, name, email });
       const to = settings.get('site.contact_recipient') || settings.get('general.admin_email');
       if (to && mailer.enabled()) {
         try {

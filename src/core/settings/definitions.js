@@ -176,6 +176,37 @@ export function defineCoreSettings(registry) {
         min: 1,
         max: 100,
       },
+      services_rate_limit_per_minute: {
+        type: 'number',
+        label: 'Services requests per minute (per IP)',
+        default: 60,
+        min: 1,
+        max: 100000,
+        help: 'Shared across every Service; a SQL-mode one can be expensive to run.',
+      },
+      services_sql_timeout_ms: {
+        type: 'number',
+        label: 'Services: SQL statement timeout (ms)',
+        default: 3000,
+        min: 100,
+        max: 30000,
+        help: 'Cuts off a slow query on MySQL and PostgreSQL. SQLite cannot be interrupted this way (it is dev/test only, D-018) — write efficient queries and a LIMIT.',
+      },
+      services_sql_row_limit: {
+        type: 'number',
+        label: 'Services: rows returned per SQL query',
+        default: 500,
+        min: 1,
+        max: 10000,
+      },
+      services_script_timeout_ms: {
+        type: 'number',
+        label: 'Services: script response timeout (ms)',
+        default: 5000,
+        min: 100,
+        max: 60000,
+        help: 'A script that doesn’t respond in time is reported as failed; the code itself may keep running (D-046).',
+      },
     },
   });
 
@@ -255,6 +286,12 @@ export function defineCoreSettings(registry) {
       commerce: { type: 'boolean', label: 'Online store', default: false },
       multilingual: { type: 'boolean', label: 'Multiple languages', default: false },
       public_api: { type: 'boolean', label: 'Public content API', default: false },
+      services: {
+        type: 'boolean',
+        label: 'Services',
+        default: false,
+        help: 'Let components and, when the public content API is also on, external callers read data through admin-defined Services (Webmaster → Services).',
+      },
     },
   });
 
@@ -399,6 +436,68 @@ export function defineCoreSettings(registry) {
         format: 'email',
         default: '',
         help: 'Leave empty to use the admin email under General.',
+      },
+    },
+  });
+
+  registry.define('seo', {
+    title: 'SEO',
+    description:
+      'Site-wide tags used on every page. Per-page defaults live in a page’s own SEO section (Webmaster → Pages); overriding one specific address is done in Webmaster → SEO Manager.',
+    order: 28,
+    fields: {
+      twitter_site: {
+        type: 'string',
+        label: 'Twitter/X handle',
+        default: '',
+        help: 'Your site’s own account, e.g. @smartinfologiks. Shown as twitter:site.',
+      },
+      facebook_app_id: { type: 'string', label: 'Facebook App ID', default: '' },
+      default_twitter_card: {
+        type: 'select',
+        label: 'Default Twitter card',
+        default: 'summary',
+        options: [
+          { value: 'summary', label: 'Summary' },
+          { value: 'summary_large_image', label: 'Summary with large image' },
+        ],
+        help: 'Used when a page has no image and no override says otherwise.',
+      },
+      google_site_verification: {
+        type: 'string',
+        label: 'Google Search Console verification',
+        default: '',
+      },
+      bing_site_verification: { type: 'string', label: 'Bing Webmaster verification', default: '' },
+      pinterest_site_verification: { type: 'string', label: 'Pinterest verification', default: '' },
+    },
+  });
+
+  registry.define('automation', {
+    title: 'Automation',
+    description: 'Events, webhooks and their retention.',
+    order: 29,
+    fields: {
+      webhook_timeout_seconds: {
+        type: 'number',
+        label: 'Webhook delivery timeout (seconds)',
+        default: 10,
+        min: 1,
+        max: 60,
+      },
+      events_retention_days: {
+        type: 'number',
+        label: 'Keep the events log for (days)',
+        default: 30,
+        min: 1,
+        max: 365,
+      },
+      webhook_delivery_retention_days: {
+        type: 'number',
+        label: 'Keep webhook delivery history for (days)',
+        default: 30,
+        min: 1,
+        max: 365,
       },
     },
   });

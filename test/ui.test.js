@@ -84,6 +84,8 @@ test('signing in shows the shell with navigation for an administrator', async ()
   type($('#pw'), ADMIN.password);
   $('form.login-form').dispatchEvent(new win.Event('submit', { bubbles: true, cancelable: true }));
   await until(() => $('.shell'));
+  // The shell can paint before Alpine's nav x-for has flushed the permission-filtered list; wait for it to actually be there.
+  await until(() => $$('.nav-link-x').some((a) => a.textContent.trim() === 'Overview'));
   const label = (a) => a.textContent.trim();
   // A sub-link is on screen only when its group's wrapper is (x-show hides the wrapper, not each link).
   const subLinks = () =>
@@ -92,8 +94,17 @@ test('signing in shows the shell with navigation for an administrator', async ()
       .flatMap((g) => [...g.querySelectorAll('.nav-sub-link')].map(label));
   assert.deepEqual(
     $$('.nav-link-x:not(.nav-sub-link)').map(label),
-    ['Overview', 'Content', 'Appearance', 'Settings', 'Security', 'Operations'],
-    'top level: two links and four groups',
+    [
+      'Overview',
+      'Webmaster',
+      'Content',
+      'System',
+      'Settings',
+      'Security',
+      'Operations',
+      'Automation',
+    ],
+    'top level: two links and six groups',
   );
   assert.deepEqual(subLinks(), [], 'groups start collapsed on Overview');
 

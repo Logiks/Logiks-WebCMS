@@ -55,6 +55,15 @@ export function createLimiters(ctx) {
       handler: (_req, res) =>
         res.status(429).type('text').send('Too many searches. Try again in a minute.'),
     }),
+    /** A Service can be expensive (a SQL query), so it is limited per address like search. */
+    services: rateLimit({
+      windowMs: 60_000,
+      limit: () => ctx.settings.get('security.services_rate_limit_per_minute'),
+      standardHeaders: 'draft-7',
+      legacyHeaders: false,
+      store: store('cms:rl:services:'),
+      handler: handler('Too many requests. Try again in a minute.'),
+    }),
     login: rateLimit({
       windowMs: 15 * 60_000,
       limit: () => ctx.settings.get('security.login_rate_limit_per_15min'),

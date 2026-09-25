@@ -25,6 +25,11 @@ import { createContentService } from './modules/content/service.js';
 import { createLocalStorage } from './modules/media/storage.js';
 import { createMediaService } from './modules/media/service.js';
 import { createThemesService } from './modules/themes/service.js';
+import { createServices } from './modules/services/service.js';
+import { createDbms } from './modules/dbms/service.js';
+import { createSeo } from './modules/seo/service.js';
+import { createEvents } from './modules/events/service.js';
+import { createWebhooks, registerWebhookJobs } from './modules/webhooks/service.js';
 import { createSearchService } from './modules/search/service.js';
 import { createSiteService } from './modules/site/service.js';
 import { createSiteFiles } from './modules/site/files.js';
@@ -90,6 +95,7 @@ export async function createContext({ env, bus: busOverride, log: logOverride, a
     permissions,
     sessionStore,
     metrics,
+    events: () => ctx.events, // the context is complete by the time a user is actually created
   });
   const nodes = createNodes({ env, db, settings, state, log, appVersion: pkg.version });
   const jobs = createJobs({ redis, log, backoffMs: env.JOB_BACKOFF_MS });
@@ -98,6 +104,30 @@ export async function createContext({ env, bus: busOverride, log: logOverride, a
   const mailer = createMailer({ env, settings, jobs, crypto, log, metrics });
   mailer.register();
   const recovery = createRecovery({ db, settings, users, mailer, audit, log, metrics });
+  const webhooks = createWebhooks({
+    db,
+    dialect: dialect(db),
+    cache,
+    audit,
+    crypto,
+    jobs,
+    settings,
+    log,
+  });
+  registerWebhookJobs({ jobs, webhooks });
+  const events = createEvents({ db, dialect: dialect(db), jobs, log });
+  jobs.define('events.prune', async () => {
+    const n = await events.prune(settings.get('automation.events_retention_days'));
+    if (n) log.info({ deleted: n }, 'old events pruned');
+  });
+  jobs.define('webhooks.prune_deliveries', async () => {
+    const n = await webhooks.pruneDeliveries(
+      settings.get('automation.webhook_delivery_retention_days'),
+    );
+    if (n) log.info({ deleted: n }, 'old webhook deliveries pruned');
+  });
+  jobs.schedule('events.prune', { everyMs: 24 * 3600_000 });
+  jobs.schedule('webhooks.prune_deliveries', { everyMs: 24 * 3600_000 });
 
   const updates = createUpdatesService({
     env,
@@ -127,6 +157,20 @@ export async function createContext({ env, bus: busOverride, log: logOverride, a
     }),
     { registry: contentRegistry },
   );
+  // Built-in content events (docs/DECISIONS.md D-050) — reuses content's own change notifier (search already
+  // subscribes to the same one to reindex), so content/service.js itself needed no changes.
+  content.onChange(async ({ type, entry, before }) => {
+    const wasPublished = before?.status === 'published';
+    if (type === 'save' && entry.status === 'published')
+      await events.emit(wasPublished ? 'content.updated' : 'content.published', {
+        id: entry.id,
+        type: entry.type,
+        title: entry.title,
+        path: entry.path,
+      });
+    else if (type === 'delete' && wasPublished)
+      await events.emit('content.deleted', { id: entry.id, type: entry.type, title: entry.title });
+  });
   const storage = createLocalStorage(env.MEDIA_DIR);
   const media = createMediaService({
     db,
@@ -168,6 +212,8 @@ export async function createContext({ env, bus: busOverride, log: logOverride, a
     defaultsDir: fileURLToPath(new URL('../site/defaults', import.meta.url)),
   });
   await siteFiles.start();
+  const dbms = createDbms({ db, dialect: dialect(db), audit });
+  const seo = createSeo({ db, dialect: dialect(db), cache, audit });
   const search = createSearchService({ db, dialect: dialect(db), content, log });
   search.attach();
   jobs.define('search.reindex', async () => {
@@ -181,12 +227,13 @@ export async function createContext({ env, bus: busOverride, log: logOverride, a
     cache,
     audit,
     mailer,
+    events,
     log,
     pages: () => ctx.sitePages, // addresses come from the site tree; the context is complete by the time this is called
   });
   // Site identity, theme choice and theme settings appear on every page, so a change to any of them refreshes every cached page.
   settings.onChange('*', (_next, _prev, ns) => {
-    if (['general', 'site', 'content', 'features'].includes(ns) || ns.startsWith('theme_'))
+    if (['general', 'site', 'seo', 'content', 'features'].includes(ns) || ns.startsWith('theme_'))
       return cache.invalidate(['site']);
   });
   jobs.define('content.publish_due', async () => {
@@ -222,6 +269,10 @@ export async function createContext({ env, bus: busOverride, log: logOverride, a
     storage,
     themes,
     siteFiles,
+    dbms,
+    seo,
+    events,
+    webhooks,
     search,
     site,
     metrics,
@@ -244,6 +295,9 @@ export async function createContext({ env, bus: busOverride, log: logOverride, a
   ctx.i18n = createI18n(ctx, {
     shippedDir: fileURLToPath(new URL('../site/locales', import.meta.url)),
   });
+  // Passed the whole ctx (not destructured deps) because a script Service (D-046) gets the full platform context
+  // at RUN time, well after every one of these is finished — by construction time it only needs `content`.
+  ctx.services = createServices(ctx);
   ctx.publicData = createPublicData(ctx);
   ctx.sitePages = createSitePages(ctx);
   metrics.bind(ctx);

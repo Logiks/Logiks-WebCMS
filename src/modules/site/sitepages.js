@@ -227,11 +227,14 @@ export function createSitePages(ctx) {
 
     /**
      * @param {{file: string, params: Record<string,string>, themeId: string, status?: number, globals: any,
+     *          overlay?: Map<string,string>,
      *          request: {path: string, canonical: string, query: Record<string,string>, locale: string, ip?: string, previewId?: number}}} req
+     *   `overlay`: draft file content to render WITHOUT saving (the page/component builder's live preview). Keyed by site-tree
+     *   path (`pages/about.html`, `components/hero.html`); a path not in the tree yet is simply added for this render.
      * @returns {Promise<{status: number, html: string, tags: string[], entries: [number, number][], front: any, notFound: boolean, redirect?: {to: string, status: number}}>}
      */
     async render(req) {
-      const b = await bundle(req.themeId);
+      const b = await bundle(req.themeId, req.overlay);
       if (!req.file) return bareNotFound(b, req); // no page here and the site has no pages/404.html
       const attempt = async (file, status) => {
         const page = b.pages.get(file);
@@ -314,11 +317,24 @@ export function createSitePages(ctx) {
 
   // ───────── bundle: the site and the theme, compiled together ─────────
 
-  async function bundle(themeId) {
+  /** `snap.files`, plus an overlay of draft content laid over it (a path not in the tree yet is simply added). */
+  function* overlaid(files, overlay) {
+    const seen = new Set();
+    for (const [p, f] of files) {
+      seen.add(p);
+      yield [p, overlay.has(p) ? { content: overlay.get(p) } : f];
+    }
+    for (const [p, content] of overlay) if (!seen.has(p)) yield [p, { content }];
+  }
+
+  async function bundle(themeId, overlay) {
     const rt = await themes.runtime(themeId);
     const snap = siteFiles.snapshot();
-    const key = `${snap.version}|${rt.id}|${rt.hash}|${limits().renderMs}|${limits().memoryMb}`;
-    const hit = bundles.get(key);
+    // A preview's draft content never touches the shared bundle cache: it is rebuilt fresh and thrown away after the render.
+    const key = overlay
+      ? null
+      : `${snap.version}|${rt.id}|${rt.hash}|${limits().renderMs}|${limits().memoryMb}`;
+    const hit = key && bundles.get(key);
     if (hit) return hit;
 
     /** @type {Map<string, string>} */
@@ -341,7 +357,7 @@ export function createSitePages(ctx) {
     };
     /** @type {Map<string, {front: any, body: string}>} */
     const pages = new Map();
-    for (const [p, f] of snap.files) {
+    for (const [p, f] of overlay ? overlaid(snap.files, overlay) : snap.files) {
       if (p.startsWith('components/')) add(p, `site:${p}`, f.content, p);
       else {
         try {
@@ -396,8 +412,10 @@ export function createSitePages(ctx) {
         (n) => `<script src="/theme/${rt.id}/${hash12}/scripts/${n}" defer></script>`,
       ),
     };
-    bundles.clear(); // only the current site version matters; older bundles are stale the moment a file changes
-    bundles.set(key, b);
+    if (key) {
+      bundles.clear(); // only the current site version matters; older bundles are stale the moment a file changes
+      bundles.set(key, b);
+    }
     return b;
   }
 
@@ -468,6 +486,13 @@ export function createSitePages(ctx) {
 
   // ───────── what the page says about itself: <title>, description, canonical, Open Graph, structured data ─────────
 
+  /** A media id → absolute src, tagging the cache so an edit to that image refreshes this page. */
+  async function mediaSrc(id) {
+    if (!id) return null;
+    const im = (await ctx.media.describeMany([id])).get(id);
+    return im ? im.src : null;
+  }
+
   async function finalSeo(front, state, req, status) {
     const { site } = req.globals;
     const s = { ...state.seo };
@@ -485,30 +510,44 @@ export function createSitePages(ctx) {
       s.alternates ??= item.alternates;
       s.image ??= item.featuredImage?.src;
     }
+    // The SEO Manager rule for this exact live URL (docs/DECISIONS.md D-049), if any — it outranks everything
+    // below: the entry's own fields, the template's {% seo %} tag, and the page's own SEO-section defaults.
+    const rule = status === 404 ? null : await ctx.seo.resolve(req.request.path);
     const name = site.name;
     const titled = (t) =>
       t ? `${t} | ${name}` : site.tagline ? `${name} — ${site.tagline}` : name;
     const isHome = req.request.path === '/';
-    const title = s.exact_title || titled(s.title ?? front.title ?? '');
-    const description = s.description || front.description || '';
-    const absolute = (u) => ctx.site.urls.absolute(u);
+    const title = rule?.title || s.exact_title || titled(s.title ?? front.title ?? '');
+    const description = rule?.description || s.description || front.description || '';
+    const absolute = (u) => (String(u).startsWith('http') ? u : ctx.site.urls.absolute(u));
     let image = s.image;
     if (!image) {
-      const id = settings.get('site.og_image');
-      if (id) {
-        const im = (await ctx.media.describeMany([id])).get(id);
-        if (im) {
-          image = im.src;
-          state.tags.add(`media:${id}`);
-        }
+      const fallbackId = front.seo_image || settings.get('site.og_image');
+      if (fallbackId) {
+        state.tags.add(`media:${fallbackId}`);
+        image = await mediaSrc(fallbackId);
       }
     }
-    if (image) image = String(image).startsWith('http') ? image : absolute(image);
-    const canonical = req.request.canonical;
-    const noindex = Boolean(req.globals.noindexBase || front.noindex === true || s.noindex);
+    if (rule?.image) {
+      state.tags.add(`media:${rule.image}`);
+      image = (await mediaSrc(rule.image)) || image;
+    }
+    if (image) image = absolute(image);
+    const canonical = rule?.canonical ? absolute(rule.canonical) : req.request.canonical;
+    const noindexBase = Boolean(req.globals.noindexBase || front.noindex === true || s.noindex);
+    const noindex = rule?.noindex !== undefined ? rule.noindex : noindexBase;
+    const nofollow = rule?.nofollow;
+    const type = rule?.type || s.type || front.seo_type || 'website';
+    // An explicit choice (rule, then the page's own SEO section) always wins; otherwise an image implies the
+    // large-image card (the platform's long-standing behaviour), and only a plain page falls back to the site's
+    // configured default.
+    const twitterCard =
+      rule?.twitterCard ||
+      front.twitter_card ||
+      (image ? 'summary_large_image' : settings.get('seo.default_twitter_card'));
     const crumbs = Array.isArray(s.breadcrumbs) && s.breadcrumbs.length > 1 ? s.breadcrumbs : null;
     const ld = [
-      s.type === 'article'
+      type === 'article'
         ? {
             '@context': 'https://schema.org',
             '@type': 'BlogPosting',
@@ -559,12 +598,22 @@ export function createSitePages(ctx) {
       ...view,
       head: buildHead({
         ...view,
-        type: s.type ?? 'website',
+        type,
+        nofollow,
         siteName: name,
         locale: site.locale,
-        ld: status === 404 ? [] : ld,
+        ld: status === 404 ? [] : [...ld, ...(rule?.ldJson ?? [])],
         alternates: Array.isArray(s.alternates) ? s.alternates : undefined,
         noindex: noindex || status === 404,
+        twitterCard,
+        twitterSite: settings.get('seo.twitter_site') || undefined,
+        fbAppId: settings.get('seo.facebook_app_id') || undefined,
+        verification: {
+          google: settings.get('seo.google_site_verification') || undefined,
+          bing: settings.get('seo.bing_site_verification') || undefined,
+          pinterest: settings.get('seo.pinterest_site_verification') || undefined,
+        },
+        metaTags: rule?.metaTags,
       }),
     };
   }

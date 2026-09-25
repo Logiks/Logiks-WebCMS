@@ -96,6 +96,7 @@ export function createUsersService({
   permissions,
   sessionStore,
   metrics,
+  events,
 }) {
   const d = dialect(db);
 
@@ -329,6 +330,7 @@ export function createUsersService({
         entityId: id,
         meta: { email, roleId },
       });
+      await events().emit('user.created', { id, email });
       return svc.getUser(id);
     },
 

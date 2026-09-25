@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import AdmZip from 'adm-zip';
 import { HttpError, notFound } from '../../core/http/errors.js';
 import { now } from '../../core/db/index.js';
 import { createEngine } from '../themes/sandbox.js';
@@ -514,6 +515,79 @@ export function createSiteFiles({
           }
         }
       const deletes = prune ? [...snap.files.keys()].filter((p) => !seen.has(p)) : [];
+      const r = await apply({ writes, deletes }, actor);
+      return {
+        written: r.written.length,
+        unchanged: writes.length - r.written.length,
+        removed: r.removed.length,
+        errors,
+      };
+    },
+
+    /** All files under one top-level folder (pages/ or components/), as a downloadable zip. */
+    exportZip(prefix) {
+      const zip = new AdmZip();
+      for (const [p, f] of snap.files)
+        if (p.startsWith(`${prefix}/`)) zip.addFile(p, Buffer.from(f.content));
+      return zip.toBuffer();
+    },
+
+    /**
+     * A zip of pages/ or components/ (Webmaster → Site pages / Components: Import). Same safety checks as a
+     * theme zip (no path traversal, no symlinks, size limits) plus the usual per-file validation; a file that
+     * fails is reported and skipped, the rest are saved together. `prune` also deletes files not in the zip.
+     * @param {Buffer} buffer @param {any} actor @param {{prefix: 'pages'|'components', prune?: boolean}} opts
+     */
+    async importZip(buffer, actor, { prefix, prune = false }) {
+      let zip;
+      try {
+        zip = new AdmZip(buffer);
+      } catch {
+        throw new HttpError(422, 'invalid_input', "That file isn't a valid zip archive.");
+      }
+      const entries = zip
+        .getEntries()
+        .filter((e) => !e.isDirectory && !/(^|\/)(__MACOSX\/|\.DS_Store$)/.test(e.entryName));
+      if (entries.length > LIMITS.files)
+        throw new HttpError(422, 'invalid_input', `The zip has more than ${LIMITS.files} files.`);
+      const writes = [];
+      const errors = [];
+      const seen = new Set();
+      for (const e of entries) {
+        const name = e.entryName;
+        if (
+          name.includes('\\') ||
+          name.includes('\0') ||
+          name.startsWith('/') ||
+          /^[a-zA-Z]:/.test(name)
+        ) {
+          errors.push({ path: name, message: 'Unsafe file name.' });
+          continue;
+        }
+        const norm = path.posix.normalize(name);
+        if (norm.startsWith('..') || norm.split('/').includes('..') || norm !== name) {
+          errors.push({ path: name, message: 'Unsafe file path.' });
+          continue;
+        }
+        if (((e.header.attr >>> 16) & 0o170000) === 0o120000) {
+          errors.push({ path: name, message: 'Symbolic links are not allowed.' });
+          continue;
+        }
+        // Only files that actually belong to this kind: an "export pages" zip fed back into "import components"
+        // (or a zip that mixes both) simply has its unrelated entries ignored, not flagged as errors.
+        if (!name.startsWith(`${prefix}/`) || !name.endsWith(extOf(prefix))) continue;
+        seen.add(name);
+        try {
+          const content = e.getData().toString('utf8');
+          validate(name, content);
+          writes.push({ path: name, content });
+        } catch (err) {
+          errors.push({ path: name, message: err.message });
+        }
+      }
+      const deletes = prune
+        ? [...snap.files.keys()].filter((p) => p.startsWith(`${prefix}/`) && !seen.has(p))
+        : [];
       const r = await apply({ writes, deletes }, actor);
       return {
         written: r.written.length,

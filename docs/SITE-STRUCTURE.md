@@ -119,12 +119,20 @@ One file: a Liquid/HTML template, its **scoped CSS**, and a JSON **meta** block 
   answers 404 the whole page is a 404. Otherwise `api.<name>` is empty. At most 30 reads per page; only `/api/public/…` addresses exist.
 - **Endpoints:** `content` (types), `content/<type>` (list: `per_page`, `page`, `sort`, `<taxonomy>=<slug>`, `locale`),
   `content/<type>/<path>` (one entry, with `breadcrumbs`, `children`, `alternates` for hierarchies and translations),
-  `terms/<taxonomy>`, `terms/<taxonomy>/<slug>`, `menus/<name>`, `search?q=`. The same answers are served over HTTP under `/api/public`
-  when Settings → Features → Public content API is on; pages don't need it.
+  `terms/<taxonomy>`, `terms/<taxonomy>/<slug>`, `menus/<name>`, `search?q=`, and `services/<slug>` — an admin-defined
+  **Service** (Webmaster → Services, D-045/D-046): a query builder over one content type _or_ a table/view (any table
+  except a hardcoded blocklist — `services.sql`), a raw read-only SQL query with named `:params` (also `services.sql`),
+  or a full, unsandboxed Node.js script (`services.script`, the entire platform `ctx`, no isolate — same trust tier as
+  shell access, by design).
+  A component reaches one exactly like any other endpoint: `{"name": "featured", "url": "/api/public/services/<slug>?…"}`.
+  The same answers are served over HTTP under `/api/public` when Settings → Features → Public content API is on
+  (Services also needs its own Settings → Features → Services flag, since it's usable in-process independently of
+  the headless HTTP surface); pages don't need either flag on to use one.
 - **What comes back** is escaped when printed; only block html (`fields.<x>.html`) is trusted, because it was sanitised on save and on render.
 - **Tags** any template can use:
   `{% seo title: …, description: …, image: …, type: "article", noindex: true, item: <entry> %}` (an entry fills in everything: title,
-  description, image, structured data, breadcrumbs, hreflang), `{% not_found %}`, `{% redirect to: "/", status: 301 %}`.
+  description, image, structured data, breadcrumbs, hreflang), `{% not_found %}`, `{% redirect to: "/", status: 301 %}`. A Webmaster →
+  SEO Manager rule for the live address overrides whatever this tag says (§8a).
 - **Scoping.** Every selector is prefixed with the component's wrapper (`[data-c="a1b2c3d4"]`); `:host` is the wrapper itself;
   `@media`/`@supports`/`@container` are scoped inside, `@keyframes`/`@font-face` are global. The css of the components a page uses is emitted
   once into `<head>` after the theme's stylesheets.
@@ -186,9 +194,10 @@ its bindings, meta, css, Liquid syntax (parsed by the sandbox engine), language 
 
 ## 7. Caching, fallbacks, security
 
-- **Cache.** A page's tags are what it read (`content:<id>`, `type:<t>`, `term:<id>`, `media:<id>`…) plus `site`, `theme`, `menu` and
-  `sitefiles`, so editing one entry refreshes exactly the pages that show it, and any edit to the site tree refreshes every page (a
-  new page can change which one answers an address). A page whose data changed while it rendered is not stored.
+- **Cache.** A page's tags are what it read (`content:<id>`, `type:<t>`, `term:<id>`, `media:<id>`…) plus `site`, `theme`, `menu`,
+  `sitefiles` and `seo_rules`, so editing one entry refreshes exactly the pages that show it, and any edit to the site tree or an
+  SEO Manager rule refreshes every page (a new page, or a new rule, can change what a given address shows). A page whose data
+  changed while it rendered is not stored.
 - **404s** for addresses that matched a page but had no data (`/x1` under a catch-all) are never stored, so made-up addresses can't fill the
   cache; browsers and CDNs may hold them for 30 s. Only "no page at all" shares a single cached 404.
 - **Browsers and CDNs** may show the previous theme for up to the page's `max-age` (60 s) / `s-maxage` (300 s).
@@ -198,8 +207,67 @@ its bindings, meta, css, Liquid syntax (parsed by the sandbox engine), language 
   memory limits, no `include`, a page can't leave the site and theme namespaces. Raw HTML in a page is trusted like an administrator's, hence
   the separate `pages.*`/`components.*` permissions.
 
-## 8. Not built yet
+## 8. Webmaster → Pages and Components (D-044)
 
-The page manager and component builder screens (Webmaster → Pages, Components: visual editing, live preview, props form, import of
-pages), the JavaScript libraries manager and scripts in pages/components, a theme file editor, plugins that ship pages and components,
-`POST` endpoints for components. Everything above is reachable through the API today; those screens are the next stage.
+Two admin screens over the API above, so nobody edits raw files to build a page.
+
+- **Components** (`components.read`/`write`): a form for the meta block (title, description, `props`, the `api` endpoints it
+  reads) plus two text areas (template, scoped CSS) — not a raw single-file editor, since the meta block is structured data.
+  A live preview renders the component alone, on a throwaway page, with every property at its declared default; there is no
+  separate "try other values" panel, so editing the default is how you see something different.
+- **Pages** (`pages.read`/`write`): a front-matter form (title, layout, noindex/sitemap/cache, what it shows) over an
+  **address field** (typed without `pages/` or `.html` — those are only how it's stored — with `[param]`/`[...rest]` typed
+  in directly; a trailing `.html` typed by habit is dropped, not doubled into a real `/page.html` address), and the body
+  in one of two modes:
+  - **Compose**: the page is an ordered list of component instances — add one from the library, fill in its declared props
+    in a generated form, reorder or remove it. This is exactly a sequence of `{% render "name", k: v %}` lines; nothing new
+    is invented in storage.
+  - **Code**: the raw Liquid/HTML body, for anything the sequence above can't express. Switching _to_ code always works;
+    switching _back_ to compose only succeeds when the body is still nothing but plain `{% render %}` lines with quoted,
+    numeric or boolean arguments — otherwise it says so and stays in code, rather than guessing and losing something.
+  - **Import**: reading a single `.html` file client-side (title/description guessed from `<title>`/`<meta description>`,
+    the `<body>` becomes the page body) always lands in code mode.
+- **Live preview**, both screens: `POST /api/admin/site/preview` renders the DRAFT content — unsaved, and never written to
+  the database or `public/` — by laying it over the real site tree for one render and throwing the result away
+  (`sitePages.render`'s `overlay`). A page not saved yet can still be previewed; dynamic address parts (`[slug]`) preview
+  with a placeholder value unless one is typed in. The same validation a Save would run (`siteFiles.validate`) runs first,
+  so a broken draft is reported the same way, not silently dropped.
+- **Export/import** (D-048): `GET /api/admin/site/pages/export` / `.../components/export` download a `.zip` of every
+  page/component (one JSON file per item — the theme-zip safety checks from D-031 apply on import: no path traversal,
+  no absolute paths, no symlinks, `__MACOSX`/`.DS_Store` filtered). `POST .../import` upserts by path/slug; an optional
+  "prune" flag also deletes items in the tree that aren't in the zip. Translations (§5) and Services get the same
+  export/import shape.
+
+## 8a. SEO Manager and the Page Manager SEO section (D-049)
+
+Three tiers, lowest to highest precedence:
+
+1. **Settings → SEO**: site-wide constants shown on every page — Twitter/X handle, Facebook App ID, default Twitter
+   card, Google/Bing/Pinterest verification meta tags. (`site.og_image`, `site.noindex`, `site.robots_extra` already
+   existed in the `site` namespace and are unchanged.)
+2. **Page Manager's own SEO section** (`pages.write`): extends a page's front matter with `seo_image` (media id),
+   `seo_type` (`website`/`article`) and `twitter_card` — the default for every URL that page/template produces, e.g.
+   every blog post gets `article` unless something more specific says otherwise. Plain scalars, same convention as
+   the existing `title`/`description`/`noindex`.
+3. **SEO Manager** (`seo.read`/`seo.write`, its own screen under Webmaster): a rule for one **live URL**, exact
+   (`/about`) or wildcard (`*` within one address segment, `**` across segments — `/blog/*`, `/docs/**`). When a rule
+   matches, it overrides title/description/image/type/noindex/nofollow/canonical/twitter card outright — not just
+   filling gaps — on top of the entry's own fields, the template's `{% seo %}` tag, and tier 2. It can also **add**
+   custom meta tags (`name`/`property` + `content`) and extra JSON-LD blocks (a FAQPage/HowTo/Product schema for
+   answer engines, or anything schema.org defines), appended to what the page already emits. An exact match always
+   wins; among wildcard matches the longest literal prefix wins, then an admin-set `priority`.
+
+Rules live in their own `seo_rules` table (never exposed through Services' table-source query mode or the DBMS
+browser — blocklisted like `services`/`dbms_saved_queries`) and are loaded whole into a `cache.wrap`'d list, the same
+pattern as `redirects.map()` — fine for the expected rule-count (tens to low hundreds), not indexed for thousands.
+**LinkedIn has no meta tags of its own** (it reads Open Graph, always emitted); there is **no fixed "AEO" standard**
+either, which is why the escape hatch is generic (meta tags + JSON-LD) rather than a field per platform.
+
+A rule write invalidates every cached page (the `seo_rules` cache tag sits alongside `sitefiles` in every page's tag
+list — the same deliberate exception to §7's narrow invalidation rule that D-038 already makes for site-tree edits),
+since a pattern can start or stop matching an address without that address's own content changing.
+
+## 9. Not built yet
+
+The JavaScript libraries manager and scripts in pages/components, a theme file editor, plugins that ship pages and components,
+`POST` endpoints for components. Everything above is reachable through the API today.

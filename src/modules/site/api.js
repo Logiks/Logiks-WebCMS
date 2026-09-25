@@ -13,11 +13,13 @@ export default function publicContentApi(ctx) {
   const r = Router();
   const { settings } = ctx;
 
-  r.use(['/content', '/menus', '/search', '/terms'], (_req, _res, next) =>
+  r.use(['/content', '/menus', '/search', '/terms', '/services'], (_req, _res, next) =>
     settings.get('features.public_api')
       ? next()
       : next(new HttpError(404, 'not_found', 'The public content API is turned off.')),
   );
+  // A Service can be expensive (a SQL query), so it gets its own budget on top of the general API limit.
+  r.use('/services', ctx.limiters.services);
 
   const ttl = () => settings.get('site.page_cache_seconds');
 

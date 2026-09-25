@@ -26,7 +26,13 @@ import mediaRoutes, { mediaPublicRoute } from './modules/media/routes.js';
 import themesRoutes from './modules/themes/routes.js';
 import siteRoutes from './modules/site/routes.js';
 import siteFilesRoutes from './modules/site/files-routes.js';
+import siteBuilderRoutes from './modules/site/builder-routes.js';
 import siteLocalesRoutes from './modules/site/locales-routes.js';
+import servicesRoutes from './modules/services/routes.js';
+import dbmsRoutes from './modules/dbms/routes.js';
+import seoRoutes from './modules/seo/routes.js';
+import eventsRoutes from './modules/events/routes.js';
+import webhooksRoutes from './modules/webhooks/routes.js';
 import publicSite from './modules/site/public.js';
 import publicContentApi from './modules/site/api.js';
 import { metricsRoute } from './core/http/metricsRoute.js';
@@ -170,7 +176,13 @@ export function createApp(ctx) {
     themesRoutes,
     siteRoutes,
     siteFilesRoutes,
+    siteBuilderRoutes,
     siteLocalesRoutes,
+    servicesRoutes,
+    dbmsRoutes,
+    seoRoutes,
+    eventsRoutes,
+    webhooksRoutes,
   ])
     admin.use(mod(ctx));
   api.use('/admin', admin);

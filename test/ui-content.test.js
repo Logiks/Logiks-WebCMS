@@ -40,6 +40,8 @@ const png = (w = 30, h = 20) =>
     .toBuffer();
 
 test('Content lives under its own menu group, with a link per content type', async () => {
+  // The shell can paint before Alpine's nav x-for has flushed the permission-filtered list; wait for the button first.
+  await wait(() => b.button('Content'));
   b.click(b.button('Content'));
   await wait(() => b.$$('.nav-sub-link').some((a) => a.textContent.trim() === 'Pages'));
   const links = b

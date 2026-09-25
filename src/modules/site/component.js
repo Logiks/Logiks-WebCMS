@@ -57,6 +57,11 @@ const frontSchema = z
       .optional(),
     noindex: z.boolean().optional(),
     sitemap: z.boolean().optional(),
+    // Page Manager's SEO section (docs/DECISIONS.md D-049): defaults for every URL this page/template produces.
+    // A SEO Manager rule for the exact live URL overrides these, same as it overrides title/description/noindex above.
+    seo_image: z.number().int().positive().optional(), // media id
+    seo_type: z.enum(['website', 'article']).optional(), // og:type
+    twitter_card: z.enum(['summary', 'summary_large_image']).optional(),
     // Which content this page shows, so the platform can build its address (menus, sitemap, search results, previews):
     //   entry: post            a dynamic page (pages/blog/[slug].html) for every entry of that type
     //   entry: page:about/team one entry, one page

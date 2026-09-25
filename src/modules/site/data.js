@@ -251,6 +251,18 @@ export function createPublicData(ctx) {
       return { body: { name, items: menus[name] }, tags: ['menu'], entries: [] };
     },
 
+    /** Services (Webmaster → Services, D-045): a component reads one exactly like any other /api/public/… address. */
+    async service(slug, q, o) {
+      if (!settings.get('features.services')) throw notFound('There is no such data.');
+      const defn = await ctx.services.getPublic(slug);
+      const body = await ctx.services.run(defn, {
+        query: q,
+        locale: q.locale ?? o.locale,
+        publicData: ctx.publicData, // read lazily: publicData isn't finished constructing itself yet
+      });
+      return { body, tags: [], entries: [], cacheable: false };
+    },
+
     async search(q, o) {
       const text = String(q.q ?? '').slice(0, 100);
       const locale = await localeOf(q.locale ?? o.locale);
@@ -284,6 +296,9 @@ export function createPublicData(ctx) {
   };
 
   return {
+    /** Entries → the same JSON shape the content API uses (images resolved, rich fields rendered). Reused by
+     *  the Services module's query mode, so a saved Service and the content API never format things differently. */
+    shape,
     /**
      * @param {string} url  e.g. /api/public/content/post?per_page=5
      * @param {{safe?: boolean, extra?: boolean, locale?: string, previewId?: number}} [o] `safe`: for templates (HTML values are Safe);
@@ -321,6 +336,7 @@ export function createPublicData(ctx) {
       if (head === 'terms' && a && b && !rest.length) return routes.term(a, b, q, o);
       if (head === 'menus' && a && !b) return routes.menu(a);
       if (head === 'search' && !a) return routes.search(q, o);
+      if (head === 'services' && a && !b) return routes.service(a, q, o);
       throw notFound('There is no such data.');
     },
   };

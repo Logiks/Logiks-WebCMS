@@ -12,7 +12,8 @@ COPY package.json ./
 COPY src ./src
 COPY migrations ./migrations
 COPY admin ./admin
-# The site that ships with the code: built-in themes (site/themes) and the starter pages, components and locales (site/defaults).
+# The site that ships with the code: built-in themes (site/themes), the starter pages/components (site/defaults) and the
+# read-only shipped wording (site/locales, D-043) — editors' changes land in the database, never here.
 COPY site ./site
 # Uploads. In a cluster mount ONE shared volume here on every web and worker container (EFS, NFS): a file uploaded through one server must be readable by all of them.
 # public/ is this container's own mirror of the site tree (derived from the database; safe to lose).

@@ -63,7 +63,6 @@ docker compose run --rm web node src/cli/index.js setup --email you@example.com
 open http://localhost:8080/admin      # plain HTTP is fine here; the ALB-only HTTPS hardening switches on with X-Forwarded-Proto
 ```
 
-
 ### Updating from git (Operations → Updates)
 
 For servers that run from a **git checkout** (systemd, PM2, a plain `npm start`). Each server has its own copy of the code, so the admin page lists
@@ -83,7 +82,6 @@ every server with the commit it is running and acts on the one you pick; the req
   Under `npm run dev` (`node --watch`) the file watcher restarts on pull by itself.
 - **Not for container images:** an image has no `.git`, so the screen says "Not a git checkout". Rebuild the image and roll the containers instead.
 - Roll back by hand: `git reset --hard <sha>` on the server, then restart. Migrations are additive, so older code keeps working with a newer schema.
-
 
 ## CLI
 

@@ -19,6 +19,53 @@ const CONTACT_ERRORS = {
 };
 
 /**
+ * What every template can see: the site, its menus, the theme's settings, the request, the contact form. Shared by real
+ * page requests and the page/component builder's live preview (the site-files preview route).
+ * @param {any} ctx
+ * @param {{locale: string, path: string, query: any, contact?: any, preview?: boolean, themeId: string}} a
+ */
+export async function siteGlobals(ctx, { locale, path, query, contact, preview, themeId }) {
+  const { settings, site } = ctx;
+  const g = settings.ns('general');
+  const st = settings.ns('site');
+  const prefix = site.urls.localePrefix(locale);
+  return {
+    site: {
+      name: g.site_name,
+      tagline: g.tagline,
+      url: g.site_url,
+      locale,
+      year: new Date().getUTCFullYear(),
+      home: prefix || '/',
+      home_page: st.home_page,
+      posts_per_page: st.posts_per_page,
+      // The languages of this site (theme + site locales), for a language switcher: [{code, name, current}]
+      languages: settings.get('features.multilingual')
+        ? (await ctx.i18n.languages(themeId)).map((l) => ({
+            code: l.code,
+            name: l.name,
+            current: l.code === locale,
+          }))
+        : [],
+    },
+    menus: await site.menus.resolveAll({
+      locale,
+      path: `${prefix}${path === '/' ? '' : path}` || '/',
+    }),
+    settings: settings.ns(`theme_${themeId}`),
+    request: { path, query },
+    contact: contact ?? {
+      enabled: st.contact_enabled,
+      token: st.contact_enabled ? site.contact.token() : '',
+      sent: false,
+      error: '',
+    },
+    preview: Boolean(preview),
+    noindexBase: st.noindex || Boolean(preview),
+  };
+}
+
+/**
  * The public website. Order of business for a page request:
  *   maintenance → redirects → the page for this address → page cache → (miss) render it in the active theme → store in the cache.
  * The cache key is the address in the active theme (plus ?page= where it matters); the tags say what the page read, so editing
@@ -97,49 +144,7 @@ export default function publicSite(ctx) {
     }
   };
 
-  /**
-   * What every template can see: the site, its menus, the theme's settings, the request, the contact form.
-   * @param {{locale: string, path: string, query: any, contact?: any, preview?: boolean, themeId: string}} a
-   */
-  async function globalsFor({ locale, path, query, contact, preview, themeId }) {
-    const g = settings.ns('general');
-    const st = settings.ns('site');
-    const prefix = site.urls.localePrefix(locale);
-    return {
-      site: {
-        name: g.site_name,
-        tagline: g.tagline,
-        url: g.site_url,
-        locale,
-        year: new Date().getUTCFullYear(),
-        home: prefix || '/',
-        home_page: st.home_page,
-        posts_per_page: st.posts_per_page,
-        // The languages of this site (theme + site locales), for a language switcher: [{code, name, current}]
-        languages: settings.get('features.multilingual')
-          ? (await ctx.i18n.languages(themeId)).map((l) => ({
-              code: l.code,
-              name: l.name,
-              current: l.code === locale,
-            }))
-          : [],
-      },
-      menus: await site.menus.resolveAll({
-        locale,
-        path: `${prefix}${path === '/' ? '' : path}` || '/',
-      }),
-      settings: settings.ns(`theme_${themeId}`),
-      request: { path, query },
-      contact: contact ?? {
-        enabled: st.contact_enabled,
-        token: st.contact_enabled ? site.contact.token() : '',
-        sent: false,
-        error: '',
-      },
-      preview: Boolean(preview),
-      noindexBase: st.noindex || Boolean(preview),
-    };
-  }
+  const globalsFor = (a) => siteGlobals(ctx, a);
 
   /** Render with the active theme; a broken theme, or one that can't show pages, must not take the site down. */
   async function generate(args, log) {
@@ -406,7 +411,9 @@ export default function publicSite(ctx) {
         }
       }
 
-      const staticTags = ['site', 'theme', 'menu', 'sitefiles'];
+      // 'seo_rules' is here for the same reason as 'sitefiles' (D-038): a rule can change which address it
+      // matches, so any SEO Manager write refreshes every cached page rather than trying to know which ones.
+      const staticTags = ['site', 'theme', 'menu', 'sitefiles', 'seo_rules'];
       const versions = cacheable || !found ? await cache.versions(staticTags) : undefined; // BEFORE reading anything else (see cache header)
       const contact = flash
         ? {
