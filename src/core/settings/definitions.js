@@ -2,6 +2,7 @@ import { randomBytes } from 'node:crypto';
 import nodemailer from 'nodemailer';
 import { buildTransport, explain, fromOf, verifySmtp } from '../mail/smtp.js';
 import { render } from '../mail/templates.js';
+import { checkCustomCss, CUSTOM_CSS_MAX } from '../../modules/themes/package.js';
 
 const tz = (v) => {
   try {
@@ -184,6 +185,14 @@ export function defineCoreSettings(registry) {
         max: 100000,
         help: 'Shared across every Service; a SQL-mode one can be expensive to run.',
       },
+      analytics_rate_limit_per_minute: {
+        type: 'number',
+        label: 'Analytics beacon requests per minute (per IP)',
+        default: 120,
+        min: 1,
+        max: 100000,
+        help: 'The click/exit beacon a visitor’s browser sends, roughly once per page.',
+      },
       services_sql_timeout_ms: {
         type: 'number',
         label: 'Services: SQL statement timeout (ms)',
@@ -206,6 +215,76 @@ export function defineCoreSettings(registry) {
         min: 100,
         max: 60000,
         help: 'A script that doesn’t respond in time is reported as failed; the code itself may keep running (D-046).',
+      },
+    },
+  });
+
+  registry.define('login', {
+    title: 'Login page',
+    description: 'What the sign-in, forgot-password and reset-password screens look like.',
+    order: 22,
+    fields: {
+      logo: {
+        type: 'number',
+        media: true,
+        label: 'Logo',
+        default: 0,
+        min: 0,
+        help: 'Shown above the welcome heading. Choose one from the Media library.',
+      },
+      favicon: {
+        type: 'number',
+        media: true,
+        label: 'Favicon',
+        default: 0,
+        min: 0,
+        help: 'Replaces the browser-tab icon only while the sign-in screens are shown.',
+      },
+      background_type: {
+        type: 'select',
+        label: 'Background',
+        default: 'default',
+        options: [
+          { value: 'default', label: 'Default' },
+          { value: 'color', label: 'Solid color' },
+          { value: 'image', label: 'Image' },
+        ],
+      },
+      background_color: {
+        type: 'string',
+        label: 'Background color',
+        default: '',
+        max: 32,
+        help: 'A CSS color, e.g. #0f172a. Used when the background is set to Solid color.',
+      },
+      background_image: {
+        type: 'number',
+        media: true,
+        label: 'Background image',
+        default: 0,
+        min: 0,
+        help: 'Used when the background is set to Image. Choose one from the Media library.',
+      },
+      welcome_heading: {
+        type: 'string',
+        label: 'Welcome heading',
+        default: '',
+        max: 120,
+        help: 'Falls back to the site name under General when empty.',
+      },
+      welcome_text: {
+        type: 'text',
+        label: 'Welcome text',
+        default: '',
+        max: 500,
+      },
+      custom_css: {
+        type: 'text',
+        label: 'Custom CSS',
+        default: '',
+        max: CUSTOM_CSS_MAX,
+        help: 'Added after the built-in sign-in page styles, so it wins over them.',
+        validate: checkCustomCss,
       },
     },
   });
@@ -589,6 +668,46 @@ export function defineCoreSettings(registry) {
         label: 'Languages',
         default: ['en'],
         help: 'Language codes, one per line. Only used when "Multiple languages" is on under Features.',
+      },
+    },
+  });
+
+  registry.define('analytics', {
+    title: 'Analytics',
+    description:
+      'Page views, clicks and bounces for the public site and the admin panel, tracked separately.',
+    order: 60,
+    fields: {
+      enabled: {
+        type: 'boolean',
+        label: 'Track activity',
+        default: true,
+        help: 'A global switch. Turn off to stop recording page views, clicks and sessions entirely.',
+      },
+      track_clicks: {
+        type: 'boolean',
+        label: 'Track clicks on the public site',
+        default: true,
+        help: 'Elements marked data-track. Page views are always recorded server-side regardless of this.',
+      },
+      respect_dnt: {
+        type: 'boolean',
+        label: 'Honor "Do Not Track"',
+        default: false,
+      },
+      visitor_cookie_days: {
+        type: 'number',
+        label: 'Visitor cookie lifetime (days)',
+        default: 400,
+        min: 1,
+        max: 3650,
+      },
+      retention_days: {
+        type: 'number',
+        label: 'Keep activity data for (days)',
+        default: 180,
+        min: 1,
+        max: 3650,
       },
     },
   });

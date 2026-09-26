@@ -2,7 +2,7 @@ import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import request from 'supertest';
 import { JSDOM } from 'jsdom';
-import { makeNode } from './helpers.js';
+import { makeNode, until } from './helpers.js';
 
 let node;
 const body = (...t) => ({ blocks: t.map((text) => ({ type: 'paragraph', data: { text } })) });
@@ -138,10 +138,41 @@ test('the index can be rebuilt from published content, and only that', async () 
   assert.ok(n >= 4);
   assert.deepEqual(await find('rocket'), ['Rocket science basics', 'Gardening notes']);
   assert.deepEqual(await find('dragon'), [], 'archived content is not indexed');
+  // Delete one row by hand so the job's own effect is observable, and wait for it: local-mode jobs fire on a later
+  // tick (never awaited by enqueue() itself), and a still-running background reindex must not leak into the next
+  // test — see the dedicated race test right after this one, which needs a clean, single-source-of-concurrency start.
+  await node.ctx.db('search_index').where({ entry_id: 1 }).del();
   assert.equal(
     await node.ctx.jobs.enqueue('search.reindex', {}).then(() => true),
     true,
     'and there is a job for it',
+  );
+  await until(() => node.ctx.db('search_index').where({ entry_id: 1 }).first().then(Boolean));
+});
+
+test('reindexing never shows a partially-rebuilt index to a concurrent search (D-033 follow-up)', async () => {
+  // Found for real on MySQL: the previous job enqueued above runs in the background (local-mode jobs fire on a
+  // later tick, never awaited here), racing this test's own queries against its del()-then-reinsert-one-by-one
+  // reindex. Enough entries that the rebuild isn't one instant round trip, so a poll running alongside it has a
+  // real chance to land mid-rebuild.
+  for (let i = 1; i <= 20; i++) await publish(`Batch entry ${i}`, 'marmot burrow census');
+  // find()'s own default limit is 10 (right for the small fixtures elsewhere in this file); ask the service directly here.
+  assert.equal((await node.ctx.search.query({ q: 'marmot', locale: 'en', limit: 50 })).total, 20);
+
+  let polling = true;
+  const totals = [];
+  const poll = (async () => {
+    while (polling)
+      totals.push((await node.ctx.search.query({ q: 'marmot', locale: 'en', limit: 50 })).total);
+  })();
+  await node.ctx.search.reindex();
+  polling = false;
+  await poll;
+
+  assert.ok(totals.length > 0, 'the poll loop actually ran during the reindex');
+  assert.ok(
+    totals.every((t) => t === 20),
+    `a concurrent search saw a partially-rebuilt index: ${[...new Set(totals)]}`,
   );
 });
 
@@ -163,7 +194,9 @@ test('the /search page lists results, escapes what was typed, is never cached, a
   );
   assert.equal(xss.status, 200);
   assert.equal(
-    new JSDOM(xss.text).window.document.querySelectorAll('script:not([type])').length,
+    new JSDOM(xss.text).window.document.querySelectorAll(
+      'script:not([type]):not([data-cms="analytics"])',
+    ).length,
     0,
   );
   assert.match(xss.text, /Nothing matched/);

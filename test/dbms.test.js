@@ -28,6 +28,8 @@ describe('System → Database: table list and structure', () => {
     assert.ok(r.body.tables.some((t) => t.name === 'entries'));
     assert.ok(!r.body.tables.some((t) => t.name === 'users'));
     assert.ok(!r.body.tables.some((t) => t.name === 'settings'));
+    assert.ok(!r.body.tables.some((t) => t.name === 'analytics_sessions'));
+    assert.ok(!r.body.tables.some((t) => t.name === 'activity_log'));
 
     const info = await admin.get('/api/admin/dbms/tables/users');
     assert.equal(info.status, 200, 'structure of a sensitive table is still readable');

@@ -206,6 +206,37 @@ describe('settings API + RBAC', () => {
     assert.equal(r.body.ok, false);
     assert.notEqual(node.ctx.settings.get('mail.port'), 1);
   });
+
+  test('audit log: date range and actor filters, and CSV/JSON export', async () => {
+    const s = await signedIn(node.app);
+    await s.put('/api/admin/settings/general').send({ values: { tagline: 'audit-filter-test' } });
+    const to = Date.now() + 60_000;
+    const from = to - 3_600_000;
+
+    const byDate = await s.get(`/api/admin/audit?from=${from}&to=${to}`);
+    assert.ok(byDate.body.entries.some((e) => e.action === 'settings.update'));
+    const tooOld = await s.get(`/api/admin/audit?from=${from - 3_600_000}&to=${from}`);
+    assert.ok(!tooOld.body.entries.some((e) => e.action === 'settings.update' && e.at >= from));
+
+    const byActor = await s.get(`/api/admin/audit?actorEmail=${encodeURIComponent(ADMIN.email)}`);
+    assert.ok(byActor.body.entries.length);
+    assert.ok(byActor.body.entries.every((e) => e.actor === ADMIN.email));
+    const wrongActor = await s.get('/api/admin/audit?actorEmail=nobody@example.com');
+    assert.deepEqual(wrongActor.body.entries, []);
+
+    const json = await s.get('/api/admin/audit/export?format=json');
+    assert.equal(json.status, 200);
+    assert.ok(json.body.entries.some((e) => e.action === 'settings.update'));
+
+    const csv = await s.get('/api/admin/audit/export');
+    assert.equal(csv.status, 200);
+    assert.match(csv.headers['content-type'], /text\/csv/);
+    assert.match(csv.headers['content-disposition'], /attachment; filename="audit-log\.csv"/);
+    assert.match(csv.text, /^id,at,action,actor,entity,entityId,ip,meta/);
+    assert.ok(!csv.text.includes('hunter2-secret'), 'secrets must not reach the export either');
+
+    assert.equal((await request(node.app).get('/api/admin/audit/export')).status, 401);
+  });
 });
 
 describe('users and roles safeguards', () => {
@@ -298,6 +329,42 @@ describe('settings apply live, without a restart', () => {
       .get('/api/public/info')
       .set('Origin', 'https://evil.example.com');
     assert.equal(other.headers['access-control-allow-origin'], undefined);
+  });
+
+  test('/api/public/info exposes login-page branding, resolving media ids to urls', async () => {
+    const s = await signedIn(node.app);
+    const now = Date.now();
+    const [id] = await node.ctx.db('media').insert({
+      filename: 'logo.png',
+      mime: 'image/png',
+      kind: 'image',
+      size: 100,
+      width: 40,
+      height: 40,
+      alt: '',
+      hash: 'x',
+      original_file: 'logo.png',
+      variants: '[]',
+      created_at: now,
+      updated_at: now,
+    });
+    await s.put('/api/admin/settings/login').send({
+      values: {
+        logo: id,
+        welcome_heading: 'Welcome back',
+        background_type: 'color',
+        background_color: '#111',
+      },
+    });
+    const info = await request(node.app).get('/api/public/info');
+    assert.equal(info.body.login.logoUrl, `/media/${id}/logo.png`);
+    assert.equal(info.body.login.welcomeHeading, 'Welcome back');
+    assert.equal(info.body.login.backgroundType, 'color');
+    assert.equal(info.body.login.backgroundColor, '#111');
+    assert.equal(info.body.login.faviconUrl, null);
+    await s
+      .put('/api/admin/settings/login')
+      .send({ reset: ['logo', 'welcome_heading', 'background_type', 'background_color'] });
   });
 
   test('session cookie name is hot-swapped', async () => {

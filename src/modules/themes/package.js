@@ -106,10 +106,43 @@ export const manifestSchema = z.object({
     .optional(),
 });
 
-/** theme.json settings → settings-registry fields (they appear under Settings as "Theme: <name>"). */
+export const CUSTOM_CSS_MAX = 100_000;
+
+/**
+ * Custom CSS (Appearance → Customize) is printed inside a <style> element on every page, so nothing in it may end that
+ * element, load another file or run code — the same rules as a component's CSS (site/component.js), except the message
+ * for an import rule points at Libraries, which is how a site adds a stylesheet from a package.
+ * @returns {string|null} what is wrong, or null
+ */
+export function checkCustomCss(css) {
+  const c = String(css ?? '').replace(/\/\*[\s\S]*?\*\//g, '');
+  if (/<\/?style|<!--|<\/?script/i.test(c))
+    return 'The CSS contains markup (like </style>). Remove it; CSS never needs tags.';
+  if (/@import\b/i.test(c))
+    return '@import is not allowed. Add a stylesheet package under System → Libraries instead.';
+  if (/expression\s*\(|behavior\s*:|-moz-binding/i.test(c))
+    return 'The CSS uses a feature that can run code (expression, behavior or -moz-binding).';
+  if (/url\(\s*['"]?\s*(javascript|vbscript|data:(?!image\/|font\/|application\/font))/i.test(c))
+    return 'The CSS has a url() that is not an image, font or web address.';
+  return null;
+}
+
+/**
+ * theme.json settings → settings-registry fields (they appear under Settings as "Theme: <name>" and on Appearance →
+ * Customize). Every theme also gets `custom_css`, printed after the theme's own styles on every page. It lives with the
+ * theme's settings (not one site-wide value) so switching themes doesn't apply CSS written for another theme's markup.
+ */
 export function settingsFields(manifest) {
   const fields = {};
   for (const [k, f] of Object.entries(manifest.settings)) fields[k] = { ...f };
+  fields.custom_css = {
+    type: 'text',
+    label: 'Custom CSS',
+    default: '',
+    max: CUSTOM_CSS_MAX,
+    help: 'Added after the theme’s own styles on every page, so it wins over them. Edit it with a live preview under Appearance → Customize.',
+    validate: checkCustomCss,
+  };
   return fields;
 }
 
@@ -153,33 +186,10 @@ export function readThemeZip(buffer, { allowJs }) {
     )
       throw bad(`Unsafe file name in the zip: "${name.slice(0, 60)}".`);
     if (rooted) name = name.slice(top.length + 1);
-    const norm = path.posix.normalize(name);
-    if (norm.startsWith('..') || norm.split('/').includes('..') || norm !== name)
-      throw bad(`Unsafe file path in the zip: "${name.slice(0, 60)}".`);
     if (((e.header.attr >>> 16) & 0o170000) === 0o120000)
       throw bad(`The zip contains a symbolic link ("${name}"). Themes can't.`);
-    const ext = path.posix.extname(name).toLowerCase();
-    const text = TEXT_EXT.has(ext);
-    if (!text && !BINARY_EXT.has(ext)) throw bad(`"${name}" is a file type themes can't contain.`);
-    if (ext === '.js' && !allowJs)
-      throw bad(
-        `"${name}" is JavaScript. This site doesn't allow themes to ship scripts (Settings → Themes).`,
-      );
-    if (
-      !/^(layouts|components|styles|scripts|assets|locales)\/|^theme\.json$|^(README|LICENSE)(\.md|\.txt)?$/i.test(
-        name,
-      )
-    )
-      throw bad(
-        `"${name}" is outside the theme folders (layouts, components, styles, scripts, assets, locales).`,
-      );
-
     const size = e.header.size; // declared size, checked BEFORE inflating anything
-    const max = ext === '.html' ? LIMITS.templateBytes : LIMITS.fileBytes;
-    if (size > max)
-      throw bad(
-        `"${name}" is too large (${Math.round(size / 1024)} KB; the limit is ${Math.round(max / 1024)} KB).`,
-      );
+    const { text } = checkThemeFile(name, size, { allowJs });
     total += size;
     if (total > LIMITS.totalBytes)
       throw bad(`The theme is larger than ${LIMITS.totalBytes / 1024 / 1024} MB unpacked.`);
@@ -193,6 +203,60 @@ export function readThemeZip(buffer, { allowJs }) {
     );
   }
 
+  const manifest = checkThemeFiles(files);
+  return { manifest, files };
+}
+
+/**
+ * One file of a theme, by path and size: where it may live, what type it may be, how big. Shared by the zip installer and
+ * the theme file editor, so a file saved in the editor passes exactly the checks an uploaded one does.
+ * @returns {{ext: string, text: boolean}}
+ */
+export function checkThemeFile(name, size, { allowJs }) {
+  if (
+    typeof name !== 'string' ||
+    !name ||
+    name.length > 191 ||
+    name.includes('\\') ||
+    name.includes('\0') ||
+    name.startsWith('/') ||
+    /^[a-zA-Z]:/.test(name)
+  )
+    throw bad(`Unsafe file name: "${String(name).slice(0, 60)}".`);
+  const norm = path.posix.normalize(name);
+  if (norm.startsWith('..') || norm.split('/').includes('..') || norm !== name)
+    throw bad(`Unsafe file path: "${name.slice(0, 60)}".`);
+  const ext = path.posix.extname(name).toLowerCase();
+  const text = TEXT_EXT.has(ext);
+  if (!text && !BINARY_EXT.has(ext)) throw bad(`"${name}" is a file type themes can't contain.`);
+  if (ext === '.js' && !allowJs)
+    throw bad(
+      `"${name}" is JavaScript. This site doesn't allow themes to ship scripts (Settings → Themes).`,
+    );
+  if (
+    !/^(layouts|components|styles|scripts|assets|locales)\/|^theme\.json$|^(README|LICENSE)(\.md|\.txt)?$/i.test(
+      name,
+    )
+  )
+    throw bad(
+      `"${name}" is outside the theme folders (layouts, components, styles, scripts, assets, locales).`,
+    );
+  const max = ext === '.html' ? LIMITS.templateBytes : LIMITS.fileBytes;
+  if (size > max)
+    throw bad(
+      `"${name}" is too large (${Math.round(size / 1024)} KB; the limit is ${Math.round(max / 1024)} KB).`,
+    );
+  return { ext, text };
+}
+
+/** The whole theme: required files present, the manifest valid, the totals within limits. Returns the parsed manifest. */
+export function checkThemeFiles(files) {
+  if (files.size > LIMITS.files) throw bad(`A theme can have ${LIMITS.files} files at most.`);
+  let total = 0;
+  for (const f of files.values())
+    total += f.encoding === 'utf8' ? Buffer.byteLength(f.content) : (f.content.length * 3) / 4;
+  if (total > LIMITS.totalBytes)
+    throw bad(`The theme is larger than ${LIMITS.totalBytes / 1024 / 1024} MB unpacked.`);
   if (!files.has('theme.json')) throw bad('The theme is missing theme.json.');
   if (!files.has('layouts/default.html'))
     throw bad(
@@ -210,7 +274,7 @@ export function readThemeZip(buffer, { allowJs }) {
   }
   if (Object.keys(manifest.settings).length > LIMITS.settings)
     throw bad(`A theme can declare ${LIMITS.settings} settings at most.`);
-  return { manifest, files };
+  return manifest;
 }
 
 /** One hash for the whole theme: URLs for its assets change whenever anything in it does. */

@@ -1,7 +1,10 @@
 import express, { Router } from 'express';
-import { createHash } from 'node:crypto';
-import { HttpError } from '../../core/http/errors.js';
-import { robotsTxt, sitemapXml } from './seo.js';
+import cookieParser from 'cookie-parser';
+import { createHash, randomBytes } from 'node:crypto';
+import { z } from 'zod';
+import { HttpError, parse } from '../../core/http/errors.js';
+import { cspHeader } from '../../core/http/securityHeaders.js';
+import { robotsTxt } from './seo.js';
 
 const esc = (s) =>
   String(s).replace(
@@ -74,8 +77,41 @@ export async function siteGlobals(ctx, { locale, path, query, contact, preview, 
  */
 export default function publicSite(ctx) {
   const r = Router();
-  const { settings, content, themes, cache, site, metrics } = ctx;
+  const { settings, content, themes, cache, site, metrics, jobs } = ctx;
   const ttl = () => settings.get('site.page_cache_seconds');
+  r.use(cookieParser()); // only this router needs it — the admin/auth API parses its own cookies separately
+
+  // ───────── activity/analytics (docs/DECISIONS.md D-056) ─────────
+  // A visitor id, not an express-session: no server-side session-store entry, so it behaves the same on any
+  // node with zero shared in-process state (cluster-safety). It carries no privilege, so it isn't signed.
+  const VID_COOKIE = 'cms_vid';
+  function visitorToken(req, res) {
+    const existing = req.cookies?.[VID_COOKIE];
+    if (existing) return existing;
+    const token = randomBytes(16).toString('hex');
+    res.cookie(VID_COOKIE, token, {
+      httpOnly: true,
+      sameSite: 'lax',
+      secure: req.secure,
+      maxAge: settings.get('analytics.visitor_cookie_days') * 86_400_000,
+    });
+    return token;
+  }
+  // Queued, never inline (D-014's "queue it" principle) — a cached page's p95 must never wait on this write.
+  function recordView(req, res, path) {
+    if (!settings.get('analytics.enabled')) return;
+    if (settings.get('analytics.respect_dnt') && req.headers.dnt === '1') return;
+    jobs
+      .enqueue('analytics.record', {
+        type: 'pageview',
+        surface: 'public',
+        sessionToken: visitorToken(req, res),
+        path,
+        referrer: req.headers.referer || null,
+        userAgent: req.headers['user-agent'] || null,
+      })
+      .catch(() => {});
+  }
 
   // ───────── theme assets ─────────
   r.get('/theme/:id/:hash/:dir/*path', async (req, res, next) => {
@@ -134,6 +170,40 @@ export default function publicSite(ctx) {
     },
   );
 
+  // ───────── activity/analytics beacon (clicks + time-on-page; page views are recorded server-side, not here) ─────────
+  const beaconBody = z.object({
+    type: z.enum(['click', 'dwell']),
+    path: z.string().min(1).max(512),
+    label: z.string().max(191).optional(),
+    durationMs: z.number().int().min(0).max(3600_000).optional(),
+  });
+  r.post(
+    '/analytics/beacon',
+    express.json({ limit: '2kb' }),
+    ctx.limiters.analytics,
+    async (req, res) => {
+      res.status(202).end(); // answer immediately either way — nothing here should ever affect the visitor's page
+      if (!settings.get('analytics.enabled')) return;
+      const token = req.cookies?.[VID_COOKIE];
+      if (!token) return; // no page view ever recorded this session (cookie cleared, or DNT) — nothing to attach to
+      try {
+        const { type, path, label, durationMs } = parse(beaconBody, req.body);
+        await jobs
+          .enqueue('analytics.record', {
+            type,
+            surface: 'public',
+            sessionToken: token,
+            path,
+            label,
+            durationMs,
+          })
+          .catch(() => {});
+      } catch {
+        /* a malformed beacon is not the visitor's problem; the response is already sent */
+      }
+    },
+  );
+
   // ───────── everything else is a page of the site tree ─────────
   const safePath = (p) => {
     try {
@@ -184,6 +254,16 @@ export default function publicSite(ctx) {
       ...(etag ? { ETag: etag } : {}),
       'X-Cache': result,
       ...(settings.get('site.noindex') ? { 'X-Robots-Tag': 'noindex, nofollow' } : {}),
+      // A component's <script> was compiled with this exact nonce baked in (D-055); a cache HIT must repeat the
+      // same header the original render sent, never a fresh random one, or the browser refuses the cached script.
+      ...(out.cspNonce
+        ? {
+            'Content-Security-Policy': cspHeader(settings.ns('security'), {
+              https: req.secure,
+              nonce: out.cspNonce,
+            }),
+          }
+        : {}),
     });
     if (etag && req.headers['if-none-match'] === etag && out.status === 200)
       return res.status(304).end();
@@ -221,40 +301,21 @@ export default function publicSite(ctx) {
     void req;
   });
 
-  r.get('/sitemap.xml', async (_req, res, next) => {
+  // System → Sitemap (D-053): /sitemap.xml is the whole list, or an index of /sitemap-<n>.xml parts once it is long.
+  const sendSitemap = async (part, res, next) => {
     try {
-      if (!settings.get('site.sitemap_enabled') || settings.get('site.noindex')) return next();
-      const xml = await cache.wrap(
-        'sitemap:xml',
-        async () => {
-          /** @type {Map<string, {loc: string, lastmod: number|null}>} */
-          const urls = new Map();
-          const add = (path, lastmod) => {
-            const loc = site.urls.absolute(path);
-            if (urls.size < 50000 && !urls.has(loc)) urls.set(loc, { loc, lastmod });
-          };
-          // Entries are listed by the address the site tree gives them (an entry no page shows has none, so it isn't listed).
-          await content.eachPublished((e) => {
-            const u = site.urls.entry(e);
-            if (u && !e.data.noindex) add(u, e.updatedAt);
-          });
-          for (const p of ctx.sitePages.sitemapPages()) add(p.url, p.updatedAt);
-          if (urls.size && !urls.has(site.urls.absolute('/'))) add('/', null);
-          for (const tax of ['category', 'tag'])
-            for (const t of await content.terms(tax)) {
-              const u =
-                t.uses > 0 ? site.urls.term(t, settings.get('general.default_locale')) : null;
-              if (u) add(u, null);
-            }
-          return sitemapXml([...urls.values()]);
-        },
-        { tags: ['sitemap', 'site', 'sitefiles'], ttl: 3600 },
-      );
-      res.type('application/xml').set('Cache-Control', 'public, max-age=300').send(xml);
+      if (!ctx.sitemap.enabled()) return next();
+      const out = await ctx.sitemap.xml(part);
+      if (out === null) return next();
+      res.type('application/xml').set('Cache-Control', 'public, max-age=300').send(out);
     } catch (e) {
       next(e);
     }
-  });
+  };
+  r.get('/sitemap.xml', (_req, res, next) => sendSitemap(0, res, next));
+  r.get(/^\/sitemap-([1-9]\d{0,3})\.xml$/, (req, res, next) =>
+    sendSitemap(Number(req.params[0]), res, next),
+  );
 
   // signed draft preview
   r.get('/preview/:id', async (req, res, next) => {
@@ -391,6 +452,7 @@ export default function publicSite(ctx) {
         const hitPage = await cache.get(key);
         if (hitPage) {
           metrics.pageCache.inc({ result: 'hit' });
+          recordView(req, res, path); // a cache HIT is still a real page view (D-056, same exception as D-032/D-038)
           return send(req, res, hitPage, {
             cacheControl: cc(hitPage.status, seconds),
             etag: hitPage.etag,
@@ -403,6 +465,7 @@ export default function publicSite(ctx) {
         const shared = await cache.get(key404);
         if (shared) {
           metrics.pageCache.inc({ result: 'hit' });
+          recordView(req, res, path);
           return send(req, res, shared, {
             cacheControl: cc(404, seconds),
             etag: shared.etag,
@@ -470,7 +533,7 @@ export default function publicSite(ctx) {
         const dv = out.tags.length ? await cache.versions(out.tags) : {};
         await cache.set(
           shared404 ? key404 : key,
-          { status: out.status, html: out.html, etag },
+          { status: out.status, html: out.html, etag, cspNonce: out.cspNonce },
           {
             ttl: out.status === 200 ? seconds : Math.min(seconds, 60),
             tags: [...staticTags, ...out.tags],
@@ -478,9 +541,11 @@ export default function publicSite(ctx) {
           },
         );
         metrics.pageCache.inc({ result: 'miss' });
+        recordView(req, res, path);
         return send(req, res, out, { cacheControl: cc(out.status, seconds), etag, result: 'MISS' });
       }
       metrics.pageCache.inc({ result: 'bypass' });
+      recordView(req, res, path);
       return send(req, res, out, {
         cacheControl: stale || flash || front?.cache === false ? 'no-store' : cc(out.status, 0),
         result: stale ? 'BYPASS' : 'BYPASS',

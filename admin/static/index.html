@@ -41,12 +41,18 @@
   </div>
 </div>
 
+<!-- ───────── Sign-in page branding (Settings → Login page) ───────── -->
+<template x-if="['login', 'forgot', 'reset'].includes(view) && branding && branding.customCss">
+  <style x-text="branding.customCss"></style>
+</template>
+
 <!-- ───────── Sign in ───────── -->
 <template x-if="view === 'login'">
   <div class="login">
-    <div class="login-side">
-      <h1 x-text="siteName || 'Admin'"></h1>
-      <p>Sign in to manage content, settings and the servers behind this site.</p>
+    <div class="login-side" :style="loginSideStyle">
+      <img class="login-logo" x-show="branding && branding.logoUrl" :src="branding && branding.logoUrl" alt="">
+      <h1 x-text="(branding && branding.welcomeHeading) || siteName || 'Admin'"></h1>
+      <p x-text="(branding && branding.welcomeText) || 'Sign in to manage content, settings and the servers behind this site.'"></p>
     </div>
     <form class="login-form" @submit.prevent="signIn()">
       <h2 class="h4 mb-4">Sign in</h2>
@@ -68,7 +74,8 @@
 <!-- ───────── Forgot password ───────── -->
 <template x-if="view === 'forgot'">
   <div class="login">
-    <div class="login-side">
+    <div class="login-side" :style="loginSideStyle">
+      <img class="login-logo" x-show="branding && branding.logoUrl" :src="branding && branding.logoUrl" alt="">
       <h1 x-text="siteName || 'Admin'"></h1>
       <p>We'll email you a link to choose a new password.</p>
     </div>
@@ -93,7 +100,8 @@
 <!-- ───────── Choose a new password (from the emailed link) ───────── -->
 <template x-if="view === 'reset'">
   <div class="login">
-    <div class="login-side">
+    <div class="login-side" :style="loginSideStyle">
+      <img class="login-logo" x-show="branding && branding.logoUrl" :src="branding && branding.logoUrl" alt="">
       <h1 x-text="siteName || 'Admin'"></h1>
       <p>Choose a password you don't use anywhere else.</p>
     </div>
@@ -213,7 +221,15 @@
                       </div>
                     </template>
                     <template x-if="f.type === 'text'"><textarea :id="'f_' + f.key" rows="3" class="form-control" :class="{'is-invalid': errors[f.key]}" :value="val(f)" :disabled="st(f).locked" @input="set(f, $event.target.value)"></textarea></template>
-                    <template x-if="f.type === 'number'"><input :id="'f_' + f.key" type="number" class="form-control" style="max-width:10rem" :class="{'is-invalid': errors[f.key]}" :value="val(f)" :min="f.min" :max="f.max" :disabled="st(f).locked" @input="set(f, $event.target.value === '' ? '' : Number($event.target.value))"></template>
+                    <template x-if="f.type === 'number' && !f.media"><input :id="'f_' + f.key" type="number" class="form-control" style="max-width:10rem" :class="{'is-invalid': errors[f.key]}" :value="val(f)" :min="f.min" :max="f.max" :disabled="st(f).locked" @input="set(f, $event.target.value === '' ? '' : Number($event.target.value))"></template>
+                    <template x-if="f.type === 'number' && f.media">
+                      <div class="d-flex align-items-center gap-3">
+                        <span class="ph thumb" x-show="val(f)"><img x-show="media[val(f)] && media[val(f)].kind === 'image'" :src="thumb(media[val(f)])" alt=""></span>
+                        <span class="muted small" x-show="val(f)" x-text="media[val(f)] ? media[val(f)].filename : ''"></span>
+                        <button type="button" class="btn btn-outline-secondary btn-sm" :disabled="st(f).locked" @click="pickMedia(f)" x-text="val(f) ? 'Change' : 'Choose from the library'"></button>
+                        <button type="button" class="btn btn-link btn-sm" x-show="val(f)" :disabled="st(f).locked" @click="set(f, 0)">Remove</button>
+                      </div>
+                    </template>
                     <template x-if="f.type === 'boolean'"><div class="form-check form-switch"><input :id="'f_' + f.key" type="checkbox" class="form-check-input" role="switch" :checked="val(f)" :disabled="st(f).locked" @change="set(f, $event.target.checked)"><label class="form-check-label muted" :for="'f_' + f.key" x-text="val(f) ? 'On' : 'Off'"></label></div></template>
                     <template x-if="f.type === 'select'"><select :id="'f_' + f.key" class="form-select" :disabled="st(f).locked" @change="set(f, $event.target.value)"><template x-for="o in f.options" :key="o.value"><option :value="o.value" :selected="o.value === val(f)" x-text="o.label"></option></template></select></template>
                     <template x-if="f.type === 'list'"><textarea :id="'f_' + f.key" rows="3" class="form-control mono" placeholder="One per line" :value="listText(f)" :disabled="st(f).locked" @input="setList(f, $event.target.value)"></textarea></template>
@@ -327,8 +343,17 @@
     <!-- Audit -->
     <template x-if="route === 'audit'">
       <section x-data="auditPage">
-        <div class="page-head"><h1>Audit log</h1><p>Who changed what, and when. Secret values are never recorded.</p></div>
-        <div class="mb-3"><input class="form-control" style="max-width:20rem" placeholder="Filter by action, e.g. settings" x-model="filter" @input.debounce.400ms="load(true)"></div>
+        <div class="page-head d-flex justify-content-between align-items-end flex-wrap gap-2">
+          <div><h1>Audit log</h1><p>Who changed what, and when. Secret values are never recorded.</p></div>
+          <a class="btn btn-outline-secondary" :href="exportUrl" download>Export CSV</a>
+        </div>
+        <div class="mb-3 d-flex flex-wrap gap-2 align-items-end">
+          <div><label class="form-label small" for="au-action">Action</label><input id="au-action" class="form-control" style="max-width:16rem" placeholder="e.g. settings" x-model="filter" @input.debounce.400ms="load(true)"></div>
+          <div><label class="form-label small" for="au-actor">Actor email</label><input id="au-actor" class="form-control" style="max-width:16rem" placeholder="e.g. you@example.com" x-model="actorEmail" @input.debounce.400ms="load(true)"></div>
+          <div><label class="form-label small" for="au-from">From</label><input id="au-from" type="date" class="form-control" x-model="from" @change="load(true)"></div>
+          <div><label class="form-label small" for="au-to">To</label><input id="au-to" type="date" class="form-control" x-model="to" @change="load(true)"></div>
+          <button type="button" class="btn btn-link" x-show="filter || actorEmail || from || to" @click="clearFilters()">Clear filters</button>
+        </div>
         <div class="panel">
           <div class="empty" x-show="!entries.length">No entries match.</div>
           <table class="table" x-show="entries.length"><thead><tr><th>Action</th><th>Detail</th><th>By</th><th>When</th></tr></thead><tbody>
@@ -339,6 +364,169 @@
               <td class="muted text-nowrap" x-text="ago(e.at)" :title="new Date(e.at).toLocaleString()"></td></tr></template></tbody></table>
         </div>
         <div class="text-center mt-3"><button class="btn btn-outline-secondary" x-show="more" @click="load(false)">Load older</button></div>
+      </section>
+    </template>
+
+    <!-- Analytics -->
+    <template x-if="route === 'analytics-overview'">
+      <section x-data="analyticsPage('overview')">
+        <div class="page-head"><h1>Analytics overview</h1><p>Page views, sessions and bounces. The public site and the admin panel are tracked separately.</p></div>
+        <div class="mb-3 d-flex flex-wrap gap-2 align-items-end">
+          <div><label class="form-label small" for="an-surface-1">Surface</label><select id="an-surface-1" class="form-select" x-model="surface" @change="load()"><option value="public">Public site</option><option value="admin">Admin panel</option></select></div>
+          <div><label class="form-label small" for="an-from-1">From</label><input id="an-from-1" type="date" class="form-control" x-model="from" @change="load()"></div>
+          <div><label class="form-label small" for="an-to-1">To</label><input id="an-to-1" type="date" class="form-control" x-model="to" @change="load()"></div>
+        </div>
+        <div class="row g-3">
+          <div class="col-6 col-lg-4"><div class="panel p-3"><div class="muted small">Page views</div><div class="bigver" x-text="overview ? overview.pageviews : '–'"></div></div></div>
+          <div class="col-6 col-lg-4"><div class="panel p-3"><div class="muted small">Unique visitors</div><div class="bigver" x-text="overview ? overview.sessions : '–'"></div></div></div>
+          <div class="col-6 col-lg-4"><div class="panel p-3"><div class="muted small">Avg. pages / visitor</div><div class="bigver" x-text="overview ? overview.avgPagesPerSession.toFixed(1) : '–'"></div></div></div>
+          <div class="col-6 col-lg-4"><div class="panel p-3"><div class="muted small">Bounce rate</div><div class="bigver" x-text="overview ? pct(overview.bounceRate) : '–'"></div></div></div>
+          <div class="col-6 col-lg-4"><div class="panel p-3"><div class="muted small">Avg. time on page</div><div class="bigver" x-text="overview ? duration(overview.avgDwellMs) : '–'"></div></div></div>
+          <div class="col-6 col-lg-4"><div class="panel p-3"><div class="muted small">Clicks tracked</div><div class="bigver" x-text="overview ? overview.clicks : '–'"></div></div></div>
+        </div>
+
+        <div class="panel p-3 mt-3">
+          <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-2">
+            <h2 class="h6 mb-0">Traffic over time</h2>
+            <div class="legend">
+              <span class="legend-item"><span class="legend-swatch" style="background:var(--chart-1)"></span>Page views</span>
+              <span class="legend-item"><span class="legend-swatch" style="background:var(--chart-2)"></span>Visitors</span>
+            </div>
+          </div>
+          <div class="empty" x-show="!trend.length">No page views in this range yet.</div>
+          <svg x-show="trend.length" x-ref="trendSvg" class="chart-svg" viewBox="0 0 600 195" preserveAspectRatio="none" @mousemove="onTrendMove($event)" @mouseleave="onTrendLeave()" role="img" aria-label="Page views and visitors per day">
+            <g x-html="trendSvgInner"></g>
+          </svg>
+        </div>
+
+        <div class="row g-3 mt-1">
+          <div class="col-lg-6">
+            <div class="panel p-3 h-100">
+              <h2 class="h6 mb-2">Devices</h2>
+              <div class="empty" x-show="!devices.length">No sessions in this range yet.</div>
+              <div class="donut-wrap" x-show="devices.length">
+                <svg viewBox="0 0 200 200" width="160" height="160" role="img" aria-label="Sessions by device type">
+                  <g x-html="donutSvgInner"></g>
+                </svg>
+                <div class="legend flex-column">
+                  <template x-for="seg in donutSegments" :key="seg.device + '-legend'">
+                    <span class="legend-item"><span class="legend-swatch" :style="'background:' + seg.color"></span><span class="text-capitalize" x-text="seg.device"></span><span class="muted ms-auto" x-text="seg.count + ' · ' + pct(seg.pct)"></span></span>
+                  </template>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="col-lg-6">
+            <div class="panel p-3 h-100">
+              <h2 class="h6 mb-2">Top referrers</h2>
+              <div class="empty" x-show="!referrerRows.length">No sessions in this range yet.</div>
+              <div class="bar-list" x-show="referrerRows.length">
+                <template x-for="r in referrerRows" :key="r.host">
+                  <div class="bar-list-row">
+                    <div class="bar-list-label" :title="r.host" x-text="r.host"></div>
+                    <div class="bar-list-track"><div class="bar-list-fill" :style="'width:' + r.pct + '%'"></div></div>
+                    <div class="bar-list-value" x-text="r.sessions"></div>
+                  </div>
+                </template>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </template>
+
+    <template x-if="route === 'analytics-active'">
+      <section x-data="analyticsActivePage">
+        <div class="page-head"><h1>Active now</h1><p>Sessions seen in the last window, by the page they're currently on. Refreshes automatically.</p></div>
+        <div class="mb-3 d-flex flex-wrap gap-2 align-items-end">
+          <div><label class="form-label small" for="an-surface-0">Surface</label><select id="an-surface-0" class="form-select" x-model="surface" @change="refresh()"><option value="public">Public site</option><option value="admin">Admin panel</option></select></div>
+          <div><label class="form-label small" for="an-window">Active within</label><select id="an-window" class="form-select" x-model.number="windowMin" @change="refresh()"><option value="1">1 minute</option><option value="5">5 minutes</option><option value="15">15 minutes</option><option value="30">30 minutes</option></select></div>
+        </div>
+        <div class="panel p-3 mb-3"><div class="muted small">Active sessions</div><div class="bigver" x-text="data ? data.total : '–'"></div></div>
+        <div class="panel p-3">
+          <h2 class="h6 mb-2">By page</h2>
+          <div class="empty" x-show="data && !data.byPage.length">No active sessions right now.</div>
+          <div class="bar-list" x-show="data && data.byPage.length">
+            <template x-for="r in (data ? data.byPage : [])" :key="r.path">
+              <div class="bar-list-row">
+                <div class="bar-list-label mono" :title="r.path" x-text="r.path"></div>
+                <div class="bar-list-track"><div class="bar-list-fill" :style="'width:' + pctOf(r.count) + '%'"></div></div>
+                <div class="bar-list-value" x-text="r.count"></div>
+              </div>
+            </template>
+          </div>
+        </div>
+      </section>
+    </template>
+
+    <template x-if="route === 'analytics-pages'">
+      <section x-data="analyticsPage('pages')">
+        <div class="page-head"><h1>Page analytics</h1><p>Views and time on page, page-wise.</p></div>
+        <div class="mb-3 d-flex flex-wrap gap-2 align-items-end">
+          <div><label class="form-label small" for="an-surface-2">Surface</label><select id="an-surface-2" class="form-select" x-model="surface" @change="load()"><option value="public">Public site</option><option value="admin">Admin panel</option></select></div>
+          <div><label class="form-label small" for="an-from-2">From</label><input id="an-from-2" type="date" class="form-control" x-model="from" @change="load()"></div>
+          <div><label class="form-label small" for="an-to-2">To</label><input id="an-to-2" type="date" class="form-control" x-model="to" @change="load()"></div>
+        </div>
+        <div class="panel">
+          <div class="empty" x-show="!pages.length">No page views yet.</div>
+          <table class="table" x-show="pages.length"><thead><tr><th>Page</th><th>Views</th><th>Sessions</th><th>Avg. time</th><th>Bounce rate</th></tr></thead><tbody>
+            <template x-for="p in pages" :key="p.path"><tr>
+              <td class="mono" x-text="p.path"></td>
+              <td x-text="p.views"></td>
+              <td x-text="p.sessions"></td>
+              <td x-text="duration(p.avgDwellMs)"></td>
+              <td x-text="p.bounceRate == null ? '–' : pct(p.bounceRate)"></td>
+            </tr></template>
+          </tbody></table>
+        </div>
+      </section>
+    </template>
+
+    <template x-if="route === 'analytics-sessions'">
+      <section x-data="analyticsPage('sessions')">
+        <div class="page-head"><h1>Sessions</h1><p>One row per visit — entry and exit page, device and referrer.</p></div>
+        <div class="mb-3 d-flex flex-wrap gap-2 align-items-end">
+          <div><label class="form-label small" for="an-surface-3">Surface</label><select id="an-surface-3" class="form-select" x-model="surface" @change="loadSessions(true)"><option value="public">Public site</option><option value="admin">Admin panel</option></select></div>
+          <div><label class="form-label small" for="an-from-3">From</label><input id="an-from-3" type="date" class="form-control" x-model="from" @change="loadSessions(true)"></div>
+          <div><label class="form-label small" for="an-to-3">To</label><input id="an-to-3" type="date" class="form-control" x-model="to" @change="loadSessions(true)"></div>
+        </div>
+        <div class="panel">
+          <div class="empty" x-show="!sessions.length">No sessions yet.</div>
+          <table class="table" x-show="sessions.length"><thead><tr><th>Entry page</th><th>Exit page</th><th>Pages</th><th>Device</th><th>Referrer</th><th>Bounce</th><th>Last seen</th></tr></thead><tbody>
+            <template x-for="s in sessions" :key="s.token"><tr>
+              <td class="mono" x-text="s.entryPath"></td>
+              <td class="mono" x-text="s.exitPath"></td>
+              <td x-text="s.pageCount"></td>
+              <td x-text="s.deviceType"></td>
+              <td class="muted small" x-text="s.referrer || '–'"></td>
+              <td x-text="s.isBounce ? 'Yes' : 'No'"></td>
+              <td class="muted text-nowrap" x-text="ago(s.lastSeen)" :title="new Date(s.lastSeen).toLocaleString()"></td>
+            </tr></template>
+          </tbody></table>
+        </div>
+        <div class="text-center mt-3"><button class="btn btn-outline-secondary" x-show="moreSessions" @click="loadSessions(false)">Load older</button></div>
+      </section>
+    </template>
+
+    <template x-if="route === 'analytics-users'">
+      <section x-data="analyticsPage('users')">
+        <div class="page-head"><h1>User-wise analytics</h1><p>Activity for signed-in users — every admin session today; public visitors once customer accounts exist.</p></div>
+        <div class="mb-3 d-flex flex-wrap gap-2 align-items-end">
+          <div><label class="form-label small" for="an-surface-4">Surface</label><select id="an-surface-4" class="form-select" x-model="surface" @change="load()"><option value="admin">Admin panel</option><option value="public">Public site</option></select></div>
+          <div><label class="form-label small" for="an-from-4">From</label><input id="an-from-4" type="date" class="form-control" x-model="from" @change="load()"></div>
+          <div><label class="form-label small" for="an-to-4">To</label><input id="an-to-4" type="date" class="form-control" x-model="to" @change="load()"></div>
+        </div>
+        <div class="panel">
+          <div class="empty" x-show="!users.length">No signed-in activity yet.</div>
+          <table class="table" x-show="users.length"><thead><tr><th>User</th><th>Sessions</th><th>Page views</th><th>Last seen</th></tr></thead><tbody>
+            <template x-for="u in users" :key="u.userId"><tr>
+              <td><div x-text="u.name || ('user #' + u.userId)"></div><div class="muted small" x-text="u.email"></div></td>
+              <td x-text="u.sessions"></td>
+              <td x-text="u.pageviews"></td>
+              <td class="muted text-nowrap" x-text="ago(u.lastSeen)" :title="new Date(u.lastSeen).toLocaleString()"></td>
+            </tr></template>
+          </tbody></table>
+        </div>
       </section>
     </template>
 
@@ -442,7 +630,7 @@
             <label class="form-label" for="ev-name">Event name</label>
             <input id="ev-name" class="form-control mono" placeholder="orders.created" x-model="fireName">
             <label class="form-label mt-2" for="ev-payload">Payload (JSON)</label>
-            <textarea id="ev-payload" class="form-control mono" rows="6" spellcheck="false" x-model="firePayload"></textarea>
+            <textarea id="ev-payload" class="form-control mono" rows="6" spellcheck="false" x-codejar="{ mode: 'application/json', get: firePayload, set: (v) => (firePayload = v) }"></textarea>
             <div class="alert alert-danger mt-2" role="alert" x-show="fireError" x-text="fireError"></div>
             <button type="button" class="btn btn-primary mt-2" :disabled="fireBusy || !fireName.trim()" @click="fire()">Fire</button>
           </div>
@@ -519,7 +707,7 @@
                   <div class="panel p-3 mb-3">
                     <div class="panel-h">Payload</div>
                     <div class="help small muted mb-2">Sent as the delivery's <code>payload</code>, merged under the real event's own data (the event's fields win). Also what "Send test" sends when set.</div>
-                    <textarea class="form-control mono" rows="6" spellcheck="false" x-model="payloadText"></textarea>
+                    <textarea class="form-control mono" rows="6" spellcheck="false" x-codejar="{ mode: 'application/json', get: payloadText, set: (v) => (payloadText = v) }"></textarea>
                   </div>
 
                   <div class="panel p-3 mb-3" x-show="!isNew">
@@ -543,6 +731,129 @@
               <div class="savebar" x-show="loaded">
                 <span class="ms-auto"></span>
                 <button class="btn btn-primary" type="button" :disabled="busy" @click="save()" x-text="isNew ? 'Create webhook' : 'Save webhook'"></button>
+              </div>
+            </section>
+          </template>
+
+        </div></template>
+      </div>
+    </template>
+
+    <!-- Automation: Scheduler -->
+    <template x-if="route === 'scheduler'">
+      <div>
+        <template x-for="v in schedulerViews" :key="v.key"><div>
+
+          <template x-if="v.kind === 'list'">
+            <section x-data="schedulerList">
+              <div class="page-head d-flex justify-content-between align-items-end flex-wrap gap-2">
+                <div><h1>Scheduler</h1><p>Run a saved Service or fire a Webhook automatically, on an interval or a cron schedule.</p></div>
+                <a class="btn btn-primary" x-show="can('scheduler.write')" href="#/scheduler/new">New task</a>
+              </div>
+              <div class="panel">
+                <div class="empty" x-show="loaded && !tasks.length">No scheduled tasks yet.</div>
+                <table class="table" x-show="tasks.length"><thead><tr><th>Name</th><th>Runs</th><th>Schedule</th><th>Last run</th><th></th><th></th></tr></thead><tbody>
+                  <template x-for="t in tasks" :key="t.id"><tr>
+                    <td x-text="t.name"></td>
+                    <td class="muted small" x-text="(t.kind === 'service' ? 'Service: ' : 'Webhook: ') + t.target"></td>
+                    <td class="mono small" x-text="describe(t)"></td>
+                    <td class="muted small">
+                      <span x-show="!t.lastRunAt">Never</span>
+                      <span x-show="t.lastRunAt"><span class="tag" :class="t.lastStatus === 'ok' ? 'ok' : 'warn'" x-text="t.lastStatus"></span> <span x-text="ago(t.lastRunAt)"></span></span>
+                    </td>
+                    <td><span class="tag" :class="t.enabled ? 'ok' : 'warn'" x-text="t.enabled ? 'Enabled' : 'Disabled'"></span></td>
+                    <td class="text-end text-nowrap">
+                      <button class="btn btn-sm btn-outline-secondary" type="button" x-show="can('scheduler.write')" @click="runNow(t)">Run now</button>
+                      <a class="btn btn-sm btn-outline-secondary" :href="'#/scheduler/' + t.id">Edit</a>
+                      <button class="btn btn-sm btn-outline-danger" type="button" x-show="can('scheduler.write')" @click="remove(t)">Delete</button>
+                    </td>
+                  </tr></template>
+                </tbody></table>
+              </div>
+            </section>
+          </template>
+
+          <template x-if="v.kind === 'edit'">
+            <section x-data="schedulerEditor(v.id)">
+              <div class="page-head d-flex justify-content-between align-items-end flex-wrap gap-2">
+                <div><h1 x-text="isNew ? 'New scheduled task' : name"></h1></div>
+                <a href="#/scheduler" class="btn btn-outline-secondary">Back to Scheduler</a>
+              </div>
+              <div class="alert alert-danger" role="alert" x-show="error" x-text="error"></div>
+              <div class="row g-3" x-show="loaded">
+                <div class="col-lg-7">
+                  <div class="panel p-3 mb-3">
+                    <div class="row g-2">
+                      <div class="col-md-6"><label class="form-label" for="sc-name">Name</label><input id="sc-name" class="form-control" maxlength="200" x-model="name"></div>
+                      <div class="col-md-6"><div class="form-check mt-4"><input id="sc-enabled" class="form-check-input" type="checkbox" x-model="enabled"><label class="form-check-label small" for="sc-enabled">Enabled</label></div></div>
+                    </div>
+                    <div class="row g-2 mt-1">
+                      <div class="col-md-4"><label class="form-label" for="sc-kind">What to run</label>
+                        <select id="sc-kind" class="form-select" x-model="kind" @change="target = ''"><option value="service">A Service</option><option value="webhook">A Webhook</option></select>
+                      </div>
+                      <div class="col-md-8">
+                        <label class="form-label" for="sc-target">Target</label>
+                        <template x-if="kind === 'service'">
+                          <select id="sc-target" class="form-select" x-model="target"><option value="">Choose a Service&hellip;</option><template x-for="s in services" :key="s.slug"><option :value="s.slug" x-text="s.name + ' (' + s.slug + ')'"></option></template></select>
+                        </template>
+                        <template x-if="kind === 'webhook'">
+                          <select id="sc-target" class="form-select" x-model="target"><option value="">Choose a webhook&hellip;</option><template x-for="w in webhooks" :key="w.id"><option :value="String(w.id)" x-text="w.name"></option></template></select>
+                        </template>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="panel p-3 mb-3">
+                    <div class="panel-h">Schedule</div>
+                    <div class="btn-group d-flex mb-3" role="group" aria-label="Schedule type">
+                      <input type="radio" class="btn-check" id="sc-type-interval" value="interval" x-model="scheduleType" autocomplete="off">
+                      <label class="btn btn-outline-secondary" for="sc-type-interval">Interval</label>
+                      <input type="radio" class="btn-check" id="sc-type-cron" value="cron" x-model="scheduleType" autocomplete="off">
+                      <label class="btn btn-outline-secondary" for="sc-type-cron">Cron expression</label>
+                    </div>
+                    <template x-if="scheduleType === 'interval'">
+                      <div class="row g-2 align-items-end">
+                        <div class="col-4"><label class="form-label" for="sc-every-value">Every</label><input id="sc-every-value" type="number" min="1" class="form-control" x-model.number="everyValue"></div>
+                        <div class="col-4"><select class="form-select" aria-label="Unit" x-model="everyUnit"><option value="minutes">Minutes</option><option value="hours">Hours</option><option value="days">Days</option></select></div>
+                      </div>
+                      <div class="help small muted mt-1">At least a minute &mdash; this runs real work, not a cheap check.</div>
+                    </template>
+                    <template x-if="scheduleType === 'cron'">
+                      <div>
+                        <label class="form-label" for="sc-cron">Cron expression</label>
+                        <input id="sc-cron" class="form-control mono" placeholder="0 * * * *" x-model="cronExpr" @input="updateCronPreview()">
+                        <div class="alert alert-danger mt-2 py-2" role="alert" x-show="cronError" x-text="cronError"></div>
+                        <div class="help small muted mt-1" x-show="cronPreview.length">
+                          Next runs: <template x-for="(t, i) in cronPreview" :key="i"><span x-text="new Date(t).toLocaleString() + (i < cronPreview.length - 1 ? '; ' : '')"></span></template>
+                        </div>
+                      </div>
+                    </template>
+                  </div>
+
+                  <div class="panel p-3 mb-3">
+                    <div class="panel-h">Parameters</div>
+                    <div class="help small muted mb-2">For a Service: its query parameters. For a Webhook: merged into the delivery's payload. A JSON object; leave as <code>{}</code> for none.</div>
+                    <textarea class="form-control mono" rows="5" spellcheck="false" x-codejar="{ mode: 'application/json', get: paramsText, set: (v) => (paramsText = v) }"></textarea>
+                  </div>
+
+                  <div class="panel p-3 mb-3" x-show="!isNew">
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                      <div class="panel-h mb-0">Last run</div>
+                      <button type="button" class="btn btn-sm btn-outline-secondary" :disabled="runBusy" @click="runNow()">Run now</button>
+                    </div>
+                    <div class="empty small" x-show="!lastRunAt">Never run yet.</div>
+                    <div x-show="lastRunAt">
+                      <span class="tag" :class="lastStatus === 'ok' ? 'ok' : 'warn'" x-text="lastStatus"></span>
+                      <span class="muted small" x-text="lastRunAt ? ago(lastRunAt) : ''"></span>
+                      <div class="alert alert-danger mt-2 py-2" role="alert" x-show="lastError" x-text="lastError"></div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="savebar" x-show="loaded">
+                <span class="ms-auto"></span>
+                <button class="btn btn-primary" type="button" :disabled="busy" @click="save()" x-text="isNew ? 'Create task' : 'Save task'"></button>
               </div>
             </section>
           </template>
@@ -634,7 +945,7 @@
                               <template x-if="b.type === 'header'"><div class="d-flex gap-2"><input class="form-control" aria-label="Heading text" placeholder="Heading" maxlength="500" x-model="b.data.text"><select class="form-select" style="max-width:6rem" aria-label="Heading level" x-model.number="b.data.level"><option value="1">H1</option><option value="2">H2</option><option value="3">H3</option><option value="4">H4</option></select></div></template>
                               <template x-if="b.type === 'list'"><div><select class="form-select mb-1" style="max-width:12rem" aria-label="List style" x-model="b.data.style"><option value="unordered">Bulleted</option><option value="ordered">Numbered</option></select><textarea class="form-control" rows="4" aria-label="List items" placeholder="One item per line" :value="blockLines(b)" @input="setBlockLines(b, $event.target.value)"></textarea></div></template>
                               <template x-if="b.type === 'quote'"><div><textarea class="form-control mb-1" rows="3" aria-label="Quote" placeholder="Quote" x-model="b.data.text"></textarea><input class="form-control" aria-label="Who said it" placeholder="Who said it (optional)" x-model="b.data.caption"></div></template>
-                              <template x-if="b.type === 'code'"><textarea class="form-control mono" rows="6" aria-label="Code" x-model="b.data.code"></textarea></template>
+                              <template x-if="b.type === 'code'"><textarea class="form-control mono" rows="6" aria-label="Code" x-codejar="{ get: b.data.code, set: (v) => (b.data.code = v) }"></textarea></template>
                               <template x-if="b.type === 'delimiter'"><hr class="my-2"></template>
                               <template x-if="b.type === 'image'">
                                 <div class="d-flex gap-3 flex-wrap">
@@ -754,6 +1065,31 @@
             </div>
           </div></template>
         </div>
+      </section>
+    </template>
+
+    <!-- Content activity: create/edit/publish/delete across content, pages, components, translations, media, menus, redirects, SEO rules -->
+    <template x-if="route === 'content-activity'">
+      <section x-data="contentActivityPage">
+        <div class="page-head d-flex justify-content-between align-items-end flex-wrap gap-2">
+          <div><h1>Activity</h1><p>Who created, edited, published, restored or deleted a page, entry or file. Security events (sign-ins, settings, webhooks) are in the Audit log.</p></div>
+          <a class="btn btn-outline-secondary" :href="exportUrl" download>Export CSV</a>
+        </div>
+        <div class="mb-3 d-flex flex-wrap gap-2 align-items-end">
+          <div><label class="form-label small" for="ca-actor">Actor email</label><input id="ca-actor" class="form-control" style="max-width:16rem" placeholder="e.g. you@example.com" x-model="actorEmail" @input.debounce.400ms="load(true)"></div>
+          <div><label class="form-label small" for="ca-from">From</label><input id="ca-from" type="date" class="form-control" x-model="from" @change="load(true)"></div>
+          <div><label class="form-label small" for="ca-to">To</label><input id="ca-to" type="date" class="form-control" x-model="to" @change="load(true)"></div>
+          <button type="button" class="btn btn-link" x-show="actorEmail || from || to" @click="clearFilters()">Clear filters</button>
+        </div>
+        <div class="panel">
+          <div class="empty" x-show="!entries.length">No content activity yet.</div>
+          <table class="table" x-show="entries.length"><thead><tr><th>What happened</th><th>By</th><th>When</th></tr></thead><tbody>
+            <template x-for="e in entries" :key="e.id"><tr>
+              <td class="small"><span x-html="detail(e)"></span></td>
+              <td x-text="e.actor"></td>
+              <td class="muted text-nowrap" x-text="ago(e.at)" :title="new Date(e.at).toLocaleString()"></td></tr></template></tbody></table>
+        </div>
+        <div class="text-center mt-3"><button class="btn btn-outline-secondary" x-show="more" @click="load(false)">Load older</button></div>
       </section>
     </template>
 
@@ -907,7 +1243,7 @@
                       </div>
                     </template>
                     <template x-if="mode === 'code'">
-                      <textarea class="form-control mono" rows="16" spellcheck="false" x-model="code"></textarea>
+                      <textarea class="form-control mono" rows="16" spellcheck="false" x-codejar="{ mode: 'htmlmixed', get: code, set: (v) => (code = v) }"></textarea>
                     </template>
                   </div>
                 </div>
@@ -924,7 +1260,7 @@
                       </template>
                     </div>
                     <div class="alert alert-danger m-2" role="alert" x-show="preview.error" x-text="preview.error"></div>
-                    <iframe title="Page preview" style="width:100%;height:70vh;border:0;border-top:1px solid var(--line)" sandbox="" :srcdoc="preview.html"></iframe>
+                    <iframe title="Page preview" style="width:100%;height:70vh;border:0;border-top:1px solid var(--line)" sandbox="allow-same-origin" :srcdoc="preview.html"></iframe>
                   </div>
                 </div>
               </div>
@@ -1028,11 +1364,12 @@
 
                   <div class="panel p-3 mb-3">
                     <label class="form-label" for="c-template">Template (HTML + Liquid)</label>
-                    <textarea id="c-template" class="form-control mono" rows="14" spellcheck="false" x-model="template"></textarea>
+                    <textarea id="c-template" class="form-control mono" rows="14" spellcheck="false" x-codejar="{ mode: 'htmlmixed', get: template, set: (v) => (template = v) }"></textarea>
+                    <div class="help small muted mt-1">A <span class="mono">&lt;script&gt;</span> tag is allowed here and runs on the live page (it is not sandboxed — the same trust level as a script Service); the live preview does not run it, since the preview frame never runs scripts.</div>
                   </div>
                   <div class="panel p-3 mb-3">
                     <label class="form-label" for="c-css">Scoped CSS</label>
-                    <textarea id="c-css" class="form-control mono" rows="8" spellcheck="false" x-model="css"></textarea>
+                    <textarea id="c-css" class="form-control mono" rows="8" spellcheck="false" x-codejar="{ mode: 'css', get: css, set: (v) => (css = v) }"></textarea>
                   </div>
                 </div>
 
@@ -1044,7 +1381,7 @@
                     </div>
                     <div class="help small muted p-2" x-show="props.length">Shown with each property at its default value above.</div>
                     <div class="alert alert-danger m-2" role="alert" x-show="preview.error" x-text="preview.error"></div>
-                    <iframe title="Component preview" style="width:100%;height:60vh;border:0;border-top:1px solid var(--line)" sandbox="" :srcdoc="preview.html"></iframe>
+                    <iframe title="Component preview" style="width:100%;height:60vh;border:0;border-top:1px solid var(--line)" sandbox="allow-same-origin" :srcdoc="preview.html"></iframe>
                   </div>
                 </div>
               </div>
@@ -1226,7 +1563,7 @@
                     <template x-if="mode === 'script'">
                       <div>
                         <label class="form-label" for="sc-code">Script</label>
-                        <textarea id="sc-code" class="form-control mono" rows="14" spellcheck="false" placeholder="const rows = await ctx.db('entries').where({ type: 'post' }).limit(5);&#10;return { rows };" x-model="scCode"></textarea>
+                        <textarea id="sc-code" class="form-control mono" rows="14" spellcheck="false" x-codejar="{ mode: 'javascript', get: scCode, set: (v) => (scCode = v), placeholder: &quot;const rows = await ctx.db('entries').where({ type: 'post' }).limit(5);\nreturn { rows };&quot; }"></textarea>
                         <div class="help small muted mt-1">Complete, <strong>unsandboxed</strong> Node.js — the same trust level as shell access to this server. The code becomes an <code>async (req, ctx) =&gt; { … }</code> function: <code>req.query</code> is the request's query string; <code>ctx</code> is the entire platform (database, settings — including secrets, email, everything). Whatever it <code>return</code>s is the response body. A timeout stops the site from WAITING on it, but cannot stop code that's already running.</div>
                       </div>
                     </template>
@@ -1234,7 +1571,7 @@
                     <template x-if="mode === 'sql'">
                       <div>
                         <label class="form-label" for="s-sql">SQL (read-only SELECT, named :params)</label>
-                        <textarea id="s-sql" class="form-control mono" rows="8" spellcheck="false" placeholder="select title, published_at from entries where type = :type order by published_at desc" x-model="sSql"></textarea>
+                        <textarea id="s-sql" class="form-control mono" rows="8" spellcheck="false" x-codejar="{ mode: 'text/x-sql', get: sSql, set: (v) => (sSql = v), placeholder: 'select title, published_at from entries where type = :type order by published_at desc' }"></textarea>
                         <div class="help small muted mt-1">This runs against your live database, in the dialect it is written for. Only a single SELECT/WITH statement, read-only. Write your own LIMIT — results are also capped by the setting below.</div>
 
                         <div class="d-flex justify-content-between align-items-center mt-3 mb-2"><label class="form-label mb-0">Parameters</label><button type="button" class="btn btn-sm btn-outline-secondary" @click="addParam()">Add parameter</button></div>
@@ -1381,7 +1718,7 @@
                   <div class="panel p-3 mb-3">
                     <div class="panel-h">Extra structured data (JSON-LD)</div>
                     <div class="help small muted mb-2">Added alongside what the page already emits — a FAQPage or HowTo block for answer engines, a Product/Review schema, anything <a href="https://schema.org" target="_blank" rel="noopener">schema.org</a> defines. A JSON array of objects; leave as <code>[]</code> for none.</div>
-                    <textarea class="form-control mono" rows="8" spellcheck="false" x-model="ldJsonText"></textarea>
+                    <textarea class="form-control mono" rows="8" spellcheck="false" x-codejar="{ mode: 'application/json', get: ldJsonText, set: (v) => (ldJsonText = v) }"></textarea>
                   </div>
                 </div>
               </div>
@@ -1407,7 +1744,10 @@
             <div class="node" style="grid-template-columns: 1fr auto">
               <div><strong x-text="t.name"></strong> <span class="tag" x-text="'v' + t.version"></span> <span class="tag ok" x-show="t.active">Live</span> <span class="tag" x-show="t.source === 'disk'">Built in</span>
                 <div class="muted small" x-text="t.description"></div><div class="muted small" x-show="t.author" x-text="'By ' + t.author"></div></div>
-              <div class="text-nowrap"><a class="btn btn-sm btn-outline-secondary" x-show="t.hasSettings && can('settings.read')" :href="'#/settings/' + t.settingsNamespace">Theme settings</a>
+              <div class="text-nowrap"><a class="btn btn-sm btn-outline-secondary" :href="'#/customize/' + t.id">Customize</a>
+                <a class="btn btn-sm btn-outline-secondary" :href="'#/theme-editor/' + t.id" x-text="t.source === 'db' && can('themes.edit') ? 'Edit files' : 'View files'"></a>
+                <button class="btn btn-sm btn-outline-secondary" x-show="can('themes.manage')" @click="duplicate(t)">Duplicate</button>
+                <a class="btn btn-sm btn-outline-secondary" :href="'/api/admin/themes/' + t.id + '/export'">Export .zip</a>
                 <button class="btn btn-sm btn-primary" x-show="!t.active && can('themes.manage')" @click="activate(t)">Make live</button>
                 <button class="btn btn-sm btn-outline-danger" x-show="!t.active && t.source === 'db' && can('themes.manage')" @click="remove(t)">Remove</button></div>
             </div>
@@ -1418,6 +1758,116 @@
           <div class="muted small mb-2" x-text="'Upload a .zip (up to ' + maxZipMb + ' MB). It is checked before anything is saved: file types, paths, sizes and every template. ' + (allowJs ? 'Scripts are allowed.' : 'Themes with JavaScript are refused.')"></div>
           <label class="btn btn-outline-secondary mb-0" :class="{disabled: busy}">Choose a .zip <input type="file" hidden accept=".zip,application/zip" @change="upload($event.target.files[0]); $event.target.value = ''"></label>
           <span class="muted small ms-2" x-show="busy">Checking and installing…</span>
+        </div>
+      </section>
+    </template>
+
+    <!-- Customize (Appearance → Customize): the theme's options and custom CSS, with a live preview -->
+    <template x-if="route === 'customize'">
+      <section x-data="customizePage">
+        <div class="page-head d-flex justify-content-between align-items-end flex-wrap gap-2">
+          <div><h1>Customize</h1><p>Change the theme’s options and add your own CSS. The preview updates as you type; visitors see nothing until you save.</p></div>
+          <div class="d-flex gap-2 align-items-center">
+            <label class="small muted" for="cz-theme">Theme</label>
+            <select id="cz-theme" class="form-select" style="max-width:14rem" @change="open($event.target.value)"><template x-for="t in themes" :key="t.id"><option :value="t.id" :selected="t.id === id" x-text="t.name + (t.active ? ' (live)' : '')"></option></template></select>
+          </div>
+        </div>
+        <div class="alert alert-danger" role="alert" x-show="error" x-text="error"></div>
+        <div class="alert alert-info small" x-show="theme && !theme.active">This theme isn’t live. What you save here applies when it is made live under Appearance → Themes.</div>
+        <div class="row g-3" x-show="loaded">
+          <div class="col-lg-5">
+            <div class="panel">
+              <div class="panel-h">Options</div>
+              <div class="empty" x-show="!optionFields.length">This theme has no options of its own.</div>
+              <template x-for="f in optionFields" :key="f.key">
+                <div class="p-3 border-bottom">
+                  <label class="form-label fw-semibold mb-1" :for="'cz_' + f.key" x-text="f.label"></label>
+                  <template x-if="f.type === 'string'"><input :id="'cz_' + f.key" class="form-control" :class="{'is-invalid': errors[f.key]}" :value="values[f.key]" @input="set(f.key, $event.target.value)"></template>
+                  <template x-if="f.type === 'text'"><textarea :id="'cz_' + f.key" rows="3" class="form-control" :value="values[f.key]" @input="set(f.key, $event.target.value)"></textarea></template>
+                  <template x-if="f.type === 'number'"><input :id="'cz_' + f.key" type="number" class="form-control" style="max-width:10rem" :value="values[f.key]" :min="f.min" :max="f.max" @input="set(f.key, $event.target.value === '' ? '' : Number($event.target.value))"></template>
+                  <template x-if="f.type === 'boolean'"><div class="form-check form-switch"><input :id="'cz_' + f.key" type="checkbox" class="form-check-input" role="switch" :checked="values[f.key]" @change="set(f.key, $event.target.checked)"><label class="form-check-label muted" :for="'cz_' + f.key" x-text="values[f.key] ? 'On' : 'Off'"></label></div></template>
+                  <template x-if="f.type === 'select'"><select :id="'cz_' + f.key" class="form-select" @change="set(f.key, $event.target.value)"><template x-for="o in f.options" :key="o.value"><option :value="o.value" :selected="o.value === values[f.key]" x-text="o.label"></option></template></select></template>
+                  <div class="form-text" x-show="f.help" x-text="f.help"></div>
+                  <div class="invalid-feedback d-block" x-show="errors[f.key]" x-text="errors[f.key]"></div>
+                </div>
+              </template>
+            </div>
+            <div class="panel mt-3">
+              <div class="panel-h">Custom CSS <span class="muted small fw-normal">Added after the theme’s styles on every page</span></div>
+              <div class="p-3">
+                <textarea id="cz-css" class="form-control mono" rows="14" spellcheck="false" aria-label="Custom CSS" x-codejar="{ mode: 'css', get: values.custom_css, set: (v) => set('custom_css', v), placeholder: ':root { --accent: #c0392b; }\n.site-header { border-bottom: 3px solid var(--accent); }' }"></textarea>
+                <div class="invalid-feedback d-block" x-show="errors.custom_css" x-text="errors.custom_css"></div>
+                <div class="form-text">Tip: themes keep colours and spacing in CSS variables (<span class="mono">--accent</span>, <span class="mono">--ink</span>, <span class="mono">--bg</span>…), so changing one restyles the whole site. Fonts and icon sets: install them under System → Libraries.</div>
+              </div>
+            </div>
+            <div class="d-flex gap-2 mt-3 align-items-center" x-show="can('themes.customize')">
+              <button class="btn btn-primary" :disabled="saving || !dirty" @click="save()" x-text="saving ? 'Saving…' : 'Save changes'"></button>
+              <button class="btn btn-outline-secondary" :disabled="!dirty" @click="discard()">Discard</button>
+              <span class="muted small" x-show="dirty">Unsaved changes</span>
+            </div>
+          </div>
+          <div class="col-lg-7">
+            <div class="panel">
+              <div class="panel-h d-flex gap-2 align-items-center flex-wrap">
+                <span>Preview</span>
+                <input class="form-control form-control-sm mono" style="max-width:16rem" aria-label="Preview address" x-model="previewPath" @keydown.enter.prevent="refresh()">
+                <button type="button" class="btn btn-sm btn-outline-secondary" @click="refresh()">Show</button>
+                <span class="muted small" x-show="previewing">Rendering…</span>
+                <span class="text-danger small" x-show="previewError" x-text="previewError"></span>
+              </div>
+              <!-- allow-same-origin and nothing else: scripts, forms and popups stay off, but the frame keeps the site's origin, so
+                   theme/library/media files (served with Cross-Origin-Resource-Policy: same-origin) load. An empty sandbox gives
+                   the frame a "null" origin and the browser blocks every one of them, leaving the preview unstyled. -->
+              <iframe title="Theme preview" style="width:100%;height:75vh;border:0;border-top:1px solid var(--line)" sandbox="allow-same-origin" :srcdoc="previewHtml"></iframe>
+            </div>
+          </div>
+        </div>
+      </section>
+    </template>
+
+    <!-- Theme editor (Appearance → Theme editor): the files of an installed theme; built-in themes are read-only -->
+    <template x-if="route === 'theme-editor'">
+      <section x-data="themeEditorPage">
+        <div class="page-head d-flex justify-content-between align-items-end flex-wrap gap-2">
+          <div><h1>Theme editor</h1><p>Edit a theme’s layouts, components, styles and wording. Every save is checked like an upload, so a mistake is refused instead of reaching visitors.</p></div>
+          <div class="d-flex gap-2 align-items-center flex-wrap">
+            <label class="small muted" for="te-theme">Theme</label>
+            <select id="te-theme" class="form-select" style="max-width:14rem" @change="open($event.target.value)"><template x-for="t in themes" :key="t.id"><option :value="t.id" :selected="t.id === id" x-text="t.name + (t.source === 'disk' ? ' (built in)' : '')"></option></template></select>
+            <a class="btn btn-outline-secondary" :href="'/api/admin/themes/' + id + '/export'" x-show="id">Export .zip</a>
+          </div>
+        </div>
+        <div class="alert alert-danger" role="alert" x-show="error" x-text="error"></div>
+        <div class="alert alert-warning d-flex gap-2 align-items-center flex-wrap" x-show="loaded && !editable">
+          <span>Built-in themes ship read-only with the code, so an edit would be lost on the next update. Duplicate it to get a copy you can edit.</span>
+          <button class="btn btn-sm btn-primary ms-auto" x-show="can('themes.manage')" @click="duplicate()">Duplicate this theme</button>
+        </div>
+        <div class="row g-3" x-show="loaded">
+          <div class="col-lg-3">
+            <div class="panel">
+              <div class="panel-h">Files</div>
+              <div class="te-files">
+                <template x-for="f in files" :key="f.path">
+                  <button type="button" class="te-file" :class="{active: f.path === path}" @click="select(f.path)"><span class="mono small" x-text="f.path"></span><span class="muted small" x-text="bytes(f.size)"></span></button>
+                </template>
+              </div>
+              <div class="p-2 border-top" x-show="editable && can('themes.edit')">
+                <form class="d-flex gap-1" @submit.prevent="create()"><input class="form-control form-control-sm mono" aria-label="New file path" placeholder="components/banner.html" x-model="newPath"><button class="btn btn-sm btn-outline-secondary">Add</button></form>
+                <label class="btn btn-sm btn-outline-secondary w-100 mt-2 mb-0">Upload image or font to assets/<input type="file" hidden accept=".png,.jpg,.jpeg,.gif,.webp,.avif,.ico,.svg,.woff,.woff2,.ttf" @change="upload($event.target.files[0]); $event.target.value = ''"></label>
+              </div>
+            </div>
+          </div>
+          <div class="col-lg-9">
+            <div class="panel" x-show="path">
+              <div class="panel-h d-flex gap-2 align-items-center flex-wrap"><span class="mono" x-text="path"></span><span class="tag warn" x-show="dirty">Unsaved</span>
+                <span class="ms-auto"></span>
+                <button class="btn btn-sm btn-outline-danger" x-show="editable && can('themes.edit') && !required" @click="del()">Delete file</button>
+                <button class="btn btn-sm btn-primary" x-show="editable && can('themes.edit') && file && file.text" :disabled="saving || !dirty" @click="save()" x-text="saving ? 'Checking and saving…' : 'Save file'"></button>
+              </div>
+              <template x-if="file && file.text"><textarea id="te-content" class="form-control mono border-0 rounded-0" rows="28" spellcheck="false" aria-label="File content" x-codejar="{ mode: /\.css$/.test(path) ? 'css' : /\.js$/.test(path) ? 'javascript' : /\.json$/.test(path) ? 'application/json' : 'htmlmixed', get: content, set: (v) => (content = v), readOnly: !editable || !can('themes.edit') }"></textarea></template>
+              <div class="p-3 muted" x-show="file && !file.text">A binary file (<span x-text="bytes(file?.size || 0)"></span>). Reach it from a template with <span class="mono" x-text="`{{ '${path.replace(/^assets\//, '')}' | asset_url }}`"></span>.</div>
+            </div>
+            <div class="panel p-4 muted" x-show="!path">Choose a file on the left.</div>
+          </div>
         </div>
       </section>
     </template>
@@ -1646,7 +2096,7 @@
           <div class="row g-3">
             <div class="col-lg-8">
               <label class="form-label" for="dbms-sql">SQL</label>
-              <textarea id="dbms-sql" class="form-control mono" rows="8" spellcheck="false" x-model="sql"></textarea>
+              <textarea id="dbms-sql" class="form-control mono" rows="8" spellcheck="false" x-codejar="{ mode: 'text/x-sql', get: sql, set: (v) => (sql = v) }"></textarea>
               <div class="d-flex gap-2 align-items-center mt-2">
                 <button class="btn btn-primary" type="button" :disabled="consoleBusy || !sql.trim()" @click="runQuery()">Run</button>
                 <input class="form-control form-control-sm" style="max-width:16rem" aria-label="Name this query to save it" placeholder="Save as…" x-model="newQueryName" @keydown.enter.prevent="saveCurrentQuery()">
@@ -1678,6 +2128,165 @@
             </div>
           </div>
         </template>
+      </section>
+    </template>
+
+    <!-- Sitemap (System → Sitemap, D-053) -->
+    <template x-if="route === 'sitemap'">
+      <section x-data="sitemapPage">
+        <div class="page-head d-flex justify-content-between align-items-end flex-wrap gap-2">
+          <div><h1>Sitemap</h1><p>The list of addresses search engines read at /sitemap.xml. It is built from your site and content, and rebuilt whenever they change.</p></div>
+          <div class="d-flex gap-2 flex-wrap">
+            <a class="btn btn-outline-secondary" :href="sum.publicUrl" target="_blank" rel="noopener" x-show="sum.enabled">Open sitemap.xml</a>
+            <a class="btn btn-outline-secondary" href="/api/admin/sitemap/download">Download</a>
+            <button class="btn btn-outline-secondary" x-show="can('sitemap.manage')" :disabled="busy" @click="rebuild()">Rebuild now</button>
+          </div>
+        </div>
+        <div class="alert alert-danger" role="alert" x-show="error" x-text="error"></div>
+        <div class="alert alert-warning" x-show="sum.noindex">This site asks search engines not to index it (Settings → Website), so /sitemap.xml isn’t published.</div>
+        <div class="row g-3 mb-3" x-show="loaded">
+          <div class="col-6 col-md-3"><div class="panel p-3"><div class="muted small">Addresses</div><div class="fs-3 fw-semibold" id="sm-total" x-text="sum.total"></div></div></div>
+          <div class="col-6 col-md-3"><div class="panel p-3"><div class="muted small">Files</div><div class="fs-3 fw-semibold" x-text="sum.files"></div><div class="muted small" x-text="sum.files > 1 ? 'An index of ' + sum.files + ' parts' : 'One file'"></div></div></div>
+          <div class="col-6 col-md-3"><div class="panel p-3"><div class="muted small">With images</div><div class="fs-3 fw-semibold" x-text="sum.withImages"></div></div></div>
+          <div class="col-6 col-md-3"><div class="panel p-3"><div class="muted small">Built</div><div class="fs-5 fw-semibold" x-text="sum.generatedAt ? ago(sum.generatedAt) : '–'"></div><div class="muted small" x-show="sum.skipped" x-text="sum.skipped + ' left out by rules'"></div></div></div>
+        </div>
+        <div class="row g-3" x-show="loaded">
+          <div class="col-lg-5">
+            <div class="panel">
+              <div class="panel-h">What it lists</div>
+              <div class="p-3">
+                <div class="form-check form-switch mb-2"><input id="sm-enabled" class="form-check-input" type="checkbox" role="switch" x-model="enabled" :disabled="!can('sitemap.manage')"><label class="form-check-label fw-semibold" for="sm-enabled">Publish sitemap.xml</label></div>
+                <template x-for="o in toggles" :key="o.key">
+                  <div class="form-check mb-1"><input :id="'sm-' + o.key" class="form-check-input" type="checkbox" x-model="v[o.key]" :disabled="!can('sitemap.manage')"><label class="form-check-label" :for="'sm-' + o.key" x-text="o.label"></label></div>
+                </template>
+                <div class="mt-3" x-show="types.length">
+                  <div class="small fw-semibold mb-1">Content types to list</div>
+                  <template x-for="t in types" :key="t.id">
+                    <div class="form-check form-check-inline"><input :id="'sm-type-' + t.id" class="form-check-input" type="checkbox" :checked="!v.exclude_types.includes(t.id)" :disabled="!can('sitemap.manage')" @change="toggleType(t.id, $event.target.checked)"><label class="form-check-label" :for="'sm-type-' + t.id" x-text="t.plural || t.label || t.id"></label></div>
+                  </template>
+                </div>
+                <div class="row g-2 mt-2">
+                  <div class="col-6"><label class="form-label small" for="sm-freq">How often pages change</label><select id="sm-freq" class="form-select" x-model="v.default_changefreq" :disabled="!can('sitemap.manage')"><option value="">Don’t say</option><template x-for="f in freqs" :key="f"><option :value="f" x-text="f"></option></template></select></div>
+                  <div class="col-6"><label class="form-label small" for="sm-prio">Priority</label><select id="sm-prio" class="form-select" x-model="v.default_priority" :disabled="!can('sitemap.manage')"><option value="">Don’t say</option><template x-for="p in prios" :key="p"><option :value="p" x-text="p"></option></template></select></div>
+                  <div class="col-6"><label class="form-label small" for="sm-per">Addresses per file</label><input id="sm-per" type="number" min="100" max="50000" class="form-control" x-model.number="v.per_file" :disabled="!can('sitemap.manage')"></div>
+                </div>
+                <div class="form-text">Google ignores “how often” and “priority”; other search engines may read them.</div>
+              </div>
+            </div>
+            <div class="panel mt-3">
+              <div class="panel-h">Rules <span class="muted small fw-normal">The first rule that matches an address wins. * matches one part of the address, ** any number.</span></div>
+              <div class="empty" x-show="!v.rules.length">No rules: every address is listed with the defaults.</div>
+              <template x-for="(r, i) in v.rules" :key="i">
+                <div class="p-2 border-bottom d-flex gap-1 flex-wrap align-items-center">
+                  <input class="form-control form-control-sm mono" style="max-width:11rem" aria-label="Address pattern" placeholder="/blog/**" x-model="r.pattern" :disabled="!can('sitemap.manage')">
+                  <select class="form-select form-select-sm" style="max-width:7.5rem" aria-label="What to do" :value="r.exclude ? 'exclude' : 'list'" @change="r.exclude = $event.target.value === 'exclude'" :disabled="!can('sitemap.manage')"><option value="list">List</option><option value="exclude">Leave out</option></select>
+                  <select class="form-select form-select-sm" style="max-width:7.5rem" aria-label="How often it changes" x-show="!r.exclude" x-model="r.changefreq" :disabled="!can('sitemap.manage')"><option value="">Default</option><template x-for="f in freqs" :key="f"><option :value="f" x-text="f"></option></template></select>
+                  <select class="form-select form-select-sm" style="max-width:6rem" aria-label="Priority" x-show="!r.exclude" x-model="r.priority" :disabled="!can('sitemap.manage')"><option value="">Default</option><template x-for="p in prios" :key="p"><option :value="p" x-text="p"></option></template></select>
+                  <button type="button" class="btn btn-sm btn-link text-danger" x-show="can('sitemap.manage')" @click="v.rules.splice(i, 1)" aria-label="Remove rule"><i class="bi bi-x-lg"></i></button>
+                </div>
+              </template>
+              <div class="p-2" x-show="can('sitemap.manage')"><button type="button" class="btn btn-sm btn-outline-secondary" @click="v.rules.push({pattern: '', exclude: false, changefreq: '', priority: ''})">Add rule</button></div>
+            </div>
+            <div class="panel mt-3">
+              <div class="panel-h">Extra addresses</div>
+              <div class="p-3"><textarea id="sm-extra" rows="3" class="form-control mono" placeholder="/landing/spring&#10;/downloads" aria-label="Extra addresses, one per line" :value="v.extra_urls.join('\n')" @input="v.extra_urls = $event.target.value.split('\n').map((x) => x.trim()).filter(Boolean)" :disabled="!can('sitemap.manage')"></textarea><div class="form-text">Addresses on this site that the sitemap wouldn’t find on its own, one per line.</div></div>
+            </div>
+            <div class="d-flex gap-2 mt-3 align-items-center" x-show="can('sitemap.manage')">
+              <button class="btn btn-primary" :disabled="busy" @click="save()" x-text="busy ? 'Saving…' : 'Save changes'"></button>
+            </div>
+          </div>
+          <div class="col-lg-7">
+            <div class="panel">
+              <div class="panel-h d-flex gap-2 align-items-center flex-wrap"><span>Addresses</span>
+                <template x-for="(n, src) in sum.bySource" :key="src"><span class="tag" x-text="label(src) + ': ' + n"></span></template>
+                <input class="form-control form-control-sm ms-auto" style="max-width:12rem" aria-label="Filter addresses" placeholder="Filter" x-model="q" @input.debounce.300ms="load(0)">
+              </div>
+              <div class="empty" x-show="!sum.urls?.length">Nothing listed<span x-show="q"> matches that filter</span>.</div>
+              <table class="table table-sm" x-show="sum.urls?.length"><thead><tr><th>Address</th><th>From</th><th>Changed</th><th>Hints</th></tr></thead><tbody>
+                <template x-for="u in sum.urls" :key="u.path"><tr>
+                  <td class="mono small"><a :href="u.loc" target="_blank" rel="noopener" x-text="u.path"></a> <i class="bi bi-image muted" x-show="u.image" title="Has an image"></i></td>
+                  <td class="small muted" x-text="label(u.source)"></td>
+                  <td class="small muted" x-text="u.lastmod ? new Date(u.lastmod).toLocaleDateString() : '–'"></td>
+                  <td class="small muted" x-text="[u.changefreq, u.priority !== null ? u.priority.toFixed(1) : ''].filter(Boolean).join(' · ') || '–'"></td>
+                </tr></template></tbody></table>
+              <div class="p-2 d-flex gap-2 align-items-center" x-show="sum.matching > 100">
+                <button class="btn btn-sm btn-outline-secondary" :disabled="offset === 0" @click="load(Math.max(0, offset - 100))">Previous</button>
+                <span class="muted small" x-text="(offset + 1) + '–' + Math.min(offset + 100, sum.matching) + ' of ' + sum.matching"></span>
+                <button class="btn btn-sm btn-outline-secondary" :disabled="offset + 100 >= sum.matching" @click="load(offset + 100)">Next</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </template>
+
+    <!-- Libraries (System → Libraries, D-054) -->
+    <template x-if="route === 'libraries'">
+      <section x-data="librariesPage">
+        <div class="page-head d-flex justify-content-between align-items-end flex-wrap gap-2">
+          <div><h1>Libraries</h1><p>Add npm packages to your site — icon sets, fonts, CSS frameworks. Each server keeps its own copy, checked against the package’s published hash.</p></div>
+          <div class="d-flex gap-2 flex-wrap">
+            <a class="btn btn-outline-secondary" href="/api/admin/libraries/export">Export list</a>
+            <label class="btn btn-outline-secondary mb-0" x-show="can('libraries.manage')" :class="{disabled: busy}">Import list<input type="file" hidden accept=".json,application/json" @change="importList($event.target.files[0]); $event.target.value = ''"></label>
+          </div>
+        </div>
+        <div class="alert alert-danger" role="alert" x-show="error" x-text="error"></div>
+        <div class="alert alert-info small" x-show="loaded && !allowScripts">Library JavaScript is off, so only stylesheets, fonts and images are served. To use a package’s scripts, turn on “Let libraries add JavaScript” under Settings → Libraries.</div>
+        <div class="alert alert-success small" x-show="report" x-text="report"></div>
+        <div class="panel mb-3 p-3" x-show="can('libraries.manage')">
+          <div class="fw-semibold mb-2">Add a package</div>
+          <form class="d-flex gap-2 flex-wrap align-items-center" @submit.prevent="search()">
+            <input id="lib-q" class="form-control" style="max-width:18rem" aria-label="Search packages" placeholder="Search npm, e.g. font awesome" x-model="q">
+            <button class="btn btn-outline-secondary" :disabled="busy">Search</button>
+            <span class="mx-1 muted">or</span>
+            <input id="lib-name" class="form-control mono" style="max-width:16rem" aria-label="Package name" placeholder="@fortawesome/fontawesome-free" x-model="name">
+            <input id="lib-version" class="form-control mono" style="max-width:7rem" aria-label="Version" placeholder="latest" x-model="version">
+            <button type="button" class="btn btn-primary" :disabled="busy || !name" @click="install(name, version || 'latest')" x-text="busy ? 'Installing…' : 'Install'"></button>
+            <div class="form-check ms-2"><input id="lib-autoload" class="form-check-input" type="checkbox" x-model="autoload"><label class="form-check-label" for="lib-autoload">Load on every page</label></div>
+          </form>
+          <table class="table table-sm mt-3 mb-0" x-show="results.length"><tbody>
+            <template x-for="p in results" :key="p.name"><tr>
+              <td><span class="mono fw-semibold" x-text="p.name"></span> <span class="muted small" x-text="p.version"></span><div class="muted small" x-text="p.description"></div></td>
+              <td class="text-end text-nowrap"><span class="tag ok" x-show="p.installed" x-text="'Installed ' + p.installed"></span> <button class="btn btn-sm btn-outline-primary" :disabled="busy" @click="install(p.name, 'latest')" x-text="p.installed ? 'Install latest' : 'Install'"></button></td>
+            </tr></template></tbody></table>
+        </div>
+        <div class="panel">
+          <div class="panel-h">Installed</div>
+          <div class="empty" x-show="loaded && !libraries.length">No libraries yet.</div>
+          <table class="table" x-show="libraries.length"><thead><tr><th>Package</th><th>Loads on every page</th><th>Size</th><th></th></tr></thead><tbody>
+            <template x-for="l in libraries" :key="l.name"><tr>
+              <td><span class="mono fw-semibold" x-text="l.name"></span> <span class="tag" x-text="l.version"></span> <span class="muted small" x-show="l.license" x-text="l.license"></span>
+                <div class="muted small" x-text="l.description"></div></td>
+              <td><div class="form-check form-switch mb-0"><input class="form-check-input" type="checkbox" role="switch" :aria-label="'Load ' + l.name + ' on every page'" :checked="l.autoload" :disabled="!can('libraries.manage')" @change="setAutoload(l, $event.target.checked)"></div>
+                <div class="muted small mono" x-text="l.include.join(', ') || 'No files chosen'"></div></td>
+              <td class="muted small text-nowrap" x-text="bytes(l.unpackedSize) + ' · ' + l.fileCount + ' files'"></td>
+              <td class="text-end text-nowrap">
+                <button class="btn btn-sm btn-outline-secondary" @click="configure(l)">Files</button>
+                <button class="btn btn-sm btn-outline-secondary" x-show="can('libraries.manage')" :disabled="busy" @click="install(l.name, 'latest')">Update</button>
+                <button class="btn btn-sm btn-outline-danger" x-show="can('libraries.manage')" @click="remove(l)">Remove</button>
+              </td>
+            </tr></template></tbody></table>
+        </div>
+        <div class="panel mt-3" x-show="current">
+          <div class="panel-h d-flex gap-2 align-items-center flex-wrap"><span>Files of <span class="mono" x-text="current?.name"></span></span>
+            <input class="form-control form-control-sm ms-auto" style="max-width:14rem" aria-label="Filter files" placeholder="Filter, e.g. .min.css" x-model="fileFilter">
+            <button type="button" class="btn btn-sm btn-outline-secondary" @click="current = null">Close</button>
+          </div>
+          <div class="p-3 small">In a template: <span class="mono" x-text="snippet"></span></div>
+          <div class="lib-files">
+            <template x-for="f in shownFiles" :key="f.path">
+              <div class="d-flex gap-2 align-items-center px-3 py-1 border-top">
+                <input type="checkbox" class="form-check-input" :id="'lf-' + f.path" :checked="picked.includes(f.path)" :disabled="!can('libraries.manage') || !loadable(f.path)" @change="pick(f.path, $event.target.checked)">
+                <label class="mono small flex-grow-1 mb-0" :for="'lf-' + f.path" x-text="f.path"></label>
+                <span class="muted small" x-text="bytes(f.size)"></span>
+              </div>
+            </template>
+          </div>
+          <div class="p-3 d-flex gap-2 align-items-center" x-show="can('libraries.manage')">
+            <button class="btn btn-primary" :disabled="busy" @click="saveFiles()">Save chosen files</button>
+            <span class="muted small">Ticked stylesheets and scripts load on every page, in this order, when the library is set to load.</span>
+          </div>
+        </div>
       </section>
     </template>
 

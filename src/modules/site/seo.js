@@ -55,23 +55,6 @@ export function buildHead(p) {
   return new Safe(tags.filter(Boolean).join('\n  '));
 }
 
-const xml = (s) =>
-  String(s).replace(
-    /[<>&'"]/g,
-    (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', "'": '&apos;', '"': '&quot;' })[c],
-  );
-
-/** @param {{loc: string, lastmod?: number|null}[]} urls */
-export function sitemapXml(urls) {
-  const body = urls
-    .map(
-      (u) =>
-        `  <url><loc>${xml(u.loc)}</loc>${u.lastmod ? `<lastmod>${new Date(u.lastmod).toISOString()}</lastmod>` : ''}</url>`,
-    )
-    .join('\n');
-  return `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${body}\n</urlset>\n`;
-}
-
 export function robotsTxt({ noindex, extra, siteUrl, sitemap }) {
   const lines = ['User-agent: *'];
   if (noindex) lines.push('Disallow: /');

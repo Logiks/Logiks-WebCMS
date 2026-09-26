@@ -123,4 +123,15 @@ describe('Events: permissions', () => {
 
     assert.equal((await reader.get('/api/admin/events')).status, 200);
   });
+
+  test('firing a test event is audited (it can trigger real webhooks, D-050)', async () => {
+    const writer = await mkUser(
+      ['admin.access', 'events.read', 'events.write'],
+      'events-audited@example.com',
+    );
+    await writer.post('/api/admin/events/fire').send({ name: 'ui.audited_fire', payload: {} });
+    const entries = await node.ctx.audit.list({ action: 'events.fired', limit: 5 });
+    assert.ok(entries.some((e) => e.entityId === 'ui.audited_fire'));
+    assert.equal(entries[0].actor, 'events-audited@example.com');
+  });
 });

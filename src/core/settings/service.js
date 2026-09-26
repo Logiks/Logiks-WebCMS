@@ -471,6 +471,7 @@ export class SettingsService {
         options: f.options ?? null,
         min: f.min ?? null,
         max: f.max ?? null,
+        media: !!f.media,
         secret: !!f.secret,
         required: !!f.required,
         restartRequired: !!f.restartRequired,

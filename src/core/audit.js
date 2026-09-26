@@ -6,6 +6,39 @@ import { now } from './db/index.js';
  * @param {{db: import('knex').Knex, log: import('pino').Logger}} deps
  */
 export function createAudit({ db, log }) {
+  /**
+   * Shared WHERE clauses for `list` and `export`. `from`/`to` are epoch-ms, inclusive. `actions` (a fixed,
+   * code-supplied list of prefixes, e.g. Content Activity's own view) is OR'd; `action` (one prefix, the general
+   * Audit log's free-text filter) stays a separate, simpler param so that screen's behaviour doesn't change.
+   * @param {{before?: number|string, action?: string, actions?: string[], actorEmail?: string, from?: number|string, to?: number|string}} [f]
+   */
+  function filtered({ before, action, actions, actorEmail, from, to } = {}) {
+    const q = db('audit_logs').orderBy('id', 'desc');
+    if (before) q.where('id', '<', Number(before));
+    if (action) q.where('action', 'like', `${action}%`);
+    if (actions?.length)
+      q.where((qb) => {
+        for (const a of actions) qb.orWhere('action', 'like', `${a}%`);
+      });
+    if (actorEmail) q.where('actor_email', actorEmail);
+    if (from) q.where('created_at', '>=', Number(from));
+    if (to) q.where('created_at', '<=', Number(to));
+    return q;
+  }
+
+  function toRow(r) {
+    return {
+      id: Number(r.id),
+      actor: r.actor_email ?? (r.actor_id ? `user #${r.actor_id}` : 'system'),
+      action: r.action,
+      entity: r.entity,
+      entityId: r.entity_id,
+      meta: r.meta ? JSON.parse(r.meta) : null,
+      ip: r.ip,
+      at: Number(r.created_at),
+    };
+  }
+
   return {
     /**
      * @param {{actor?: {id?:number,email?:string,ip?:string}|null, action: string, entity?: string, entityId?: string|number, meta?: object, ip?: string}} e
@@ -30,24 +63,19 @@ export function createAudit({ db, log }) {
       }
     },
 
-    /** @param {{limit?: number|string, before?: number|string, action?: string, actorEmail?: string}} [f] */
-    async list({ limit = 50, before, action, actorEmail } = {}) {
-      const q = db('audit_logs')
-        .orderBy('id', 'desc')
-        .limit(Math.min(Number(limit) || 50, 200));
-      if (before) q.where('id', '<', Number(before));
-      if (action) q.where('action', 'like', `${action}%`);
-      if (actorEmail) q.where('actor_email', actorEmail);
-      return (await q).map((r) => ({
-        id: Number(r.id),
-        actor: r.actor_email ?? (r.actor_id ? `user #${r.actor_id}` : 'system'),
-        action: r.action,
-        entity: r.entity,
-        entityId: r.entity_id,
-        meta: r.meta ? JSON.parse(r.meta) : null,
-        ip: r.ip,
-        at: Number(r.created_at),
-      }));
+    /**
+     * @param {{limit?: number|string, before?: number|string, action?: string, actions?: string[], actorEmail?: string,
+     *   from?: number|string, to?: number|string}} [f]
+     */
+    async list(f = {}) {
+      const rows = await filtered(f).limit(Math.min(Number(f.limit) || 50, 200));
+      return rows.map(toRow);
+    },
+
+    /** Same filters as `list`, without the small page size — capped instead at a flat 20,000 rows. */
+    async export(f = {}) {
+      const rows = await filtered(f).limit(20_000);
+      return rows.map(toRow);
     },
 
     /** Delete entries older than `days` (0 = keep forever). Returns rows deleted. */

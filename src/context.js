@@ -30,12 +30,16 @@ import { createDbms } from './modules/dbms/service.js';
 import { createSeo } from './modules/seo/service.js';
 import { createEvents } from './modules/events/service.js';
 import { createWebhooks, registerWebhookJobs } from './modules/webhooks/service.js';
+import { createScheduler, registerSchedulerJobs } from './modules/scheduler/service.js';
 import { createSearchService } from './modules/search/service.js';
 import { createSiteService } from './modules/site/service.js';
 import { createSiteFiles } from './modules/site/files.js';
 import { createSitePages } from './modules/site/sitepages.js';
 import { createPublicData } from './modules/site/data.js';
 import { createI18n } from './modules/site/i18n.js';
+import { createSitemap, defineSitemapSettings } from './modules/sitemap/service.js';
+import { createLibraries, defineLibrariesSettings } from './modules/libraries/service.js';
+import { createAnalyticsService } from './modules/analytics/service.js';
 
 const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
 
@@ -69,6 +73,8 @@ export async function createContext({ env, bus: busOverride, log: logOverride, a
 
   const registry = createRegistry();
   defineCoreSettings(registry);
+  defineSitemapSettings(registry);
+  defineLibrariesSettings(registry);
   const permissions = createPermissions();
   defineCorePermissions(permissions);
 
@@ -129,6 +135,18 @@ export async function createContext({ env, bus: busOverride, log: logOverride, a
   jobs.schedule('events.prune', { everyMs: 24 * 3600_000 });
   jobs.schedule('webhooks.prune_deliveries', { everyMs: 24 * 3600_000 });
 
+  // Activity/analytics (D-056): every record() call is queued (never inline), so a cached page's p95 never waits
+  // on a write here — the same "queue it" principle as email (D-014) and webhook delivery (D-050).
+  const analytics = createAnalyticsService({ db, dialect: dialect(db) });
+  jobs.define('analytics.record', async (data) => {
+    await analytics.record(data);
+  });
+  jobs.define('analytics.prune', async () => {
+    const n = await analytics.prune(settings.get('analytics.retention_days'));
+    if (n) log.info({ deleted: n }, 'old activity data pruned');
+  });
+  jobs.schedule('analytics.prune', { everyMs: 24 * 3600_000 });
+
   const updates = createUpdatesService({
     env,
     db,
@@ -142,7 +160,15 @@ export async function createContext({ env, bus: busOverride, log: logOverride, a
   });
   await updates.start();
 
-  permissions.define('Content', { 'content.terms.manage': 'Manage categories and tags' });
+  permissions.define('Content', {
+    'content.terms.manage': 'Manage categories and tags',
+    // Deliberately separate from audit.read (System, administrator-tier): an editor/author who has no business
+    // seeing security-sensitive audit rows (logins, settings, webhooks…) can still see who created, edited,
+    // published, restored or deleted a page, entry or piece of media — the same audit_logs data, filtered to
+    // content-authoring actions only.
+    'content.activity':
+      'View content and page activity (who created, edited, published or deleted something)',
+  });
   const contentRegistry = createContentRegistry({ permissions });
   defineCoreContent(contentRegistry);
   const content = Object.assign(
@@ -212,6 +238,8 @@ export async function createContext({ env, bus: busOverride, log: logOverride, a
     defaultsDir: fileURLToPath(new URL('../site/defaults', import.meta.url)),
   });
   await siteFiles.start();
+  const libraries = createLibraries({ env, db, settings, bus, audit, cache, log });
+  await libraries.start();
   const dbms = createDbms({ db, dialect: dialect(db), audit });
   const seo = createSeo({ db, dialect: dialect(db), cache, audit });
   const search = createSearchService({ db, dialect: dialect(db), content, log });
@@ -231,11 +259,16 @@ export async function createContext({ env, bus: busOverride, log: logOverride, a
     log,
     pages: () => ctx.sitePages, // addresses come from the site tree; the context is complete by the time this is called
   });
-  // Site identity, theme choice and theme settings appear on every page, so a change to any of them refreshes every cached page.
+  // Site identity, theme choice and theme settings (incl. custom CSS) appear on every page, and so do library tags (whether
+  // library scripts are allowed), so a change to any of them refreshes every cached page.
   settings.onChange('*', (_next, _prev, ns) => {
-    if (['general', 'site', 'seo', 'content', 'features'].includes(ns) || ns.startsWith('theme_'))
+    if (
+      ['general', 'site', 'seo', 'content', 'features', 'libraries', 'analytics'].includes(ns) ||
+      ns.startsWith('theme_')
+    )
       return cache.invalidate(['site']);
   });
+  settings.onChange('sitemap', () => cache.invalidate(['sitemap']));
   jobs.define('content.publish_due', async () => {
     await content.publishDue();
   });
@@ -269,10 +302,12 @@ export async function createContext({ env, bus: busOverride, log: logOverride, a
     storage,
     themes,
     siteFiles,
+    libraries,
     dbms,
     seo,
     events,
     webhooks,
+    analytics,
     search,
     site,
     metrics,
@@ -282,6 +317,7 @@ export async function createContext({ env, bus: busOverride, log: logOverride, a
       settings.stop();
       updates.stop();
       themes.stop();
+      libraries.stop();
       await siteFiles.stop();
       await nodes.stop();
       await jobs.close();
@@ -298,8 +334,22 @@ export async function createContext({ env, bus: busOverride, log: logOverride, a
   // Passed the whole ctx (not destructured deps) because a script Service (D-046) gets the full platform context
   // at RUN time, well after every one of these is finished — by construction time it only needs `content`.
   ctx.services = createServices(ctx);
+  // Also needs the finished ctx: it runs an existing Service (ctx.services) or fires a Webhook (ctx.webhooks) on
+  // an admin-editable schedule (D-051) built on ctx.jobs.reschedule()/unschedule().
+  ctx.scheduler = createScheduler(ctx);
+  registerSchedulerJobs(ctx);
+  await ctx.scheduler.reloadAll();
   ctx.publicData = createPublicData(ctx);
   ctx.sitePages = createSitePages(ctx);
+  ctx.sitemap = createSitemap({
+    settings,
+    content,
+    cache,
+    db,
+    audit,
+    site,
+    pages: () => ctx.sitePages,
+  });
   metrics.bind(ctx);
   return ctx;
 }

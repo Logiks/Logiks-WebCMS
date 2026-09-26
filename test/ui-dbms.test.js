@@ -26,13 +26,12 @@ const check = (el) => {
 };
 const page = () => b.$('section[x-data="dbmsPage"]');
 
-test('Database is in the menu, under the renamed System group', async () => {
+test('Database is in the menu, under the System group', async () => {
   b.go('#/overview');
   const navText = () =>
     `${b.$$('nav a, aside a, nav button, aside button').map((a) => a.textContent.trim())}`;
   await wait(() => /Database/.test(navText()));
   assert.match(navText(), /System/);
-  assert.doesNotMatch(navText(), /\bAppearance\b/);
 });
 
 test('sensitive tables are hidden from the table list', async () => {

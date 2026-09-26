@@ -152,3 +152,26 @@ test('connection test runs against draft values without saving', async () => {
   assert.match(r.message, /host/i);
   assert.equal(s.get('mail.host'), '');
 });
+
+test('login page branding: defaults, the media hint reaches the API view, and custom CSS is checked', async () => {
+  assert.equal(s.get('login.logo'), 0);
+  assert.equal(s.get('login.background_type'), 'default');
+  assert.equal(s.describe('login').fields.find((f) => f.key === 'logo').media, true);
+  assert.equal(s.describe('login').fields.find((f) => f.key === 'welcome_heading').media, false);
+  for (const css of [
+    'a{}</style><script>alert(1)</script>',
+    '@import url(https://evil.example/x.css);',
+    'a{background:url(javascript:alert(1))}',
+    'a{behavior:url(x.htc)}',
+  ]) {
+    await assert.rejects(
+      s.update('login', { values: { custom_css: css } }),
+      (e) => e.status === 422,
+      css,
+    );
+  }
+  await s.update('login', {
+    values: { welcome_heading: 'Welcome back', custom_css: '.login-side{opacity:.9}' },
+  });
+  assert.equal(s.get('login.welcome_heading'), 'Welcome back');
+});

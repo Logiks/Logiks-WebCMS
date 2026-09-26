@@ -44,13 +44,18 @@ export function createSearchService({ db, dialect, content, log }) {
     return parts.filter(Boolean).join('\n');
   };
 
-  async function remove(entryId) {
-    await db('search_index').where({ entry_id: entryId }).del();
+  /**
+   * `remove`/`put`/`reindex` all take an optional `conn` (a transaction), defaulting to `db`. `reindex` passes its
+   * own transaction through every `put`, so the delete-then-rebuild-one-row-at-a-time it does is invisible to a
+   * concurrent search as a whole: nothing sees the index half-emptied mid-rebuild (D-033 follow-up — see below).
+   */
+  async function remove(entryId, conn = db) {
+    await conn('search_index').where({ entry_id: entryId }).del();
     if (dialect.kind === 'sqlite')
-      await db.raw('DELETE FROM search_fts WHERE rowid = ?', [entryId]);
+      await conn.raw('DELETE FROM search_fts WHERE rowid = ?', [entryId]);
   }
 
-  async function put(entry) {
+  async function put(entry, conn = db) {
     if (!content.registry.has(entry.type)) return;
     const body = searchableText(entry);
     const row = {
@@ -61,7 +66,7 @@ export function createSearchService({ db, dialect, content, log }) {
       body,
       updated_at: now(),
     };
-    await db.transaction(async (trx) => {
+    const write = async (trx) => {
       await trx('search_index').where({ entry_id: entry.id }).del();
       await trx('search_index').insert(row);
       if (dialect.kind === 'sqlite') {
@@ -72,7 +77,10 @@ export function createSearchService({ db, dialect, content, log }) {
           body,
         ]);
       }
-    });
+    };
+    // Already inside reindex's own transaction: run in it directly rather than opening a nested one.
+    if (conn === db) await db.transaction(write);
+    else await write(conn);
   }
 
   const svc = {
@@ -84,16 +92,27 @@ export function createSearchService({ db, dialect, content, log }) {
       });
     },
 
+    /**
+     * Rebuilds the whole index in ONE transaction (found the hard way, docs/DECISIONS.md D-033): doing the
+     * delete-all and the per-entry re-inserts as separate statements let a `/search` request running on another
+     * connection, at the exact moment reindexing was mid-flight, see the table emptied but not yet refilled — real
+     * on MySQL/PostgreSQL (each write is a genuine round trip, giving the event loop room to interleave a
+     * concurrent request in between them); effectively never on SQLite, whose synchronous driver runs the whole
+     * loop before anything else gets a turn, which is exactly why this only ever showed up against MySQL.
+     * The read (`eachPublished`, on the plain `db`) happens BEFORE the transaction opens, not inside it: SQLite's
+     * pool is one connection, and a query issued on `db` from inside a `trx` callback would wait forever for a
+     * connection the transaction itself is holding — a real deadlock hit while building this.
+     */
     async reindex() {
-      let n = 0;
-      await db('search_index').del();
-      if (dialect.kind === 'sqlite') await db.raw('DELETE FROM search_fts');
-      await content.eachPublished(async (e) => {
-        await put(e);
-        n++;
+      const entries = [];
+      await content.eachPublished(async (e) => entries.push(e));
+      await db.transaction(async (trx) => {
+        await trx('search_index').del();
+        if (dialect.kind === 'sqlite') await trx.raw('DELETE FROM search_fts');
+        for (const e of entries) await put(e, trx);
       });
-      log.info({ entries: n }, 'search index rebuilt');
-      return n;
+      log.info({ entries: entries.length }, 'search index rebuilt');
+      return entries.length;
     },
 
     /** @returns {Promise<{results: any[], total: number}>} */

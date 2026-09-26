@@ -80,7 +80,7 @@ test('the built-in default theme is available, active, and its settings appear o
   assert.equal(s.title, 'Theme: Default');
   assert.deepEqual(
     s.fields.map((f) => f.key),
-    ['accent_color', 'show_dates', 'footer_text'],
+    ['accent_color', 'show_dates', 'footer_text', 'custom_css'], // every theme gets custom_css (Appearance → Customize)
   );
   assert.equal(
     (
@@ -472,11 +472,13 @@ test('the site-tree anatomy is checked at install: layouts and components are co
     /components\/top\.html: @import/,
     'component css',
   );
-  await refused(
-    zipOf({ ...site(), 'components/top.html': '<script>alert(1)</script>' }),
-    /components\/top\.html: This component contains a <script>/,
-    'component script',
+  // a theme component is a component: it can carry a <script> too (D-055), same as a site component
+  const withScript = await install(
+    admin,
+    zipOf({ ...site(), 'components/top.html': '<script>alert(1)</script><p>x</p>' }),
   );
+  assert.equal(withScript.status, 201, JSON.stringify(withScript.body));
+  assert.equal((await admin.delete('/api/admin/themes/sitey')).status, 204);
   await refused(
     zipOf({ ...site(), 'layouts/nope.html': 'x'.repeat(301 * 1024) }),
     /too large/,

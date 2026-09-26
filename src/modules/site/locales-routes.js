@@ -13,7 +13,7 @@ const body = z.object({
 });
 
 /**
- * Translations for the CMS screen (Appearance → Translations). The site's language files live in the site tree (locales/<code>.json),
+ * Translations for the CMS screen (System → Translations). The site's language files live in the site tree (locales/<code>.json),
  * so the files API can read and write them too; this adds the merged view an editor needs: for one language, every string
  * the site or its theme has, what the default language says (the reference), what the theme says, and what the site overrides.
  * Saving stores only the editor's overrides (locales/<code>.json in the site tree); the strings that ship with the code (site/locales) and the

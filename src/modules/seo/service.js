@@ -141,7 +141,13 @@ export function createSeo(ctx) {
         },
         'id',
       );
-      await audit.log({ actor, action: 'seo.rule_created', entity: 'seo_rule', entityId: id });
+      await audit.log({
+        actor,
+        action: 'seo.rule_created',
+        entity: 'seo_rule',
+        entityId: id,
+        meta: { pattern: defn.pattern },
+      });
       await invalidate();
       return svc.get(id);
     },
@@ -165,7 +171,13 @@ export function createSeo(ctx) {
       await db('seo_rules')
         .where({ id: Number(id) })
         .update({ ...toColumns(defn), updated_by: actor?.id ?? null, updated_at: now() });
-      await audit.log({ actor, action: 'seo.rule_updated', entity: 'seo_rule', entityId: id });
+      await audit.log({
+        actor,
+        action: 'seo.rule_updated',
+        entity: 'seo_rule',
+        entityId: id,
+        meta: { pattern: defn.pattern },
+      });
       await invalidate();
       return svc.get(id);
     },
@@ -178,7 +190,13 @@ export function createSeo(ctx) {
       await db('seo_rules')
         .where({ id: Number(id) })
         .del();
-      await audit.log({ actor, action: 'seo.rule_deleted', entity: 'seo_rule', entityId: id });
+      await audit.log({
+        actor,
+        action: 'seo.rule_deleted',
+        entity: 'seo_rule',
+        entityId: id,
+        meta: { pattern: existing.pattern },
+      });
       await invalidate();
     },
 

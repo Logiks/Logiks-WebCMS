@@ -64,6 +64,15 @@ export function createLimiters(ctx) {
       store: store('cms:rl:services:'),
       handler: handler('Too many requests. Try again in a minute.'),
     }),
+    /** The public click/exit beacon — cheap, but still worth a floor per address. */
+    analytics: rateLimit({
+      windowMs: 60_000,
+      limit: () => ctx.settings.get('security.analytics_rate_limit_per_minute'),
+      standardHeaders: 'draft-7',
+      legacyHeaders: false,
+      store: store('cms:rl:analytics:'),
+      handler: (_req, res) => res.status(429).end(),
+    }),
     login: rateLimit({
       windowMs: 15 * 60_000,
       limit: () => ctx.settings.get('security.login_rate_limit_per_15min'),

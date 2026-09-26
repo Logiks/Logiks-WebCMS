@@ -77,7 +77,10 @@ export function defineCorePermissions(permissions) {
   });
   permissions.define('Appearance', {
     'themes.read': 'View themes',
-    'themes.manage': 'Install, switch and remove themes',
+    'themes.manage': 'Install, switch, duplicate and remove themes',
+    // Theme templates and CSS reach every visitor: like pages.write/components.write, an administrator-level permission.
+    'themes.edit': 'Edit the files of installed themes (templates, styles, scripts)',
+    'themes.customize': 'Change theme options and custom CSS',
     'menus.manage': 'Edit navigation menus',
     'redirects.manage': 'Manage redirects',
     'site.messages': 'Read contact form messages',
@@ -85,6 +88,8 @@ export function defineCorePermissions(permissions) {
   permissions.define('SEO', {
     'seo.read': 'View SEO Manager rules',
     'seo.write': 'Create, edit and delete SEO Manager rules',
+    'sitemap.read': 'View the sitemap and its settings',
+    'sitemap.manage': 'Change what the sitemap lists, and rebuild it',
   });
   permissions.define('Automation', {
     'events.read': 'View the events log',
@@ -93,6 +98,14 @@ export function defineCorePermissions(permissions) {
     'events.write': 'Fire a test event',
     'webhooks.read': 'View webhooks',
     'webhooks.write': 'Create, edit and delete webhooks',
+    'scheduler.read': 'View scheduled tasks',
+    // A scheduled task runs an existing Service or fires a Webhook automatically and unattended, so creating one
+    // is as powerful as whatever it targets already allows — same "automation, not a new capability" reasoning
+    // Services and Webhooks already rely on.
+    'scheduler.write': 'Create, edit and delete scheduled tasks',
+  });
+  permissions.define('Analytics', {
+    'analytics.read': 'View site and admin activity: page views, sessions and user activity',
   });
   permissions.define('Database', {
     'dbms.read': 'Browse database tables, their data and structure',
@@ -108,5 +121,8 @@ export function defineCorePermissions(permissions) {
     'jobs.manage': 'Retry or discard failed background jobs',
     'system.update': 'Check for and install application updates (git pull)',
     'system.restart': 'Restart servers',
+    'libraries.read': 'View installed libraries (npm packages)',
+    // A library's files are served on the site's own address and can be added to every page: administrator-level.
+    'libraries.manage': 'Install, configure and remove libraries (npm packages)',
   });
 }

@@ -12,6 +12,15 @@
   --amber-bg: #fdf3d9;
   --moss: #2f7d57;
   --brick: #b3392f;
+  /* Analytics charts only — a categorical set validated for CVD-safe adjacent pairs and a light-surface contrast
+     floor (dataviz skill's six checks; --moss alone reads slightly gray for a chart fill, so charts get their own
+     brighter step rather than changing that token's other, unrelated uses). Assigned in this fixed order, never
+     cycled: series/category 1, 2, 3, 4; --chart-other is outside the rotation, for a residual "Other/Unknown" bucket. */
+  --chart-1: #2b59c3;
+  --chart-2: #1a9c5c;
+  --chart-3: #b97a00;
+  --chart-4: #b3392f;
+  --chart-other: #5d7076;
   --bs-primary: #2b59c3;
   --bs-primary-rgb: 43, 89, 195;
   --bs-body-font-family: 'IBM Plex Sans', system-ui, sans-serif;
@@ -59,6 +68,38 @@ body {
 }
 .form-control.is-invalid {
   background-image: none;
+}
+
+/* ── code editor (CodeJar + Prism.js, dropped over a plain textarea by the x-codejar directive) ──
+   CodeJar sets its own inline white-space/overflow/outline on the element; this only covers look, not layout. */
+.codejar {
+  display: block;
+  max-height: 60vh;
+  tab-size: 2;
+}
+.codejar:empty::before {
+  content: attr(data-placeholder);
+  color: var(--muted);
+}
+.token.comment {
+  color: var(--muted);
+}
+.token.string,
+.token.attr-value {
+  color: var(--moss);
+}
+.token.keyword,
+.token.important {
+  color: var(--cobalt);
+}
+.token.tag,
+.token.property,
+.token.function {
+  color: #7a3e9d;
+}
+.token.number,
+.token.boolean {
+  color: var(--amber);
 }
 
 /* ── shell ── */
@@ -467,6 +508,12 @@ body {
   flex-direction: column;
   justify-content: flex-end;
 }
+.login-logo {
+  max-width: 10rem;
+  max-height: 3.5rem;
+  object-fit: contain;
+  margin-bottom: 1.5rem;
+}
 .login-side h1 {
   font-size: 2.1rem;
   font-weight: 600;
@@ -682,4 +729,124 @@ body {
   .sticky-side {
     position: static;
   }
+}
+
+/* Appearance → Theme editor / System → Libraries: long, scrollable file lists */
+.te-files,
+.lib-files {
+  max-height: 60vh;
+  overflow-y: auto;
+}
+.te-file {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.3rem 0.75rem;
+  border: 0;
+  background: none;
+  text-align: left;
+  color: inherit;
+}
+.te-file:hover {
+  background: var(--paper);
+}
+.te-file.active {
+  background: var(--paper);
+  box-shadow: inset 3px 0 0 var(--cobalt);
+  font-weight: 600;
+}
+#te-content,
+#cz-css {
+  font-size: 0.85rem;
+  tab-size: 2;
+}
+
+/* ── Analytics: charts (dataviz skill — thin marks, recessive grid, hover crosshair) ── */
+.chart-svg {
+  width: 100%;
+  height: 220px;
+  overflow: visible;
+}
+.chart-line {
+  fill: none;
+  stroke-width: 2;
+}
+.chart-crosshair {
+  stroke: var(--line);
+  stroke-width: 1;
+}
+.chart-dot {
+  stroke: var(--surface);
+  stroke-width: 2;
+}
+.chart-axis-label {
+  fill: var(--muted);
+  font-size: 9px;
+  font-family: var(--mono);
+}
+.chart-tooltip-bg {
+  fill: var(--ink);
+}
+.chart-tooltip-text {
+  fill: #fff;
+  font-size: 10px;
+}
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 1.25rem;
+  font-size: 0.82rem;
+}
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  color: var(--text);
+}
+.legend-swatch {
+  width: 0.65rem;
+  height: 0.65rem;
+  border-radius: 2px;
+  flex: none;
+}
+.donut-wrap {
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+  flex-wrap: wrap;
+}
+.bar-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+.bar-list-row {
+  display: grid;
+  grid-template-columns: 8rem 1fr 3rem;
+  align-items: center;
+  gap: 0.6rem;
+  font-size: 0.85rem;
+}
+.bar-list-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bar-list-track {
+  background: var(--paper);
+  border-radius: 3px;
+  height: 0.6rem;
+  overflow: hidden;
+}
+.bar-list-fill {
+  background: var(--chart-1);
+  height: 100%;
+  border-radius: 3px;
+}
+.bar-list-value {
+  text-align: right;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 0.8rem;
 }

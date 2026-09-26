@@ -168,6 +168,14 @@ test('every save is a revision; restoring one is a new revision; old ones are pr
     (await admin.get(`/api/admin/content/entries/${e.id}/revisions`)).body.revisions[0].note,
     /Restored version 1/,
   );
+  const restoreEntry = (await node.ctx.audit.list({ action: 'content.update', limit: 5 })).find(
+    (a) => a.entityId === String(e.id) && a.meta?.note,
+  );
+  assert.match(
+    restoreEntry.meta.note,
+    /Restored version 1/,
+    'a restore is distinguishable in the audit trail, not just a plain update',
+  );
 
   await node.ctx.settings.update('content', { values: { max_revisions: 2 } });
   await admin.put(`/api/admin/content/entries/${e.id}`).send({ title: 'History 4' });

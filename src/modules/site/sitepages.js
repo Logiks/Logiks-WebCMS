@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto';
 import { HttpError } from '../../core/http/errors.js';
 import { SITE_DIRS, Safe, createEngine } from '../themes/sandbox.js';
 import { WRAPPER_CSS, compileComponent, parsePage, scopeIdsIn } from './component.js';
@@ -227,10 +228,11 @@ export function createSitePages(ctx) {
 
     /**
      * @param {{file: string, params: Record<string,string>, themeId: string, status?: number, globals: any,
-     *          overlay?: Map<string,string>,
+     *          overlay?: Map<string,string>, customCss?: string,
      *          request: {path: string, canonical: string, query: Record<string,string>, locale: string, ip?: string, previewId?: number}}} req
      *   `overlay`: draft file content to render WITHOUT saving (the page/component builder's live preview). Keyed by site-tree
      *   path (`pages/about.html`, `components/hero.html`); a path not in the tree yet is simply added for this render.
+     *   `customCss`: draft custom CSS in place of the theme's saved one (Appearance → Customize's live preview).
      * @returns {Promise<{status: number, html: string, tags: string[], entries: [number, number][], front: any, notFound: boolean, redirect?: {to: string, status: number}}>}
      */
     async render(req) {
@@ -251,6 +253,10 @@ export function createSitePages(ctx) {
             `The theme "${b.rt.id}" has no layouts/default.html, so pages can't be shown with it.`,
           );
         const seoView = { head: new Safe('') };
+        // One nonce per render, never per request: it is baked into the html (a component's <script> gets it via
+        // `{{ csp_nonce }}`, component.js's `addScriptNonce`) and cached alongside it, so a cache HIT must answer
+        // with the SAME nonce in its CSP header as the one already in that cached markup (D-055) — see `send()`.
+        const cspNonce = randomBytes(16).toString('base64');
         const globals = {
           ...req.globals,
           params: req.params,
@@ -264,6 +270,7 @@ export function createSitePages(ctx) {
             front: page.front,
           },
           seo: seoView,
+          csp_nonce: cspNonce,
           _cms: state.api,
         };
         try {
@@ -292,7 +299,8 @@ export function createSitePages(ctx) {
           );
           return {
             status,
-            html: finish(b, html),
+            html: finish(b, html, req.customCss, cspNonce),
+            cspNonce,
             tags: [...state.tags],
             entries: state.entries,
             front: page.front,
@@ -384,6 +392,8 @@ export function createSitePages(ctx) {
     });
     const filters = {
       ...rt.filters,
+      // {{ '@fortawesome/fontawesome-free/css/all.min.css' | library_url }} → that file of the installed version
+      library_url: (spec) => ctx.libraries?.url(String(spec ?? '')) ?? '',
       t: /** @this {any} */ function (key, fallback) {
         return translate(this.context.getSync(['site', 'locale']), key, fallback);
       },
@@ -658,7 +668,7 @@ export function createSitePages(ctx) {
       );
       return {
         status: 404,
-        html: finish(b, html),
+        html: finish(b, html, req.customCss),
         tags: [],
         entries: [],
         front: {},
@@ -669,16 +679,56 @@ export function createSitePages(ctx) {
     }
   }
 
-  /** Put the collected component CSS and the theme's stylesheets and scripts where the layout asked for them. */
-  function finish(b, html) {
+  /**
+   * The activity/analytics beacon (docs/DECISIONS.md D-056): clicks on `[data-track]` elements and time-on-page.
+   * Page views are recorded server-side (public.js), not here, so ad-blockers and JS-disabled visits still count —
+   * this script exists only for the signals the server can't see on its own. `cspNonce` is the SAME one minted for
+   * this render and baked into the cached markup (D-055), so a cache HIT's repeated CSP header still allows it.
+   */
+  function analyticsScript(cspNonce) {
+    if (!settings.get('analytics.enabled')) return '';
+    const trackClicks = settings.get('analytics.track_clicks');
+    const respectDnt = settings.get('analytics.respect_dnt');
+    return `<script data-cms="analytics" nonce="${cspNonce}">(function(){
+${respectDnt ? "if(navigator.doNotTrack==='1')return;" : ''}
+var t0=Date.now();
+function send(b){try{navigator.sendBeacon('/analytics/beacon',new Blob([JSON.stringify(b)],{type:'application/json'}))}catch(e){}}
+${
+  trackClicks
+    ? `document.addEventListener('click',function(e){var el=e.target.closest('[data-track]');if(!el)return;send({type:'click',path:location.pathname,label:el.getAttribute('data-track').slice(0,191)})});`
+    : ''
+}
+addEventListener('pagehide',function(){send({type:'dwell',path:location.pathname,durationMs:Date.now()-t0})});
+})();</script>`;
+  }
+
+  /**
+   * Put the collected component CSS and the theme's stylesheets and scripts where the layout asked for them. Order in
+   * <head>, lowest precedence first: library stylesheets (System → Libraries), the theme's styles, component CSS, then the
+   * theme's custom CSS (Appearance → Customize), so each layer can override the one before it. Scripts: libraries first,
+   * so a theme script can use them.
+   */
+  /** @param {string} [cspNonce] omitted only by `bareNotFound`, which has no nonce infrastructure of its own — that one fallback page gets no beacon script (page views are still counted server-side regardless, in public.js). */
+  function finish(b, html, draftCss, cspNonce) {
     const ids = scopeIdsIn(html);
     const styles = ids.length
       ? [WRAPPER_CSS, ...ids.map((id) => b.css.get(id)).filter(Boolean)].join('\n')
       : '';
-    const head = [...b.styles, styles ? `<style data-cms="components">${styles}</style>` : '']
+    const libs = ctx.libraries?.tags() ?? { head: [], foot: [] };
+    // Checked when saved (themes/package.js checkCustomCss), and again here: a value edited behind our back must still
+    // not be able to close the <style> element.
+    const custom = String(draftCss ?? settings.get(`theme_${b.rt.id}.custom_css`) ?? '').trim();
+    const head = [
+      ...libs.head,
+      ...b.styles,
+      styles ? `<style data-cms="components">${styles}</style>` : '',
+      custom && !/<\/?style/i.test(custom) ? `<style data-cms="custom-css">${custom}</style>` : '',
+    ]
       .filter(Boolean)
       .join('\n');
-    const foot = b.scripts.join('\n');
+    const foot = [...libs.foot, ...b.scripts, cspNonce ? analyticsScript(cspNonce) : '']
+      .filter(Boolean)
+      .join('\n');
     // A layout that forgot the placeholders still gets its styles and scripts, just at the ends of <head> and <body>.
     const put = (h, mark, insert, closing) =>
       h.includes(mark)

@@ -25,6 +25,8 @@ export const SENSITIVE_TABLES = new Set([
   'knex_migrations_lock',
   'dbms_saved_queries',
   'seo_rules',
+  'analytics_sessions',
+  'activity_log',
 ]);
 
 const TYPE_LABELS = {

@@ -35,6 +35,8 @@ const schema = z.object({
   MEDIA_DIR: z.string().default('./data/media'),
   // Where each server mirrors the site tree (pages/, components/). A derived copy: the database is the source of truth.
   SITE_DIR: z.string().default('./public'),
+  // Where each server unpacks the npm packages of System → Libraries. Also a derived copy (the tarballs are in the database).
+  LIBRARY_DIR: z.string().default('./data/libraries'),
   ALLOW_SINGLE_NODE: bool,
 });
 
@@ -73,6 +75,9 @@ export function loadEnv(source = process.env) {
   if (env.NODE_ENV === 'test' && !source.SITE_DIR) {
     // Tests (and the processes they spawn) must never write into the repository's own public/ folder.
     env.SITE_DIR = path.join(os.tmpdir(), 'cms-test-site', String(process.pid));
+  }
+  if (env.NODE_ENV === 'test' && !source.LIBRARY_DIR) {
+    env.LIBRARY_DIR = path.join(os.tmpdir(), 'cms-test-libraries', String(process.pid));
   }
   if (env.NODE_ENV === 'test' && !env.APP_MASTER_KEY) {
     env.APP_MASTER_KEY = 'test-only-master-key-not-a-secret-000'; // fixed, so simulated nodes agree

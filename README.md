@@ -41,6 +41,9 @@ ALB ──► web × N (ROLE=web)  ──┐
 - **Migrations are a deploy step**, not a startup side effect: `npm run migrate` (or `docker run … node src/cli/index.js migrate`).
   Production refuses to start with pending migrations. Write migrations expand/contract so old and new code can run side by side during a rolling deploy.
 - **Sessions** are in Redis (any node can serve any request; no sticky sessions). CSRF tokens are HMAC-bound to the session using the cluster-wide secret.
+- **Per-server folders are derived caches**, never shared state: `SITE_DIR` (mirror of the site tree) and `LIBRARY_DIR` (unpacked npm
+  packages from System → Libraries, default `./data/libraries`). Both rebuild themselves from the database; they need no shared volume.
+  Installing a library needs outbound HTTPS to the registry set in Settings → Libraries (npm by default) from the server handling the request.
 - **Production guard rails:** `NODE_ENV=production` requires MySQL/PostgreSQL **and** Redis unless `ALLOW_SINGLE_NODE=true`.
 
 ### AWS ALB settings

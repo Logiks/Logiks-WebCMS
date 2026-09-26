@@ -506,7 +506,14 @@ test('DEMO: a marketing site on a 3-node cluster: build it, edit it, switch its 
       pages.map((r) => r.status),
       [200, 200, 200],
     );
-    assert.equal(new Set(pages.map((r) => r.text)).size, 1, 'the same HTML from all three servers');
+    // Three independent cold cache misses, one per node: content must match, but the analytics beacon's CSP
+    // nonce (D-055's per-render mechanism, reused by D-056) is intentionally random per render, not per node.
+    const stripNonce = (html) => html.replace(/nonce="[^"]*"/g, 'nonce="_"');
+    assert.equal(
+      new Set(pages.map((r) => stripNonce(r.text))).size,
+      1,
+      'the same HTML from all three servers',
+    );
     assert.match(pages[0].text, /Northwind/);
     assert.match(pages[0].text, new RegExp(`/media/${img.id}/640\\.webp 640w`));
     for (const r of await all('/blog/we-are-hiring')) assert.match(r.text, /Open roles/);

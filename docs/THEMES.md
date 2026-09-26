@@ -19,6 +19,20 @@ assets/                    images, fonts, other css (served at hashed URLs)
 Installing a theme compiles every layout and component (a component's CSS and meta are checked too) and renders `layouts/default.html`
 once, so mistakes are reported with the file name instead of reaching visitors.
 
+## Changing a theme in the admin (Appearance)
+
+- **Themes**: install (zip), make live, **Duplicate**, **Export .zip**, remove.
+- **Theme editor**: edit, add, upload (images, fonts) and delete the files of an **installed** theme. Every save checks the whole theme
+  exactly as an upload would (paths, types, sizes, `theme.json`, and the compile + dry-run render), so a broken template is refused with its
+  file name and nothing changes. **Built-in themes are read-only** (they ship with the code and would be overwritten by the next update):
+  **Duplicate** one to get an editable copy, with the original's options. The id in `theme.json` can't change; duplicate to make a new id.
+- **Customize**: the theme's options (its `theme.json` settings) and **custom CSS**, with a live preview of any address that renders your
+  unsaved changes. Each theme has its own custom CSS; it is printed last in `<head>` (after library stylesheets, the theme's styles and the
+  components' CSS), so it wins. It may not contain markup, `@import` (install a stylesheet package under System → Libraries instead),
+  `expression()`/`behavior`/`-moz-binding`, or `javascript:`/non-image `data:` URLs. The same values are on Settings → "Theme: <name>".
+
+Every change is audited and reaches every server within seconds.
+
 ## The layout
 
 ```liquid
@@ -88,7 +102,7 @@ Content is not a global: the site's components read it through the endpoints the
 - **Time and memory are limited** (Settings → Themes, default 500 ms and 64 MB per page), so a runaway loop stops the page, not the server.
   If the active theme fails at render time, visitors get the built-in theme's page instead of an error.
 - **Allowed tags:** `assign capture case comment cycle decrement echo for if increment layout block liquid raw render tablerow unless break continue`
-  plus `seo not_found redirect`. **Filters:** the standard LiquidJS set except `raw` and `sample`, plus `asset_url`, `t`, `absolute_url`, `handle`.
+  plus `seo not_found redirect`. **Filters:** the standard LiquidJS set except `raw` and `sample`, plus `asset_url`, `library_url`, `t`, `absolute_url`, `handle`.
 - **Zip rules:** at most 400 files; 2 MB per file, 300 KB per template, 10 MB unpacked; extensions `html json css js txt md png jpg jpeg gif webp avif ico woff woff2 ttf svg`;
   folders `layouts components styles scripts assets locales`; no symlinks, no `..`, no absolute paths. **JavaScript is refused unless allowed in Settings → Themes**:
   a theme script runs in your visitors' browsers on the same address as the admin, so only allow it for themes you'd trust with your own admin session.
@@ -98,4 +112,6 @@ Content is not a global: the site's components read it through the endpoints the
 `{{ 'photo.jpg' | asset_url }}` → a hashed URL that changes whenever any file in the theme changes (so it can be cached for a year); `styles/x.css`
 and `scripts/x.js` work too · `{{ 'layout.skip' | t }}` or `{{ 'layout.skip' | t: 'Skip' }}` → a string from the merged locales (edited over shipped over theme; visitor's
 language, its base language, the default language, English, the fallback text, the key) · `{{ '/about' | absolute_url }}` · `{{ 'Hello World' | handle }}`
-· dates: `{{ post.publishedAt | date: '%-d %B %Y' }}` (UTC).
+· dates: `{{ post.publishedAt | date: '%-d %B %Y' }}` (UTC) · `{{ '@fortawesome/fontawesome-free/css/all.min.css' | library_url }}` → that file
+of the installed version of a library (System → Libraries), or an empty string when it isn't installed. A library set to "load on every page"
+needs no tag at all: its chosen stylesheets are added to `<head>` before the theme's.

@@ -56,6 +56,7 @@ export const ALLOWED_TAGS = [
   'redirect',
 ];
 export const ALLOWED_FILTERS = [
+  'library_url', // ours: a file of an installed library (System → Libraries)
   'escape',
   'xml_escape',
   'escape_once',

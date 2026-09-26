@@ -40,6 +40,7 @@ export default [
         CustomEvent: 'readonly',
         URLSearchParams: 'readonly',
         FileReader: 'readonly',
+        HTMLTextAreaElement: 'readonly',
       },
     },
   },

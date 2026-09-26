@@ -84,6 +84,24 @@ export function dialect(knex) {
     async ping() {
       await knex.raw('select 1');
     },
+    /**
+     * An epoch-ms BIGINT column truncated to its calendar day, as a 'YYYY-MM-DD' string — for a daily trend chart
+     * (Analytics, D-057). `alias` bakes an `as <alias>` into the raw expression for a SELECT; leave it off to
+     * reuse the identical expression in GROUP BY (grouping by an aliased column name is not portable everywhere).
+     * `column` is always a fixed, code-supplied identifier — never user input.
+     */
+    dayBucket(column, alias) {
+      // Each must yield a STRING, not an engine DATE type: mysql2 auto-converts date() to a JS Date object,
+      // which breaks GROUP BY (a fresh object per row) and any caller expecting 'YYYY-MM-DD' text — date_format()
+      // returns varchar instead. SQLite's date() and Postgres's to_char() are already text.
+      const expr =
+        kind === 'sqlite'
+          ? `date(${column} / 1000, 'unixepoch')`
+          : kind === 'mysql'
+            ? `date_format(from_unixtime(${column} / 1000), '%Y-%m-%d')`
+            : `to_char(to_timestamp(${column} / 1000.0), 'YYYY-MM-DD')`;
+      return knex.raw(alias ? `${expr} as ${alias}` : expr);
+    },
     /** Every table and view in this database (Services' table-source query mode, `src/modules/services/`). */
     async listTables() {
       if (kind === 'sqlite') {

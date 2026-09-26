@@ -87,11 +87,15 @@ const frontSchema = z
 
 const SCRIPT = /<script\b/i;
 
-/** What an author may not put in a page or component yet. Scripts arrive with the libraries manager (docs/SITE-STRUCTURE.md §7). */
+/**
+ * A page's own body still can't hold a `<script>` (use a theme script or a library, D-037); a component's can
+ * (docs/DECISIONS.md D-055) — its author already has the same trust tier as `services.script`/`dbms.query`, and
+ * `compileComponent` gives every `<script>` a CSP nonce so it actually runs on the rendered page.
+ */
 function checkMarkup(html, what) {
   if (SCRIPT.test(html))
     fail(
-      `${what} contains a <script> tag. Scripts in pages and components aren't supported yet; use a theme script or a library.`,
+      `${what} contains a <script> tag. Scripts aren't supported in pages; use a theme script or a library.`,
     );
 }
 
@@ -186,7 +190,6 @@ export function parseComponent(src) {
   }
   const css = [...src.matchAll(STYLE_BLOCK)].map((m) => m[1].trim()).join('\n');
   const template = src.replace(META_BLOCK, '').replace(STYLE_BLOCK, '').trim();
-  checkMarkup(template, 'This component');
   if (/<\/?style\b/i.test(template))
     fail('A <style> block is not closed (or there is a stray </style>).');
   if (css) assertSafeCss(css);
@@ -288,6 +291,20 @@ export function scopeCss(css, scope) {
 export const scopeId = (key, css) =>
   createHash('sha1').update(key).update('\0').update(css).digest('hex').slice(0, 8);
 
+const SCRIPT_TAG_OPEN = /<script\b([^>]*)>/gi;
+
+/**
+ * A component's own `<script>` tags (D-055) get a CSP nonce automatically, the same way `scopeCss` rewrites
+ * selectors — the author writes plain `<script>…</script>`, never `nonce="…"`. `{{ csp_nonce }}` is a Liquid
+ * expression, substituted per render by `sitepages.js`; a tag that already declares its own `nonce` is left alone.
+ * @param {string} html
+ */
+function addScriptNonce(html) {
+  return html.replace(SCRIPT_TAG_OPEN, (m, attrs) =>
+    /\bnonce\s*=/i.test(attrs) ? m : `<script${attrs} nonce="{{ csp_nonce }}">`,
+  );
+}
+
 /**
  * What the sandbox engine sees for a component: its template inside a wrapper that carries the scope attribute.
  * The wrapper has no box unless the component asks for one (`:host { display: block }`); see WRAPPER_CSS.
@@ -306,7 +323,7 @@ export function compileComponent(key, src) {
     meta,
     apis: meta.api,
     css: css ? scopeCss(css, `[data-c="${id}"]`) : '',
-    template: `<div data-c="${id}">${prologue}${template}</div>`,
+    template: `<div data-c="${id}">${prologue}${addScriptNonce(template)}</div>`,
   };
 }
 

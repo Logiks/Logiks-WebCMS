@@ -387,7 +387,15 @@ describe('Query mode over a raw table/view: still built with the query builder, 
   });
 
   test('a sensitive table is refused outright, however permissive the operator otherwise is', async () => {
-    for (const table of ['users', 'sessions', 'settings', 'services', 'audit_logs']) {
+    for (const table of [
+      'users',
+      'sessions',
+      'settings',
+      'services',
+      'audit_logs',
+      'analytics_sessions',
+      'activity_log',
+    ]) {
       const r = await admin.post('/api/admin/services').send(
         tableService({
           slug: `blocked-${table.replace(/_/g, '-')}`,

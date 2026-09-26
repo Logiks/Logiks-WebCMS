@@ -4,8 +4,8 @@ import cookieParser from 'cookie-parser';
 import session from 'express-session';
 import { pinoHttp } from 'pino-http';
 import { randomUUID } from 'node:crypto';
+import fs from 'node:fs';
 import path from 'node:path';
-import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 
 import { hotSwap } from './core/http/hotswap.js';
@@ -33,14 +33,28 @@ import dbmsRoutes from './modules/dbms/routes.js';
 import seoRoutes from './modules/seo/routes.js';
 import eventsRoutes from './modules/events/routes.js';
 import webhooksRoutes from './modules/webhooks/routes.js';
+import schedulerRoutes from './modules/scheduler/routes.js';
+import sitemapRoutes from './modules/sitemap/routes.js';
+import librariesRoutes, { libraryPublicRoute } from './modules/libraries/routes.js';
+import analyticsRoutes from './modules/analytics/routes.js';
 import publicSite from './modules/site/public.js';
 import publicContentApi from './modules/site/api.js';
 import { metricsRoute } from './core/http/metricsRoute.js';
 import { securityHeaders } from './core/http/securityHeaders.js';
 
-const require = createRequire(import.meta.url);
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const pkgDir = (name) => path.dirname(require.resolve(`${name}/package.json`));
+// Not require.resolve(`${name}/package.json`): a package whose own "exports" map doesn't list "./package.json"
+// (codejar, prismjs — unlike bootstrap/alpine/the fontsource fonts) makes Node refuse to resolve that subpath at
+// all. A flat, single-package node_modules (no workspaces here) makes the plain join just as reliable.
+const pkgDir = (name) => path.join(ROOT, 'node_modules', name);
+// codejar ships ESM-only (`export function CodeJar`); it has no imports of its own, so turning it into a plain
+// global script is a one-line swap rather than a real build step — read once at boot, served on every request.
+const codejarRaw = fs.readFileSync(path.join(pkgDir('codejar'), 'dist/codejar.js'), 'utf8');
+if (!/^export function CodeJar/m.test(codejarRaw))
+  throw new Error(
+    'codejar/dist/codejar.js no longer starts with "export function CodeJar" — update the swap in app.js for the new version.',
+  );
+const codejarSrc = `${codejarRaw.replace(/^export function CodeJar/m, 'function CodeJar')}\nwindow.CodeJar = CodeJar;\n`;
 const esc = (s) =>
   String(s).replace(
     /[&<>"']/g,
@@ -95,6 +109,14 @@ export function createApp(ctx) {
     express.static(path.join(pkgDir('bootstrap-icons'), 'font'), cache),
   );
   app.use('/admin/vendor/alpine', express.static(path.join(pkgDir('alpinejs'), 'dist'), cache));
+  app.get('/admin/vendor/codejar/dist/codejar.js', (_req, res) => {
+    res
+      .type('application/javascript')
+      .set('Cache-Control', env.isProd ? 'public, max-age=604800, immutable' : 'no-cache')
+      .send(codejarSrc);
+  });
+  app.use('/admin/vendor/codejar', express.static(pkgDir('codejar'), cache));
+  app.use('/admin/vendor/prismjs', express.static(pkgDir('prismjs'), cache));
   app.use('/admin/vendor/plex-sans', express.static(pkgDir('@fontsource/ibm-plex-sans'), cache));
   app.use('/admin/vendor/plex-mono', express.static(pkgDir('@fontsource/ibm-plex-mono'), cache));
   app.use(
@@ -106,8 +128,9 @@ export function createApp(ctx) {
     res.sendFile(path.join(ROOT, 'admin/static/index.html'));
   });
 
-  // Uploaded files (public, cookie-less, immutable)
+  // Uploaded files and installed libraries (public, cookie-less, immutable)
   app.get('/media/:id/:file', mediaPublicRoute(ctx));
+  app.use(libraryPublicRoute(ctx));
 
   // ── API ──
   const api = express.Router();
@@ -124,8 +147,12 @@ export function createApp(ctx) {
       maxAge: 600,
     }),
   );
-  publicApi.get('/info', (_req, res) => {
+  publicApi.get('/info', async (_req, res) => {
     const g = settings.ns('general');
+    const l = settings.ns('login');
+    const media = await ctx.media.describeMany(
+      [l.logo, l.favicon, l.background_image].filter(Boolean),
+    );
     res.set('Cache-Control', 'public, max-age=30');
     res.json({
       siteName: g.site_name,
@@ -133,6 +160,16 @@ export function createApp(ctx) {
       maintenance: g.maintenance_mode,
       passwordReset: ctx.mailer.enabled(),
       passwordMinLength: settings.get('security.password_min_length'),
+      login: {
+        logoUrl: media.get(l.logo)?.src || null,
+        faviconUrl: media.get(l.favicon)?.src || null,
+        backgroundType: l.background_type,
+        backgroundColor: l.background_color,
+        backgroundImageUrl: media.get(l.background_image)?.src || null,
+        welcomeHeading: l.welcome_heading,
+        welcomeText: l.welcome_text,
+        customCss: l.custom_css,
+      },
     });
   });
   publicApi.use(publicContentApi(ctx));
@@ -183,6 +220,10 @@ export function createApp(ctx) {
     seoRoutes,
     eventsRoutes,
     webhooksRoutes,
+    schedulerRoutes,
+    sitemapRoutes,
+    librariesRoutes,
+    analyticsRoutes,
   ])
     admin.use(mod(ctx));
   api.use('/admin', admin);

@@ -13,7 +13,7 @@ cms/site/                          ships with the code
 cms/public/                        this server's mirror of the site tree (git-ignored; SITE_DIR)
   pages/                           index.html · blog/index.html · blog/[slug].html · [...path].html · 404.html
   components/                      hero.html · post-list.html · entry.html · contact-form.html
-  locales/                         fr.json                    (only what editors changed: Appearance → Translations)
+  locales/                         fr.json                    (only what editors changed: System → Translations)
 
 a theme  (site/themes/<id>/ or installed)
   theme.json  layouts/  components/  styles/  scripts/  locales/  assets/
@@ -136,7 +136,8 @@ One file: a Liquid/HTML template, its **scoped CSS**, and a JSON **meta** block 
 - **Scoping.** Every selector is prefixed with the component's wrapper (`[data-c="a1b2c3d4"]`); `:host` is the wrapper itself;
   `@media`/`@supports`/`@container` are scoped inside, `@keyframes`/`@font-face` are global. The css of the components a page uses is emitted
   once into `<head>` after the theme's stylesheets.
-- **Refused for now:** `<script>` in pages and components, `@import`, code-running css. Scripts arrive with the libraries manager.
+- **Refused:** `<script>` in pages and components, `@import`, code-running css. Stylesheets, fonts and (when allowed) scripts from npm
+  packages come from System → Libraries: load them on every page, or reach a file with `{{ 'pkg/path' | library_url }}` (D-054).
 
 ## 4. The starter site
 
@@ -159,7 +160,7 @@ Delete, rewrite or add pages freely; that is the point. The home page's own addr
 
 The words a visitor sees come from **three layers that are merged**, highest first:
 
-1. **edited**: `locales/<code>.json` in the site tree (mirrored to `public/locales`, audited), what editors change under **Appearance → Translations**;
+1. **edited**: `locales/<code>.json` in the site tree (mirrored to `public/locales`, audited), what editors change under **System → Translations**;
 2. **shipped**: `site/locales/<code>.json`, the site's own wording as delivered with the code. **Read-only**: nothing writes into `site/`;
 3. **theme**: the theme's `locales/<code>.json`.
 
@@ -269,5 +270,5 @@ since a pattern can start or stop matching an address without that address's own
 
 ## 9. Not built yet
 
-The JavaScript libraries manager and scripts in pages/components, a theme file editor, plugins that ship pages and components,
-`POST` endpoints for components. Everything above is reachable through the API today.
+Scripts in pages/components, plugins that ship pages and components, `POST` endpoints for components. (Built since this list was written:
+the libraries manager, D-054; the theme file editor and customizer, D-052; the sitemap generator, D-053.) Everything above is reachable through the API today.

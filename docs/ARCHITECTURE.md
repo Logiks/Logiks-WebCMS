@@ -185,4 +185,10 @@ Everything public is a page of the **site tree** (`docs/SITE-STRUCTURE.md`). `sr
 
 A render collects the cache tags of everything its components read and the `[id, version]` of the entries, so a page built from something that
 changed mid-render isn't stored. Themes (`src/modules/themes/`) are the frame only: layouts, components, styles, scripts, locales, assets; built-in ones
-live in `site/themes/`, installed ones in the database.
+live in `site/themes/`, installed ones in the database (editable file by file under Appearance → Theme editor; every save re-runs the install checks, D-052).
+
+What a rendered page's `<head>` gets, in order (`sitePages.finish()`): library stylesheets (`ctx.libraries.tags()`, D-054), the theme's
+styles, the scoped CSS of the components used, then the theme's custom CSS (`theme_<id>.custom_css`, Appearance → Customize). Library
+scripts go before the theme's at the end of `<body>`. Library files are served from `/lib/<name>@<version>/…` out of each server's
+`LIBRARY_DIR`, unpacked on first use from the tarball stored in the `libraries` table. `/sitemap.xml` (and `/sitemap-<n>.xml` parts) come
+from `src/modules/sitemap/` (`ctx.sitemap`, D-053), cached under the `sitemap`/`site`/`sitefiles` tags.

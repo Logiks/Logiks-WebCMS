@@ -558,7 +558,14 @@ export function createContentService({ db, dialect, audit, cache, settings, regi
             action,
             entity: before.type,
             entityId: row.id,
-            meta: { title, from: before.status, to: st.status },
+            // `note` surfaces a restore ("Restored version N", set by restore() below) as a distinct, readable
+            // event rather than an indistinguishable plain edit — Content Activity's own screen reads this.
+            meta: {
+              title,
+              from: before.status,
+              to: st.status,
+              ...(input.note ? { note: input.note } : {}),
+            },
           },
           trx,
         );

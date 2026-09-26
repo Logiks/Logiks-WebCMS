@@ -172,7 +172,11 @@ test('everything a visitor or editor typed is escaped; block content keeps its s
   const r = await get('/script-alert-1-script-quotes');
   assert.equal(r.status, 200);
   const d = doc(r);
-  assert.equal(d.querySelectorAll('script:not([type="application/ld+json"])').length, 0);
+  assert.equal(
+    d.querySelectorAll('script:not([type="application/ld+json"]):not([data-cms="analytics"])')
+      .length,
+    0,
+  );
   assert.equal(d.querySelector('h1').textContent, nasty);
   assert.equal(d.querySelector('title').textContent, `${nasty} | Acme Co`);
   assert.equal(d.querySelector('meta[name="description"]').content, '"><script>alert(2)</script>');

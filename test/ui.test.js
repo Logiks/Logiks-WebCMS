@@ -98,19 +98,21 @@ test('signing in shows the shell with navigation for an administrator', async ()
       'Overview',
       'Webmaster',
       'Content',
+      'Analytics',
+      'Appearance',
       'System',
       'Settings',
       'Security',
       'Operations',
       'Automation',
     ],
-    'top level: two links and six groups',
+    'top level: two links and eight groups',
   );
   assert.deepEqual(subLinks(), [], 'groups start collapsed on Overview');
 
   click(button('Content'));
   await until(() => subLinks().length);
-  assert.deepEqual(subLinks(), ['Pages', 'Posts', 'Categories and tags', 'Media']);
+  assert.deepEqual(subLinks(), ['Pages', 'Posts', 'Categories and tags', 'Media', 'Activity']);
   click(button('Content'));
   await until(() => subLinks().length === 0);
 
@@ -263,6 +265,29 @@ test('audit log shows what happened, with secrets redacted', async () => {
   assert.match(text(), /mail\.password\s+\(secret changed\)/);
   assert.match(text(), /user\.create/);
   assert.ok(!/ui-secret-pw/.test(text()));
+});
+
+test('audit log: actor filter narrows the list, and the export link carries the filters', async () => {
+  go('#/audit');
+  const scope = 'section[x-data="auditPage"] ';
+  await until(() => /settings\.update/.test(text()));
+  const exportLink = $(scope + 'a[download]');
+  assert.match(exportLink.getAttribute('href'), /\/api\/admin\/audit\/export/);
+
+  type($(scope + '#au-actor'), ADMIN.email);
+  await until(() => exportLink.getAttribute('href').includes('actorEmail='), { timeout: 2000 });
+  assert.match(
+    exportLink.getAttribute('href'),
+    new RegExp(`actorEmail=${encodeURIComponent(ADMIN.email)}`),
+  );
+
+  type($(scope + '#au-actor'), 'nobody-at-all@example.com');
+  await new Promise((r) => setTimeout(r, 500)); // clear the 400ms debounce before polling
+  await until(() => $$(scope + 'tbody tr').length === 0, { timeout: 2000 });
+  assert.ok(visible($(scope + '.empty')));
+
+  type($(scope + '#au-actor'), '');
+  await until(() => /settings\.update/.test(text()));
 });
 
 test('cluster: shows this server with an up-to-date version rail; drift shows in amber', async () => {

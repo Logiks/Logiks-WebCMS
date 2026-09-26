@@ -1,5 +1,53 @@
 import helmet from 'helmet';
 
+const KEBAB = {
+  defaultSrc: 'default-src',
+  scriptSrc: 'script-src',
+  styleSrc: 'style-src',
+  imgSrc: 'img-src',
+  fontSrc: 'font-src',
+  connectSrc: 'connect-src',
+  objectSrc: 'object-src',
+  baseUri: 'base-uri',
+  formAction: 'form-action',
+  frameAncestors: 'frame-ancestors',
+  upgradeInsecureRequests: 'upgrade-insecure-requests',
+};
+
+/**
+ * The one CSP directive set, shared by the generic per-request middleware below and `cspHeader()` (a page render's
+ * own override, `sitepages.js`/`public.js`, for the nonce a component's `<script>` needs — D-055).
+ * @param {{ csp_img_sources: string[], csp_connect_sources: string[] }} v
+ * @param {{ https: boolean, nonce?: string }} opts
+ */
+function directives(v, { https, nonce }) {
+  return {
+    defaultSrc: ["'self'"],
+    scriptSrc: ["'self'", "'unsafe-eval'", ...(nonce ? [`'nonce-${nonce}'`] : [])],
+    styleSrc: ["'self'", "'unsafe-inline'"],
+    imgSrc: ["'self'", 'data:', ...v.csp_img_sources],
+    fontSrc: ["'self'"],
+    connectSrc: ["'self'", ...v.csp_connect_sources],
+    objectSrc: ["'none'"],
+    baseUri: ["'self'"],
+    formAction: ["'self'"],
+    frameAncestors: ["'none'"],
+    ...(https ? { upgradeInsecureRequests: [] } : {}),
+  };
+}
+
+/**
+ * The literal `Content-Security-Policy` header value for one response, with a page-specific script nonce (or none).
+ * Used to override the generic header set below for a rendered site page whose component(s) declared a `<script>`.
+ * @param {{ csp_img_sources: string[], csp_connect_sources: string[] }} v
+ * @param {{ https: boolean, nonce?: string }} opts
+ */
+export function cspHeader(v, opts) {
+  return Object.entries(directives(v, opts))
+    .map(([k, arr]) => `${KEBAB[k] ?? k} ${(arr ?? []).join(' ')}`.trim())
+    .join('; ');
+}
+
 /**
  * Security headers (CSP + HSTS) built from the live `security` settings.
  *
@@ -16,22 +64,7 @@ import helmet from 'helmet';
 export function securityHeaders(env, v) {
   const build = (/** @type {boolean} */ https) =>
     helmet({
-      contentSecurityPolicy: {
-        useDefaults: false,
-        directives: {
-          defaultSrc: ["'self'"],
-          scriptSrc: ["'self'", "'unsafe-eval'"],
-          styleSrc: ["'self'", "'unsafe-inline'"],
-          imgSrc: ["'self'", 'data:', ...v.csp_img_sources],
-          fontSrc: ["'self'"],
-          connectSrc: ["'self'", ...v.csp_connect_sources],
-          objectSrc: ["'none'"],
-          baseUri: ["'self'"],
-          formAction: ["'self'"],
-          frameAncestors: ["'none'"],
-          ...(https ? { upgradeInsecureRequests: [] } : {}),
-        },
-      },
+      contentSecurityPolicy: { useDefaults: false, directives: directives(v, { https }) },
       strictTransportSecurity: https ? undefined : false,
     });
   const secure = build(env.isProd);

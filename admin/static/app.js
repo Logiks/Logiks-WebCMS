@@ -267,13 +267,130 @@ function parseCompose(body) {
   return blocks;
 }
 
+// ───────── code editor (CodeJar + Prism.js, self-hosted — no CDN, loaded lazily) ─────────
+// Nothing here loads until a screen actually shows a code field: most admin screens never touch one, and the
+// combined weight (CodeJar + Prism core + a handful of language files) beats shipping it in every page's <head>.
+const PRISM_BASE = '/admin/vendor/prismjs';
+const PRISM_MODE = {
+  htmlmixed: 'markup',
+  css: 'css',
+  javascript: 'javascript',
+  'application/json': 'json',
+  'text/x-sql': 'sql',
+};
+
+function loadScript(src) {
+  return new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = src;
+    s.onload = () => resolve();
+    s.onerror = () => reject(new Error(`Could not load ${src}`));
+    document.head.appendChild(s);
+  });
+}
+let editorLoading;
+/** Resolves once window.CodeJar and window.Prism (core + markup/css/clike/javascript/sql/json) are ready. */
+function loadEditor() {
+  if (!editorLoading)
+    editorLoading = (async () => {
+      for (const f of [
+        'components/prism-core.min.js',
+        'components/prism-markup.min.js',
+        'components/prism-css.min.js',
+        'components/prism-clike.min.js',
+        'components/prism-javascript.min.js',
+        'components/prism-sql.min.js',
+        'components/prism-json.min.js',
+      ])
+        await loadScript(`${PRISM_BASE}/${f}`); // order matters: each file extends the previous one's globals
+      // Token colours come from admin.css (.token.*), matched to the app's own palette — Prism's own theme
+      // stylesheet is never loaded, one less request and one less colour scheme to keep in sync.
+      // {{ site.name }} / {% render "x" %} coloured as one token, over the HTML grammar a template is otherwise
+      // written in — Prism has no Liquid grammar of its own, and this is the whole of what one needs here.
+      window.Prism.languages.insertBefore('markup', 'comment', {
+        liquid: { pattern: /\{\{[\s\S]*?\}\}|\{%[\s\S]*?%\}/, alias: 'important' },
+      });
+      await loadScript('/admin/vendor/codejar/dist/codejar.js');
+    })();
+  return editorLoading;
+}
+
 document.addEventListener('alpine:init', () => {
+  // x-codejar="{ mode: 'htmlmixed', get: template, set: (v) => (template = v), readOnly: false, placeholder: '' }"
+  // get/set run through Alpine's own expression scope, so whatever reactive property they touch stays exactly what
+  // it was when the field was a plain textarea (x-model, a computed prop, …) — this only changes how it's drawn.
+  Alpine.directive('codejar', (el, { expression }, { effect, evaluateLater, cleanup }) => {
+    if (!(el instanceof HTMLTextAreaElement)) return;
+    const evalCfg = evaluateLater(expression);
+    let jar = null;
+    let editorEl = null;
+    let cfg = null;
+    let destroyed = false;
+    let creating = false;
+    const highlight = (e) => {
+      const code = e.textContent;
+      const lang = cfg.mode && PRISM_MODE[cfg.mode];
+      const grammar = lang && window.Prism.languages[lang];
+      e.innerHTML = grammar
+        ? window.Prism.highlight(code, grammar, lang)
+        : code.replace(/[&<]/g, (c) => (c === '&' ? '&amp;' : '&lt;'));
+    };
+    const applyCfg = () => {
+      editorEl.contentEditable = cfg.readOnly ? 'false' : 'plaintext-only';
+      editorEl.dataset.placeholder = cfg.placeholder || '';
+      const val = cfg.get ?? '';
+      if (val !== jar.toString()) {
+        jar.updateCode(val, false); // false: this is US setting it, not the user typing — onUpdate must not re-fire
+        el.value = val; // onUpdate (which mirrors el.value) is skipped above, so mirror it here for anything reading el.value directly
+      }
+    };
+    const ready = (next) => {
+      cfg = next;
+      if (!jar) {
+        if (!creating) {
+          creating = true;
+          const rows = el.rows || 10;
+          editorEl = document.createElement('div');
+          editorEl.className = 'codejar form-control mono';
+          editorEl.style.minHeight = `${rows * 1.35}em`;
+          el.insertAdjacentElement('afterend', editorEl);
+          el.style.display = 'none';
+          loadEditor().then(() => {
+            if (destroyed) return;
+            jar = window.CodeJar(editorEl, highlight);
+            jar.onUpdate((code) => {
+              el.value = code; // mirror for anything that reads el.value directly (tests, forms)
+              cfg.set(code);
+            });
+            // Nothing types into editorEl directly in code (only a real keystroke does); something that still
+            // sets el.value and fires 'input' on the original (hidden) textarea — a test's h.type(), a form
+            // reset — is forwarded into the editor, same as it would have reached a plain x-model textarea.
+            el.addEventListener('input', () => {
+              if (jar.toString() !== el.value) jar.updateCode(el.value);
+            });
+            applyCfg(); // cfg may have moved on since creation started; use the latest
+          });
+        }
+        return;
+      }
+      applyCfg();
+    };
+    effect(() => evalCfg((next) => ready(next)));
+    cleanup(() => {
+      destroyed = true;
+      jar?.destroy();
+      editorEl?.remove();
+      el.style.display = '';
+    });
+  });
+
   // ───────── root ─────────
   Alpine.data('app', () => ({
     ...H,
     ready: false,
     user: null,
     siteName: '',
+    branding: null,
     route: 'overview',
     toasts: [],
     login: { email: '', password: '', error: '', busy: false },
@@ -297,6 +414,17 @@ document.addEventListener('alpine:init', () => {
 
     get minLength() {
       return meta.passwordMinLength;
+    },
+
+    /** Inline style for the sign-in screens' side panel, from Settings → Login page. */
+    get loginSideStyle() {
+      const b = this.branding;
+      if (!b) return '';
+      if (b.backgroundType === 'color' && b.backgroundColor)
+        return `background:${b.backgroundColor}`;
+      if (b.backgroundType === 'image' && b.backgroundImageUrl)
+        return `background:center/cover no-repeat url("${b.backgroundImageUrl}")`;
+      return '';
     },
 
     /** Which top-level screen to show. A reset link wins even if someone is signed in. */
@@ -335,20 +463,45 @@ document.addEventListener('alpine:init', () => {
             })),
             { id: 'terms', label: 'Categories and tags', perm: 'content.terms.manage' },
             { id: 'media', label: 'Media', perm: 'media.read' },
+            { id: 'content-activity', label: 'Activity', perm: 'content.activity' },
           ],
         },
         {
-          // Was "Appearance" — now also holds the database manager, so it's named for the site's whole system
-          // configuration rather than just its look. (Distinct from Operations → System, which is cluster health.)
+          // Page views, sessions and activity, page-wise and user-wise (D-056) — near Content/Media, before Audit Logs.
+          id: 'analytics',
+          label: 'Analytics',
+          icon: 'bi-graph-up',
+          items: [
+            { id: 'analytics-overview', label: 'Overview', perm: 'analytics.read' },
+            { id: 'analytics-active', label: 'Active Now', perm: 'analytics.read' },
+            { id: 'analytics-pages', label: 'Page Analytics', perm: 'analytics.read' },
+            { id: 'analytics-sessions', label: 'Sessions', perm: 'analytics.read' },
+            { id: 'analytics-users', label: 'User-wise Analytics', perm: 'analytics.read' },
+          ],
+        },
+        {
+          // How the site looks (D-052): themes, their options and custom CSS, their files, and the menus they show.
           id: 'appearance',
-          label: 'System',
+          label: 'Appearance',
           icon: 'bi-palette',
           items: [
             { id: 'themes', label: 'Themes', perm: 'themes.read' },
-            { id: 'locales', label: 'Translations', perm: 'locales.read' },
+            { id: 'customize', label: 'Customize', perm: 'themes.read' },
+            { id: 'theme-editor', label: 'Theme editor', perm: 'themes.read' },
             { id: 'menus', label: 'Menus', perm: 'menus.manage' },
+          ],
+        },
+        {
+          // The site's system configuration (D-048/D-052). Distinct from Operations → System, which is cluster health.
+          id: 'sysconfig',
+          label: 'System',
+          icon: 'bi-gear',
+          items: [
+            { id: 'locales', label: 'Translations', perm: 'locales.read' },
             { id: 'redirects', label: 'Redirects', perm: 'redirects.manage' },
             { id: 'messages', label: 'Messages', perm: 'site.messages' },
+            { id: 'sitemap', label: 'Sitemap', perm: 'sitemap.read' },
+            { id: 'libraries', label: 'Libraries', perm: 'libraries.read' },
             { id: 'dbms', label: 'Database', perm: 'dbms.read' },
           ],
         },
@@ -380,6 +533,7 @@ document.addEventListener('alpine:init', () => {
           items: [
             { id: 'events', label: 'Events', perm: 'events.read' },
             { id: 'webhooks', label: 'Webhooks', perm: 'webhooks.read' },
+            { id: 'scheduler', label: 'Scheduler', perm: 'scheduler.read' },
           ],
         },
       ];
@@ -444,6 +598,13 @@ document.addEventListener('alpine:init', () => {
       if (!sub) return [{ key: 'list', kind: 'list' }];
       return [{ key: `edit:${sub}`, kind: 'edit', id: sub === 'new' ? null : sub }];
     },
+    /** Automation → Scheduler: a list, or the editor for one task (its id). */
+    get schedulerViews() {
+      const [r, sub] = this.parts;
+      if (r !== 'scheduler') return [];
+      if (!sub) return [{ key: 'list', kind: 'list' }];
+      return [{ key: `edit:${sub}`, kind: 'edit', id: sub === 'new' ? null : sub }];
+    },
 
     /** Every screen the user can open, groups flattened. */
     get navRoutes() {
@@ -482,6 +643,7 @@ document.addEventListener('alpine:init', () => {
       try {
         const info = await api('GET', '/public/info');
         this.siteName = info.siteName;
+        this.branding = info.login || null;
         this.passwordReset = meta.passwordReset = !!info.passwordReset;
         meta.passwordMinLength = info.passwordMinLength ?? meta.passwordMinLength;
         document.title = `${info.siteName} · Admin`;
@@ -499,6 +661,17 @@ document.addEventListener('alpine:init', () => {
       this.syncRoute();
       this.ready = true;
       this.openResetLink();
+      this.$watch('view', () => this.applyFavicon());
+      this.applyFavicon();
+    },
+
+    /** Swaps the browser-tab icon to Settings → Login page's favicon while a sign-in screen is shown. */
+    applyFavicon() {
+      const link = document.querySelector('link[rel="icon"]');
+      if (!link) return;
+      if (!this._defaultFavicon) this._defaultFavicon = link.href;
+      const wantsBranding = ['login', 'forgot', 'reset'].includes(this.view);
+      link.href = (wantsBranding && this.branding?.faviconUrl) || this._defaultFavicon;
     },
 
     setUser(u) {
@@ -1393,6 +1566,23 @@ document.addEventListener('alpine:init', () => {
         this.error = e.message;
       }
     },
+    async duplicate(t) {
+      const id = prompt(
+        `Duplicate “${t.name}”. Id for the copy (lowercase letters, numbers and underscores):`,
+        `${t.id}_custom`,
+      );
+      if (!id) return;
+      try {
+        const { theme } = await api('POST', `/admin/themes/${t.id}/duplicate`, {
+          id: id.trim(),
+          name: `${t.name} (copy)`,
+        });
+        toast(`Created ${theme.name}. It isn’t live until you make it live.`);
+        await this.load();
+      } catch (e) {
+        this.error = e.message;
+      }
+    },
     async remove(t) {
       if (!confirm(`Remove the theme “${t.name}”?`)) return;
       try {
@@ -1401,6 +1591,562 @@ document.addEventListener('alpine:init', () => {
         toast('Removed.');
       } catch (e) {
         this.error = e.message;
+      }
+    },
+  }));
+
+  // ───────── Appearance → Customize: a theme's options + custom CSS, previewed live (D-052) ─────────
+  Alpine.data('customizePage', () => ({
+    ...H,
+    themes: [],
+    id: '',
+    theme: null,
+    fields: [],
+    saved: {},
+    values: {},
+    versions: {},
+    errors: {},
+    loaded: false,
+    saving: false,
+    error: '',
+    previewPath: '/',
+    previewHtml: '',
+    previewing: false,
+    previewError: '',
+    _timer: null,
+    _seq: 0,
+    get optionFields() {
+      return this.fields.filter((f) => f.key !== 'custom_css' && !f.secret);
+    },
+    get dirty() {
+      return this.fields.some(
+        (f) => JSON.stringify(this.values[f.key]) !== JSON.stringify(this.saved[f.key]),
+      );
+    },
+    async init() {
+      this.themes = (await api('GET', '/admin/themes')).themes;
+      const want = hashParts()[1];
+      const first =
+        this.themes.find((t) => t.id === want) ??
+        this.themes.find((t) => t.active) ??
+        this.themes[0];
+      if (first) await this.open(first.id);
+    },
+    async open(id) {
+      if (this.dirty && !confirm('Discard your unsaved changes?')) return;
+      this.error = '';
+      try {
+        const r = await api('GET', `/admin/themes/${id}/customize`);
+        this.id = id;
+        this.theme = r.theme;
+        this.apply(r.settings);
+        this.loaded = true;
+        history.replaceState(null, '', `#/customize/${id}`);
+        await this.refresh();
+      } catch (e) {
+        this.error = e.message;
+      }
+    },
+    apply(desc) {
+      this.fields = desc.fields;
+      const vals = {};
+      const versions = {};
+      for (const f of desc.fields) {
+        vals[f.key] = desc.state[f.key]?.value ?? f.default;
+        versions[f.key] = desc.state[f.key]?.version ?? 0;
+      }
+      this.saved = JSON.parse(JSON.stringify(vals));
+      this.values = vals;
+      this.versions = versions;
+      this.errors = {};
+    },
+    set(key, v) {
+      this.values[key] = v;
+      delete this.errors[key];
+      clearTimeout(this._timer);
+      this._timer = setTimeout(() => this.refresh(), 500);
+    },
+    async refresh() {
+      if (!this.id) return;
+      const seq = ++this._seq;
+      this.previewing = true;
+      this.previewError = '';
+      try {
+        const r = await api('POST', `/admin/themes/${this.id}/preview`, {
+          path: this.previewPath || '/',
+          values: this.values,
+        });
+        if (seq !== this._seq) return; // a newer preview is on its way
+        this.previewHtml = r.redirect
+          ? `<p style="font:14px system-ui;padding:1rem">This address redirects to ${esc(r.redirect.to)}.</p>`
+          : r.html;
+      } catch (e) {
+        if (seq !== this._seq) return;
+        this.previewError = e.message;
+        if (e.field) this.errors[e.field] = e.message;
+      } finally {
+        if (seq === this._seq) this.previewing = false;
+      }
+    },
+    async save() {
+      this.saving = true;
+      this.error = '';
+      try {
+        const changed = {};
+        for (const f of this.fields)
+          if (JSON.stringify(this.values[f.key]) !== JSON.stringify(this.saved[f.key]))
+            changed[f.key] = this.values[f.key];
+        const r = await api('PUT', `/admin/themes/${this.id}/customize`, {
+          values: changed,
+          versions: Object.fromEntries(Object.keys(changed).map((k) => [k, this.versions[k]])),
+        });
+        this.apply(r.settings);
+        toast(this.theme?.active ? 'Saved. Visitors see it now.' : 'Saved.');
+      } catch (e) {
+        if (e.field) this.errors[e.field.split('.').pop()] = e.message;
+        this.error = e.message;
+      } finally {
+        this.saving = false;
+      }
+    },
+    discard() {
+      this.values = JSON.parse(JSON.stringify(this.saved));
+      this.errors = {};
+      this.refresh();
+    },
+  }));
+
+  // ───────── Appearance → Theme editor: one file at a time; built-in themes are read-only (D-052) ─────────
+  Alpine.data('themeEditorPage', () => ({
+    ...H,
+    bytes,
+    themes: [],
+    id: '',
+    editable: false,
+    files: [],
+    path: '',
+    file: null,
+    content: '',
+    original: '',
+    newPath: '',
+    loaded: false,
+    saving: false,
+    error: '',
+    get dirty() {
+      return !!this.file?.text && this.content !== this.original;
+    },
+    get required() {
+      return this.path === 'theme.json' || this.path === 'layouts/default.html';
+    },
+    async init() {
+      this.themes = (await api('GET', '/admin/themes')).themes;
+      const want = hashParts()[1];
+      const first =
+        this.themes.find((t) => t.id === want) ??
+        this.themes.find((t) => t.active && t.source === 'db') ??
+        this.themes.find((t) => t.active) ??
+        this.themes[0];
+      if (first) await this.open(first.id);
+    },
+    async open(id, keepPath = false) {
+      if (!keepPath && this.dirty && !confirm('Discard your unsaved changes to this file?')) return;
+      this.error = '';
+      try {
+        const r = await api('GET', `/admin/themes/${id}/files`);
+        this.id = id;
+        this.editable = r.editable;
+        this.files = r.files;
+        this.loaded = true;
+        history.replaceState(null, '', `#/theme-editor/${id}`);
+        if (!keepPath) {
+          this.path = '';
+          this.file = null;
+          const start = this.files.find((f) => f.path === 'layouts/default.html');
+          if (start) await this.select(start.path, true);
+        }
+      } catch (e) {
+        this.error = e.message;
+      }
+    },
+    async select(p, force = false) {
+      if (!force && this.dirty && !confirm('Discard your unsaved changes to this file?')) return;
+      this.error = '';
+      try {
+        const { file } = await api(
+          'GET',
+          `/admin/themes/${this.id}/file?path=${encodeURIComponent(p)}`,
+        );
+        this.path = p;
+        this.file = file;
+        this.content = this.original = file.text ? file.content : '';
+      } catch (e) {
+        this.error = e.message;
+      }
+    },
+    async save() {
+      this.saving = true;
+      this.error = '';
+      try {
+        const r = await api(
+          'PUT',
+          `/admin/themes/${this.id}/file?path=${encodeURIComponent(this.path)}`,
+          {
+            content: this.content,
+          },
+        );
+        this.files = r.files;
+        this.original = this.content;
+        toast('Saved. Every server uses it within seconds.');
+      } catch (e) {
+        this.error = e.message;
+      } finally {
+        this.saving = false;
+      }
+    },
+    async create() {
+      const p = this.newPath.trim().replace(/^\/+/, '');
+      if (!p) return;
+      if (this.files.some((f) => f.path === p)) return this.select(p);
+      this.error = '';
+      try {
+        const r = await api('PUT', `/admin/themes/${this.id}/file?path=${encodeURIComponent(p)}`, {
+          content: '',
+        });
+        this.files = r.files;
+        this.newPath = '';
+        await this.select(p, true);
+      } catch (e) {
+        this.error = e.message;
+      }
+    },
+    async upload(f) {
+      if (!f) return;
+      this.error = '';
+      const p = `assets/${f.name}`;
+      try {
+        const r = await api(
+          'POST',
+          `/admin/themes/${this.id}/file?path=${encodeURIComponent(p)}`,
+          f,
+        );
+        this.files = r.files;
+        toast(`Uploaded ${p}.`);
+      } catch (e) {
+        this.error = e.message;
+      }
+    },
+    async del() {
+      if (!confirm(`Delete ${this.path} from this theme?`)) return;
+      this.error = '';
+      try {
+        const r = await api(
+          'DELETE',
+          `/admin/themes/${this.id}/file?path=${encodeURIComponent(this.path)}`,
+        );
+        this.files = r.files;
+        this.path = '';
+        this.file = null;
+        toast('Deleted.');
+      } catch (e) {
+        this.error = e.message;
+      }
+    },
+    async duplicate() {
+      const t = this.themes.find((x) => x.id === this.id);
+      const id = prompt(
+        `Duplicate “${t?.name ?? this.id}”. Id for the copy (lowercase letters, numbers and underscores):`,
+        `${this.id}_custom`,
+      );
+      if (!id) return;
+      try {
+        const { theme } = await api('POST', `/admin/themes/${this.id}/duplicate`, {
+          id: id.trim(),
+          name: `${t?.name ?? this.id} (copy)`,
+        });
+        this.themes = (await api('GET', '/admin/themes')).themes;
+        toast(`Created ${theme.name}. Make it live under Appearance → Themes when it’s ready.`);
+        await this.open(theme.id);
+      } catch (e) {
+        this.error = e.message;
+      }
+    },
+  }));
+
+  // ───────── System → Sitemap (D-053) ─────────
+  Alpine.data('sitemapPage', () => ({
+    ...H,
+    sum: { urls: [], bySource: {} },
+    v: { rules: [], extra_urls: [], exclude_types: [] },
+    versions: {},
+    enabled: true,
+    types: [],
+    q: '',
+    offset: 0,
+    loaded: false,
+    busy: false,
+    error: '',
+    freqs: ['always', 'hourly', 'daily', 'weekly', 'monthly', 'yearly', 'never'],
+    prios: Array.from({ length: 11 }, (_, i) => (i / 10).toFixed(1)),
+    toggles: [
+      { key: 'include_pages', label: 'The site’s fixed pages' },
+      { key: 'include_entries', label: 'Published content, at the address a page gives it' },
+      { key: 'include_terms', label: 'Category and tag pages' },
+      { key: 'include_images', label: 'Each entry’s featured image' },
+    ],
+    async init() {
+      this.types = meta.contentTypes;
+      await this.load(0, true);
+    },
+    label(src) {
+      if (src === 'page') return 'Site page';
+      if (src === 'extra') return 'Extra';
+      const [kind, id] = src.split(':');
+      if (kind === 'term') return id === 'category' ? 'Category' : id === 'tag' ? 'Tag' : id;
+      return this.types.find((t) => t.id === id)?.label ?? id;
+    },
+    apply(r) {
+      const vals = {};
+      for (const f of r.settings.fields) {
+        vals[f.key] = r.settings.state[f.key]?.value ?? f.default;
+        this.versions[f.key] = r.settings.state[f.key]?.version ?? 0;
+      }
+      vals.rules = (vals.rules || []).map((x) => ({
+        pattern: x.pattern,
+        exclude: !!x.exclude,
+        changefreq: x.changefreq || '',
+        priority: typeof x.priority === 'number' ? x.priority.toFixed(1) : '',
+      }));
+      this.v = vals;
+      this.enabled = r.enabled;
+    },
+    async load(offset = 0, withSettings = false) {
+      this.error = '';
+      try {
+        const qs = new URLSearchParams({ q: this.q, offset: String(offset) });
+        const r = await api('GET', `/admin/sitemap?${qs}`);
+        this.sum = r.summary;
+        this.offset = offset;
+        if (withSettings) this.apply(r);
+        this.loaded = true;
+      } catch (e) {
+        this.error = e.message;
+      }
+    },
+    toggleType(id, on) {
+      this.v.exclude_types = on
+        ? this.v.exclude_types.filter((x) => x !== id)
+        : [...this.v.exclude_types, id];
+    },
+    async save() {
+      this.busy = true;
+      this.error = '';
+      try {
+        const values = {
+          ...this.v,
+          rules: this.v.rules
+            .filter((x) => x.pattern.trim())
+            .map((x) =>
+              x.exclude
+                ? { pattern: x.pattern.trim(), exclude: true }
+                : {
+                    pattern: x.pattern.trim(),
+                    ...(x.changefreq ? { changefreq: x.changefreq } : {}),
+                    ...(x.priority !== '' ? { priority: Number(x.priority) } : {}),
+                  },
+            ),
+        };
+        const r = await api('PUT', '/admin/sitemap', { enabled: this.enabled, values });
+        this.apply(r);
+        this.sum = r.summary;
+        this.offset = 0;
+        toast('Saved. The sitemap is rebuilt.');
+      } catch (e) {
+        this.error = e.message;
+      } finally {
+        this.busy = false;
+      }
+    },
+    async rebuild() {
+      this.busy = true;
+      try {
+        await api('POST', '/admin/sitemap/regenerate', {});
+        await this.load(0);
+        toast(`Rebuilt: ${this.sum.total} addresses.`);
+      } catch (e) {
+        this.error = e.message;
+      } finally {
+        this.busy = false;
+      }
+    },
+  }));
+
+  // ───────── System → Libraries: npm packages for the site (D-054) ─────────
+  Alpine.data('librariesPage', () => ({
+    ...H,
+    bytes,
+    libraries: [],
+    allowScripts: false,
+    q: '',
+    results: [],
+    name: '',
+    version: '',
+    autoload: true,
+    current: null,
+    picked: [],
+    fileFilter: '',
+    report: '',
+    loaded: false,
+    busy: false,
+    error: '',
+    get shownFiles() {
+      const f = this.fileFilter.trim().toLowerCase();
+      const files = this.current?.files ?? [];
+      return files
+        .filter((x) => (f ? x.path.toLowerCase().includes(f) : /\.(css|m?js)$/i.test(x.path)))
+        .slice(0, 300);
+    },
+    get snippet() {
+      const p =
+        this.picked[0] ??
+        this.current?.files.find((x) => /\.css$/.test(x.path))?.path ??
+        'file.css';
+      return `{{ '${this.current?.name}/${p}' | library_url }}`;
+    },
+    loadable(p) {
+      return /\.css$/i.test(p) || (this.allowScripts && /\.m?js$/i.test(p));
+    },
+    async init() {
+      await this.load();
+    },
+    async load() {
+      const r = await api('GET', '/admin/libraries');
+      this.libraries = r.libraries;
+      this.allowScripts = r.allowScripts;
+      this.loaded = true;
+    },
+    async search() {
+      if (!this.q.trim()) return;
+      this.busy = true;
+      this.error = '';
+      try {
+        this.results = (
+          await api('GET', `/admin/libraries/search?q=${encodeURIComponent(this.q)}`)
+        ).results;
+        if (!this.results.length) this.error = 'No packages match that search.';
+      } catch (e) {
+        this.error = e.message;
+      } finally {
+        this.busy = false;
+      }
+    },
+    async install(name, version) {
+      this.busy = true;
+      this.error = '';
+      this.report = '';
+      try {
+        const existing = this.libraries.find((l) => l.name === name);
+        const { library } = await api('POST', '/admin/libraries', {
+          name: name.trim(),
+          version: version.trim(),
+          ...(existing ? {} : { autoload: this.autoload }),
+        });
+        toast(`Installed ${library.name} ${library.version}.`);
+        this.name = this.version = '';
+        this.results = this.results.map((p) =>
+          p.name === library.name ? { ...p, installed: library.version } : p,
+        );
+        await this.load();
+        this.configure(
+          this.libraries.find((l) => l.name === library.name),
+          library,
+        );
+      } catch (e) {
+        this.error = e.message;
+      } finally {
+        this.busy = false;
+      }
+    },
+    async configure(l, full) {
+      if (!l) return;
+      this.error = '';
+      try {
+        this.current =
+          full ??
+          (await api('GET', `/admin/libraries/one?name=${encodeURIComponent(l.name)}`)).library;
+        this.picked = [...this.current.include];
+        this.fileFilter = '';
+      } catch (e) {
+        this.error = e.message;
+      }
+    },
+    pick(p, on) {
+      this.picked = on ? [...this.picked, p] : this.picked.filter((x) => x !== p);
+    },
+    async saveFiles() {
+      this.busy = true;
+      this.error = '';
+      try {
+        const { library } = await api(
+          'PUT',
+          `/admin/libraries/one?name=${encodeURIComponent(this.current.name)}`,
+          {
+            include: this.picked,
+          },
+        );
+        this.current = library;
+        await this.load();
+        toast('Saved.');
+      } catch (e) {
+        this.error = e.message;
+      } finally {
+        this.busy = false;
+      }
+    },
+    async setAutoload(l, on) {
+      this.error = '';
+      try {
+        await api('PUT', `/admin/libraries/one?name=${encodeURIComponent(l.name)}`, {
+          autoload: on,
+        });
+        await this.load();
+        toast(on ? `${l.name} loads on every page.` : `${l.name} no longer loads on every page.`);
+      } catch (e) {
+        this.error = e.message;
+        await this.load();
+      }
+    },
+    async remove(l) {
+      if (!confirm(`Remove ${l.name}? Pages that use its files will lose them.`)) return;
+      try {
+        await api('DELETE', `/admin/libraries/one?name=${encodeURIComponent(l.name)}`);
+        if (this.current?.name === l.name) this.current = null;
+        await this.load();
+        toast('Removed.');
+      } catch (e) {
+        this.error = e.message;
+      }
+    },
+    async importList(file) {
+      if (!file) return;
+      this.busy = true;
+      this.error = '';
+      this.report = '';
+      try {
+        let doc;
+        try {
+          doc = JSON.parse(await file.text());
+        } catch {
+          throw new Error('That file isn’t JSON. Choose a list exported from System → Libraries.');
+        }
+        const r = await api('POST', '/admin/libraries/import', doc);
+        this.report = `Installed ${r.installed.length}${r.installed.length ? ': ' + r.installed.map((x) => `${x.name} ${x.version}`).join(', ') : ''}.`;
+        if (r.failed.length)
+          this.error = `Not installed: ${r.failed.map((x) => `${x.name} (${x.error})`).join('; ')}`;
+        await this.load();
+      } catch (e) {
+        this.error = e.message;
+      } finally {
+        this.busy = false;
       }
     },
   }));
@@ -2680,6 +3426,176 @@ document.addEventListener('alpine:init', () => {
     },
   }));
 
+  // ───────── Automation → Scheduler (docs/DECISIONS.md D-051) ─────────
+  Alpine.data('schedulerList', () => ({
+    ...H,
+    tasks: [],
+    loaded: false,
+    async init() {
+      await this.load();
+    },
+    async load() {
+      this.tasks = (await api('GET', '/admin/scheduler/tasks')).tasks;
+      this.loaded = true;
+    },
+    describe(t) {
+      if (t.scheduleType === 'cron') return t.cronExpr;
+      const ms = t.everyMs;
+      if (ms % 86_400_000 === 0) return `every ${ms / 86_400_000} day(s)`;
+      if (ms % 3_600_000 === 0) return `every ${ms / 3_600_000} hour(s)`;
+      return `every ${Math.round(ms / 60_000)} minute(s)`;
+    },
+    async remove(t) {
+      if (!confirm(`Delete the scheduled task "${t.name}"?`)) return;
+      await api('DELETE', `/admin/scheduler/tasks/${t.id}`);
+      await this.load();
+      toast('Task deleted.');
+    },
+    async runNow(t) {
+      await api('POST', `/admin/scheduler/tasks/${t.id}/run`);
+      toast('Run queued.');
+      setTimeout(() => this.load(), 800);
+    },
+  }));
+
+  Alpine.data('schedulerEditor', (id) => ({
+    ...H,
+    isNew: !id,
+    id: id || null,
+    name: '',
+    kind: 'service',
+    target: '',
+    scheduleType: 'interval',
+    everyValue: 1,
+    everyUnit: 'hours', // 'minutes' | 'hours' | 'days'
+    cronExpr: '',
+    cronPreview: [],
+    cronError: '',
+    enabled: true,
+    paramsText: '{}',
+    services: [],
+    webhooks: [],
+    lastRunAt: null,
+    lastStatus: '',
+    lastError: '',
+    loaded: false,
+    busy: false,
+    error: '',
+    runBusy: false,
+
+    async init() {
+      const [svcs, whs] = await Promise.all([
+        api('GET', '/admin/services'),
+        api('GET', '/admin/webhooks'),
+      ]);
+      this.services = svcs.services;
+      this.webhooks = whs.webhooks;
+      if (!this.isNew) await this.load();
+      this.loaded = true;
+    },
+    async load() {
+      const { task } = await api('GET', `/admin/scheduler/tasks/${this.id}`);
+      this.name = task.name;
+      this.kind = task.kind;
+      this.target = task.target;
+      this.scheduleType = task.scheduleType;
+      if (task.everyMs) {
+        if (task.everyMs % 86_400_000 === 0) {
+          this.everyValue = task.everyMs / 86_400_000;
+          this.everyUnit = 'days';
+        } else if (task.everyMs % 3_600_000 === 0) {
+          this.everyValue = task.everyMs / 3_600_000;
+          this.everyUnit = 'hours';
+        } else {
+          this.everyValue = Math.round(task.everyMs / 60_000);
+          this.everyUnit = 'minutes';
+        }
+      }
+      this.cronExpr = task.cronExpr || '';
+      this.enabled = task.enabled;
+      this.paramsText = JSON.stringify(task.params || {}, null, 2);
+      this.lastRunAt = task.lastRunAt || null;
+      this.lastStatus = task.lastStatus || '';
+      this.lastError = task.lastError || '';
+      if (this.cronExpr) await this.updateCronPreview();
+    },
+    get everyMs() {
+      const unitMs = { minutes: 60_000, hours: 3_600_000, days: 86_400_000 }[this.everyUnit];
+      return Math.round(Number(this.everyValue) * unitMs);
+    },
+    async updateCronPreview() {
+      this.cronError = '';
+      this.cronPreview = [];
+      if (!this.cronExpr.trim()) return;
+      try {
+        const r = await api(
+          'GET',
+          `/admin/scheduler/cron-preview?expr=${encodeURIComponent(this.cronExpr)}`,
+        );
+        if (r.error) this.cronError = r.error;
+        else this.cronPreview = r.next;
+      } catch (e) {
+        this.cronError = e.message;
+      }
+    },
+    buildBody() {
+      const body = {
+        name: this.name.trim(),
+        kind: this.kind,
+        target: this.target,
+        scheduleType: this.scheduleType,
+        enabled: this.enabled,
+        params: JSON.parse(this.paramsText || '{}'),
+      };
+      if (this.scheduleType === 'interval') body.everyMs = this.everyMs;
+      else body.cronExpr = this.cronExpr.trim();
+      return body;
+    },
+    async save() {
+      this.error = '';
+      if (!this.name.trim() || !this.target) {
+        this.error = 'Give the task a name and pick a target.';
+        return;
+      }
+      let body;
+      try {
+        body = this.buildBody();
+      } catch {
+        this.error = 'The params aren’t valid JSON.';
+        return;
+      }
+      this.busy = true;
+      try {
+        if (this.isNew) {
+          const { task } = await api('POST', '/admin/scheduler/tasks', body);
+          this.id = task.id;
+          this.isNew = false;
+          history.replaceState(null, '', `#/scheduler/${task.id}`);
+        } else {
+          await api('PUT', `/admin/scheduler/tasks/${this.id}`, body);
+        }
+        toast('Task saved.');
+      } catch (e) {
+        this.error = e.message;
+      } finally {
+        this.busy = false;
+      }
+    },
+    async runNow() {
+      this.runBusy = true;
+      this.error = '';
+      try {
+        await api('POST', `/admin/scheduler/tasks/${this.id}/run`);
+        toast('Run queued.');
+        setTimeout(() => this.load(), 800);
+      } catch (e) {
+        this.error = e.message;
+      } finally {
+        this.runBusy = false;
+      }
+    },
+  }));
+
   // ───────── translations (site locales, merged with the theme's) ─────────
   Alpine.data('localesPage', () => ({
     ...H,
@@ -3235,6 +4151,7 @@ document.addEventListener('alpine:init', () => {
     edits: {}, // ns -> { key: newValue }
     resets: {}, // ns -> { key: true }
     raws: {}, // 'ns.key' -> raw textarea text for list fields
+    media: {}, // media id -> item, for 'media' fields (a plain number setting with a picker)
     errors: {},
     saving: false,
     testing: false,
@@ -3262,7 +4179,27 @@ document.addEventListener('alpine:init', () => {
       for (const n of out.namespaces) {
         if (!this.edits[n.namespace]) this.edits[n.namespace] = {};
         if (!this.resets[n.namespace]) this.resets[n.namespace] = {};
+        for (const f of n.fields)
+          if (f.media && n.state[f.key]?.value) this.loadMedia(n.state[f.key].value);
       }
+    },
+
+    async loadMedia(mid) {
+      if (!mid || this.media[mid]) return;
+      try {
+        this.media[mid] = (await api('GET', `/admin/media/${mid}`)).item;
+      } catch {
+        this.media[mid] = { id: mid, filename: '(deleted)', kind: 'file', variants: [] };
+      }
+    },
+    thumb,
+    async pickMedia(f) {
+      const item = await new Promise((resolve) =>
+        window.dispatchEvent(new CustomEvent('pick-media', { detail: { resolve } })),
+      );
+      if (!item) return;
+      this.media[item.id] = item;
+      this.set(f, item.id);
     },
 
     select(ns) {
@@ -3587,13 +4524,34 @@ document.addEventListener('alpine:init', () => {
     ...H,
     entries: [],
     filter: '',
+    actorEmail: '',
+    from: '',
+    to: '',
     more: false,
     async init() {
       await this.load(true);
     },
+    /** Shared by `load` and the export link — `from`/`to` are <input type=date> strings (a whole day, local). */
+    filterParams() {
+      const q = {};
+      if (this.filter) q.action = this.filter;
+      if (this.actorEmail) q.actorEmail = this.actorEmail;
+      if (this.from) q.from = String(new Date(this.from).getTime());
+      if (this.to) q.to = String(new Date(this.to).getTime() + 86_400_000 - 1);
+      return q;
+    },
+    get exportUrl() {
+      return '/api/admin/audit/export?' + new URLSearchParams(this.filterParams());
+    },
+    clearFilters() {
+      this.filter = '';
+      this.actorEmail = '';
+      this.from = '';
+      this.to = '';
+      this.load(true);
+    },
     async load(reset) {
-      const q = new URLSearchParams({ limit: '50' });
-      if (this.filter) q.set('action', this.filter);
+      const q = new URLSearchParams({ limit: '50', ...this.filterParams() });
       if (!reset && this.entries.length) q.set('before', this.entries[this.entries.length - 1].id);
       const { entries } = await api('GET', '/admin/audit?' + q);
       this.entries = reset ? entries : [...this.entries, ...entries];
@@ -3625,7 +4583,324 @@ document.addEventListener('alpine:init', () => {
           (m.attempts ? ` · attempt ${esc(m.attempts)}` : '') +
           (e.ip ? ` <span class="muted">from ${esc(e.ip)}</span>` : '')
         );
-      return '';
+      return contentActivityDetail(e) ?? '';
+    },
+  }));
+
+  // ───────── content activity ─────────
+  // "pages/about-us.html" → "About us" — no front-matter parsing, derived purely from the path, so it works
+  // uniformly for pages, components and any future site-file kind without reaching into their content.
+  function humanizePath(p) {
+    const base = (p || '')
+      .split('/')
+      .pop()
+      .replace(/\.(html|json)$/, '');
+    return base.replace(/[-_]+/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()) || p;
+  }
+  function siteFileKind(p) {
+    if (p?.startsWith('pages/')) return 'page';
+    if (p?.startsWith('components/')) return 'component';
+    if (p?.startsWith('locales/')) return 'translation';
+    return 'file';
+  }
+  const VERB = {
+    create: 'Created',
+    update: 'Updated',
+    delete: 'Deleted',
+    upload: 'Uploaded',
+    created: 'Created',
+    updated: 'Updated',
+    deleted: 'Deleted',
+    publish: 'Published',
+    unpublish: 'Unpublished',
+    schedule: 'Scheduled',
+    archive: 'Archived',
+  };
+  /**
+   * Shared by the Audit log's own `detail()` and Content Activity's: content-authoring actions read the same
+   * way wherever they're shown. Returns `null` (not `''`) for anything it doesn't recognise, so a caller with
+   * its own fallback (the general Audit log) can tell "no renderer for this" apart from "renders as nothing".
+   */
+  function contentActivityDetail(e) {
+    const m = e.meta || {};
+    if (e.action.startsWith('content.')) {
+      const verb = VERB[e.action.slice(8)] || e.action;
+      return (
+        `${verb} <strong>${esc(m.title || `#${e.entityId}`)}</strong>` +
+        (m.note ? ` <span class="muted">— ${esc(m.note)}</span>` : '')
+      );
+    }
+    if (e.action.startsWith('term.'))
+      return `${VERB[e.action.slice(5)] || e.action} <strong>${esc(m.name || `#${e.entityId}`)}</strong>`;
+    if (e.action.startsWith('site.file_')) {
+      const verb = VERB[e.action.slice(10)] || e.action;
+      const kind = siteFileKind(e.entityId);
+      return `${verb} ${kind} <strong>${esc(humanizePath(e.entityId))}</strong> <span class="muted mono">${esc(e.entityId || '')}</span>`;
+    }
+    if (e.action.startsWith('media.'))
+      return (
+        `${VERB[e.action.slice(6)] || e.action} <strong>${esc(m.filename || `#${e.entityId}`)}</strong>` +
+        (m.alt ? ' <span class="muted">(alt text changed)</span>' : '')
+      );
+    if (e.action.startsWith('menu.'))
+      return (
+        `${VERB[e.action.slice(5)] || e.action} menu <strong>${esc(e.entityId)}</strong>` +
+        (m.items !== undefined ? ` <span class="muted">(${esc(m.items)} items)</span>` : '')
+      );
+    if (e.action.startsWith('redirect.'))
+      return (
+        `${VERB[e.action.slice(9)] || e.action} redirect <strong>${esc(m.from || '')}</strong>` +
+        (m.to ? ` → ${esc(m.to)}` : '')
+      );
+    if (e.action.startsWith('seo.rule_'))
+      return `${VERB[e.action.slice(9)] || e.action} SEO rule <strong>${esc(m.pattern || `#${e.entityId}`)}</strong>`;
+    return null;
+  }
+
+  Alpine.data('contentActivityPage', () => ({
+    ...H,
+    entries: [],
+    actorEmail: '',
+    from: '',
+    to: '',
+    more: false,
+    detail: contentActivityDetail,
+    async init() {
+      await this.load(true);
+    },
+    filterParams() {
+      const q = {};
+      if (this.actorEmail) q.actorEmail = this.actorEmail;
+      if (this.from) q.from = String(new Date(this.from).getTime());
+      if (this.to) q.to = String(new Date(this.to).getTime() + 86_400_000 - 1);
+      return q;
+    },
+    get exportUrl() {
+      return '/api/admin/audit/content/export?' + new URLSearchParams(this.filterParams());
+    },
+    clearFilters() {
+      this.actorEmail = '';
+      this.from = '';
+      this.to = '';
+      this.load(true);
+    },
+    async load(reset) {
+      const q = new URLSearchParams({ limit: '50', ...this.filterParams() });
+      if (!reset && this.entries.length) q.set('before', this.entries[this.entries.length - 1].id);
+      const { entries } = await api('GET', '/admin/audit/content?' + q);
+      this.entries = reset ? entries : [...this.entries, ...entries];
+      this.more = entries.length === 50;
+    },
+  }));
+
+  // ───────── analytics ─────────
+  // Fixed categorical order (dataviz skill: "assign hues in fixed order, never cycled") — a device that never
+  // appears just never draws a segment, rather than the remaining ones being repainted.
+  const DEVICE_ORDER = ['desktop', 'mobile', 'tablet', 'bot', 'unknown'];
+  const DEVICE_COLOR = {
+    desktop: 'var(--chart-1)',
+    mobile: 'var(--chart-2)',
+    tablet: 'var(--chart-3)',
+    bot: 'var(--chart-4)',
+    unknown: 'var(--chart-other)',
+  };
+  const TREND_W = 600,
+    TREND_H = 170,
+    TREND_TOP = 10;
+
+  Alpine.data('analyticsPage', (tab) => ({
+    ...H,
+    tab,
+    // Public visitors are anonymous until customer accounts exist, so the "who" screen defaults to the admin panel.
+    surface: tab === 'users' ? 'admin' : 'public',
+    from: new Date(Date.now() - 29 * 86_400_000).toISOString().slice(0, 10),
+    to: '',
+    overview: null,
+    trend: [],
+    devices: [],
+    referrers: [],
+    direct: 0,
+    hoverIdx: null,
+    pages: [],
+    sessions: [],
+    moreSessions: false,
+    users: [],
+    async init() {
+      await this.load();
+    },
+    rangeParams() {
+      const q = { surface: this.surface };
+      if (this.from) q.from = String(new Date(this.from).getTime());
+      if (this.to) q.to = String(new Date(this.to).getTime() + 86_400_000 - 1);
+      return q;
+    },
+    pct(n) {
+      return Math.round(n * 100) + '%';
+    },
+    duration(ms) {
+      if (ms == null) return '–';
+      return ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(1)} s`;
+    },
+    shortDate(iso) {
+      return new Date(`${iso}T00:00:00`).toLocaleDateString(undefined, {
+        month: 'short',
+        day: 'numeric',
+      });
+    },
+    async load() {
+      const q = new URLSearchParams(this.rangeParams());
+      if (this.tab === 'overview') {
+        const [ov, tr, dv, rf] = await Promise.all([
+          api('GET', '/admin/analytics/overview?' + q),
+          api('GET', '/admin/analytics/trend?' + q),
+          api('GET', '/admin/analytics/devices?' + q),
+          api('GET', '/admin/analytics/referrers?' + q),
+        ]);
+        this.overview = ov;
+        this.trend = tr.trend;
+        this.devices = dv.devices;
+        this.referrers = rf.top;
+        this.direct = rf.direct;
+      } else if (this.tab === 'pages') {
+        this.pages = (await api('GET', '/admin/analytics/pages?' + q)).pages;
+      } else if (this.tab === 'sessions') {
+        await this.loadSessions(true);
+      } else if (this.tab === 'users') {
+        this.users = (await api('GET', '/admin/analytics/users?' + q)).users;
+      }
+    },
+    async loadSessions(reset) {
+      const q = new URLSearchParams({ limit: '50', ...this.rangeParams() });
+      if (!reset && this.sessions.length)
+        q.set('before', this.sessions[this.sessions.length - 1].lastSeen);
+      const { sessions } = await api('GET', '/admin/analytics/sessions?' + q);
+      this.sessions = reset ? sessions : [...this.sessions, ...sessions];
+      this.moreSessions = sessions.length === 50;
+    },
+
+    // ───────── trend chart (two-line, pageviews + visitors) ─────────
+    get trendMax() {
+      return Math.max(1, ...this.trend.flatMap((t) => [t.pageviews, t.visitors]));
+    },
+    trendX(i) {
+      return this.trend.length > 1 ? (i / (this.trend.length - 1)) * TREND_W : TREND_W / 2;
+    },
+    trendY(v) {
+      return TREND_H - (v / this.trendMax) * (TREND_H - TREND_TOP);
+    },
+    trendLine(key) {
+      return this.trend.map((t, i) => `${this.trendX(i)},${this.trendY(t[key])}`).join(' ');
+    },
+    /** A handful of evenly-spaced x-axis labels — never one per day, that's unreadable past a couple of weeks. */
+    get trendTicks() {
+      const n = this.trend.length;
+      if (n <= 1) return this.trend.map((t, i) => ({ i, date: t.date }));
+      const want = Math.min(6, n);
+      const idxs = new Set([0, n - 1]);
+      for (let k = 1; k < want - 1; k++) idxs.add(Math.round((k * (n - 1)) / (want - 1)));
+      return [...idxs].sort((a, b) => a - b).map((i) => ({ i, date: this.trend[i].date }));
+    },
+    onTrendMove(evt) {
+      const rect = this.$refs.trendSvg.getBoundingClientRect();
+      const frac = Math.max(0, Math.min(1, (evt.clientX - rect.left) / rect.width));
+      this.hoverIdx = Math.round(frac * (this.trend.length - 1));
+    },
+    onTrendLeave() {
+      this.hoverIdx = null;
+    },
+    /**
+     * Built as a markup string, not `<template x-for>`/`x-if` inside the `<svg>`: real browsers parse a
+     * `<template>` nested in inline SVG as foreign content and never populate Alpine's loop scope from it (it
+     * throws "x is not defined" for every binding inside) — invisible in jsdom, which doesn't reproduce that
+     * parsing quirk, so this was only caught testing in an actual browser. Every value here is server-computed
+     * (a date, a count) or one of this file's own fixed color tokens, never visitor input.
+     */
+    get trendSvgInner() {
+      const p = [];
+      p.push(
+        `<line x1="0" y1="${this.trendY(0)}" x2="${TREND_W}" y2="${this.trendY(0)}" class="chart-crosshair"></line>`,
+      );
+      p.push(
+        `<polyline class="chart-line" points="${esc(this.trendLine('pageviews'))}" stroke="var(--chart-1)"></polyline>`,
+      );
+      p.push(
+        `<polyline class="chart-line" points="${esc(this.trendLine('visitors'))}" stroke="var(--chart-2)"></polyline>`,
+      );
+      for (const t of this.trendTicks)
+        p.push(
+          `<text class="chart-axis-label" x="${this.trendX(t.i)}" y="190" text-anchor="middle">${esc(this.shortDate(t.date))}</text>`,
+        );
+      const row = this.hoverIdx !== null ? this.trend[this.hoverIdx] : null;
+      if (row) {
+        const x = this.trendX(this.hoverIdx);
+        const tx = Math.min(Math.max(x, 70), TREND_W - 70);
+        p.push(`<line x1="${x}" y1="0" x2="${x}" y2="${TREND_H}" class="chart-crosshair"></line>`);
+        p.push(
+          `<circle cx="${x}" cy="${this.trendY(row.pageviews)}" r="4" fill="var(--chart-1)" class="chart-dot"></circle>`,
+        );
+        p.push(
+          `<circle cx="${x}" cy="${this.trendY(row.visitors)}" r="4" fill="var(--chart-2)" class="chart-dot"></circle>`,
+        );
+        p.push(`<g transform="translate(${tx},12)">
+          <rect class="chart-tooltip-bg" x="-62" y="-10" width="124" height="52" rx="4"></rect>
+          <text class="chart-tooltip-text" x="0" y="4" text-anchor="middle">${esc(this.shortDate(row.date))}</text>
+          <text class="chart-tooltip-text" x="0" y="18" text-anchor="middle">Views: ${row.pageviews}</text>
+          <text class="chart-tooltip-text" x="0" y="32" text-anchor="middle">Visitors: ${row.visitors}</text>
+        </g>`);
+      }
+      return p.join('');
+    },
+
+    // ───────── device donut ─────────
+    get donutTotal() {
+      return this.devices.reduce((s, d) => s + d.count, 0);
+    },
+    get donutSegments() {
+      const R = 70,
+        C = 2 * Math.PI * R,
+        GAP = 4;
+      const total = this.donutTotal || 1;
+      const present = DEVICE_ORDER.map((device) => ({
+        device,
+        count: this.devices.find((d) => d.device === device)?.count || 0,
+      })).filter((d) => d.count > 0);
+      const usable = Math.max(0, C - present.length * GAP);
+      let acc = 0;
+      return present.map((d) => {
+        const dash = (d.count / total) * usable;
+        const seg = {
+          device: d.device,
+          count: d.count,
+          pct: d.count / total,
+          color: DEVICE_COLOR[d.device],
+          dash,
+          gap: C - dash,
+          offset: -acc,
+        };
+        acc += dash + GAP;
+        return seg;
+      });
+    },
+    /** Same reason as `trendSvgInner`: a `<template x-for>` inside `<svg>` doesn't bind in a real browser. */
+    get donutSvgInner() {
+      return this.donutSegments
+        .map(
+          (seg) =>
+            `<circle cx="100" cy="100" r="70" fill="none" stroke-width="32" stroke="${seg.color}" stroke-dasharray="${seg.dash} ${seg.gap}" stroke-dashoffset="${seg.offset}" transform="rotate(-90 100 100)"></circle>`,
+        )
+        .join('');
+    },
+
+    // ───────── top referrers (a ranked magnitude list, one hue — not a multi-series chart) ─────────
+    get referrerRows() {
+      const rows = [
+        { host: 'Direct', sessions: this.direct },
+        ...this.referrers.map((r) => ({ host: r.host, sessions: r.sessions })),
+      ].filter((r) => r.sessions > 0);
+      const max = Math.max(1, ...rows.map((r) => r.sessions));
+      return rows
+        .sort((a, b) => b.sessions - a.sessions)
+        .map((r) => ({ ...r, pct: Math.round((r.sessions / max) * 100) }));
     },
   }));
 
@@ -3651,6 +4926,40 @@ document.addEventListener('alpine:init', () => {
     railPct(n) {
       const v = this.data?.dbConfigVersion || 0;
       return v === 0 ? 100 : Math.max(4, Math.min(100, (n.configVersion / v) * 100));
+    },
+  }));
+
+  // A live snapshot (D-056's analytics_sessions), not a date-ranged report — polls like clusterPage rather than
+  // taking a from/to filter.
+  Alpine.data('analyticsActivePage', () => ({
+    ...H,
+    surface: 'public',
+    windowMin: 5,
+    data: null,
+    timer: null,
+    async init() {
+      await this.refresh();
+      this.timer = setInterval(() => this.refresh(), 15000);
+    },
+    destroy() {
+      clearInterval(this.timer);
+    },
+    async refresh() {
+      try {
+        const q = new URLSearchParams({
+          surface: this.surface,
+          windowMs: String(this.windowMin * 60_000),
+        });
+        this.data = await api('GET', '/admin/analytics/active?' + q);
+      } catch {
+        /* transient; next tick retries */
+      }
+    },
+    get maxCount() {
+      return Math.max(1, ...(this.data?.byPage || []).map((r) => r.count));
+    },
+    pctOf(n) {
+      return Math.round((n / this.maxCount) * 100);
     },
   }));
 });

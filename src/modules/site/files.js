@@ -126,7 +126,13 @@ export function createSiteFiles({
         renderMs: settings.get('themes.render_ms'),
         memoryMb: settings.get('themes.render_memory_mb'),
       },
-      filters: { asset_url: (x) => x, t: (x) => x, absolute_url: (x) => x, handle: (x) => x },
+      filters: {
+        asset_url: (x) => x,
+        library_url: (x) => x,
+        t: (x) => x,
+        absolute_url: (x) => x,
+        handle: (x) => x,
+      },
     });
 
   /** Validate one file completely. Returns what it is; throws a 422 whose message says what to fix. */

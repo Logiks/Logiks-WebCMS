@@ -148,6 +148,29 @@ describe('serving pages from the site tree', () => {
     assert.equal((await get('/cached')).status, 404);
   });
 
+  test('a component script gets a CSP nonce that matches on a cache HIT (D-055)', async () => {
+    await put('components/tracker.html', '<script>window.__x = 1;</script>');
+    await put('pages/scripted.html', '{% render "tracker" %}');
+    const first = await get('/scripted');
+    assert.equal(first.status, 200);
+    const nonce = /<script nonce="([^"]+)">window\.__x = 1;<\/script>/.exec(first.text)?.[1];
+    assert.ok(nonce, 'the script tag carries a nonce');
+    assert.ok(first.headers['content-security-policy'].includes(`'nonce-${nonce}'`));
+    assert.match(first.headers['content-security-policy'], /script-src[^;]*'self'/);
+
+    const second = await get('/scripted');
+    assert.equal(second.headers['x-cache'], 'HIT');
+    assert.match(
+      second.text,
+      new RegExp(`<script nonce="${nonce.replace(/[+/=]/g, '\\$&')}">`),
+      'the cached html keeps its original nonce',
+    );
+    assert.ok(
+      second.headers['content-security-policy'].includes(`'nonce-${nonce}'`),
+      'a HIT repeats the nonce already baked into the cached html, never a fresh one',
+    );
+  });
+
   test('two components with the same class names do not affect each other', async () => {
     const red = '<style>.title { color: red }</style><h2 class="title">red</h2>';
     const blue = '<style>.title { color: blue }</style><h2 class="title">blue</h2>';

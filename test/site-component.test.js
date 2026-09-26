@@ -101,8 +101,11 @@ describe('component files', () => {
     );
   });
 
-  test('scripts and unclosed styles are refused', () => {
-    fails(() => parseComponent('<p>x</p><script>1</script>'), /<script>/);
+  test('a script is allowed (D-055); unclosed styles are still refused', () => {
+    assert.equal(
+      parseComponent('<p>x</p><script>1</script>').template,
+      '<p>x</p><script>1</script>',
+    );
     fails(() => parseComponent('<style>.a{color:red}<p>x</p>'), /not closed/);
   });
 
@@ -193,5 +196,13 @@ describe('compiled components', () => {
       ['aaaaaaaa', 'bbbbbbbb'],
     );
     assert.deepEqual(scopeIdsIn('<p data-c="short">'), []);
+  });
+
+  test('a <script> tag is given a CSP nonce automatically (D-055)', () => {
+    const c = compileComponent('site:z', '<p>x</p><script>alert(1)</script>');
+    assert.match(c.template, /<script nonce="\{\{ csp_nonce \}\}">alert\(1\)<\/script>/);
+    // an author-supplied nonce is left alone, not doubled up
+    const withOwn = compileComponent('site:z2', '<script nonce="fixed">1</script>');
+    assert.match(withOwn.template, /<script nonce="fixed">1<\/script>/);
   });
 });
