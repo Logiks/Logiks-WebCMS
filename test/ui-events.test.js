@@ -35,12 +35,22 @@ const setValue = (el, v) => {
   el.dispatchEvent(new b.win.Event('change', { bubbles: true }));
 };
 
-test('Events and Webhooks are in the menu, under Automation', async () => {
+test('Webhooks is in the menu, under Automation; Events moved to Logs (D-059)', async () => {
   b.go('#/overview');
   const navText = () =>
     `${b.$$('nav a, aside a, nav button, aside button').map((a) => a.textContent.trim())}`;
-  await wait(() => /Events/.test(navText()));
-  assert.match(navText(), /Webhooks/);
+  await wait(() => /Webhooks/.test(navText()));
+  assert.match(navText(), /Events/);
+  // A collapsed group's own wrapper is hidden (x-show); its links aren't individually, so filter on the
+  // wrapper (matches ui.test.js's subLinks()), not on '.nav-sub-link' directly.
+  const groupLinks = () =>
+    b
+      .$$('.nav-sub')
+      .filter(b.visible)
+      .flatMap((g) => [...g.querySelectorAll('.nav-sub-link')].map((a) => a.textContent.trim()));
+  b.click(b.button('Automation'));
+  await wait(() => groupLinks().length);
+  assert.deepEqual(groupLinks(), ['Webhooks', 'Scheduler']);
 });
 
 test('fire a test event from the Events screen and see it in the log', async () => {

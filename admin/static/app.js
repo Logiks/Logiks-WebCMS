@@ -463,11 +463,10 @@ document.addEventListener('alpine:init', () => {
             })),
             { id: 'terms', label: 'Categories and tags', perm: 'content.terms.manage' },
             { id: 'media', label: 'Media', perm: 'media.read' },
-            { id: 'content-activity', label: 'Activity', perm: 'content.activity' },
           ],
         },
         {
-          // Page views, sessions and activity, page-wise and user-wise (D-056) — near Content/Media, before Audit Logs.
+          // Page views, sessions and activity, page-wise and user-wise (D-056) — near Content/Media, before Logs.
           id: 'analytics',
           label: 'Analytics',
           icon: 'bi-graph-up',
@@ -477,6 +476,20 @@ document.addEventListener('alpine:init', () => {
             { id: 'analytics-pages', label: 'Page Analytics', perm: 'analytics.read' },
             { id: 'analytics-sessions', label: 'Sessions', perm: 'analytics.read' },
             { id: 'analytics-users', label: 'User-wise Analytics', perm: 'analytics.read' },
+          ],
+        },
+        {
+          // Every read-only "who did what, when" screen in one place, pulled out of Security/Content/Automation
+          // (D-059 reverses part of D-058's placement): each screen keeps its own permission unchanged
+          // (audit.read/content.activity/events.read), so a role's access is exactly what it was before — only
+          // the menu location moved.
+          id: 'logs',
+          label: 'Logs',
+          icon: 'bi-journal-text',
+          items: [
+            { id: 'audit', label: 'Audit log', perm: 'audit.read' },
+            { id: 'content-activity', label: 'Activity', perm: 'content.activity' },
+            { id: 'events', label: 'Events', perm: 'events.read' },
           ],
         },
         {
@@ -513,7 +526,6 @@ document.addEventListener('alpine:init', () => {
           items: [
             { id: 'users', label: 'Users', perm: 'users.read' },
             { id: 'roles', label: 'Roles and permissions', perm: 'roles.read' },
-            { id: 'audit', label: 'Audit log', perm: 'audit.read' },
           ],
         },
         {
@@ -531,7 +543,6 @@ document.addEventListener('alpine:init', () => {
           label: 'Automation',
           icon: 'bi-lightning-charge',
           items: [
-            { id: 'events', label: 'Events', perm: 'events.read' },
             { id: 'webhooks', label: 'Webhooks', perm: 'webhooks.read' },
             { id: 'scheduler', label: 'Scheduler', perm: 'scheduler.read' },
           ],
@@ -749,8 +760,12 @@ document.addEventListener('alpine:init', () => {
           return;
         }
         this.login.password = '';
-        this.setUser(out.user);
+        // loadTypes() before setUser(): `ready` is already true on the login screen, so setUser() alone flips
+        // `view` straight to 'app' and mounts the shell — loading types after that point is too late for
+        // anything that reads contentTypes/meta.contentTypes at mount (the nav's Content group, Overview's
+        // content KPI). The session cookie from the login response above already authenticates this call.
         await this.loadTypes();
+        this.setUser(out.user);
         this.syncRoute();
       } catch (e) {
         this.login.error = e.message;
@@ -4124,21 +4139,62 @@ document.addEventListener('alpine:init', () => {
     cluster: null,
     recent: [],
     maintenance: false,
+    failedJobs: null,
+    content: null,
+    traffic: null,
+    active: null,
+    mediaTotal: null,
+    usersTotal: null,
+    usersActiveWeek: null,
     get up() {
       return this.cluster ? this.cluster.nodes.filter((n) => n.status === 'up').length : 0;
     },
     get drifted() {
       return this.cluster ? this.cluster.nodes.filter((n) => n.drift).length : 0;
     },
+    // Each KPI tile is gated by the same permission that already protects its data elsewhere in the admin —
+    // a role sees only the tiles it could already open the full screen for, never a preview of something it can't.
     async init() {
-      const [info, cluster, audit] = await Promise.all([
-        api('GET', '/public/info').catch(() => null),
-        this.can('cluster.read') ? api('GET', '/admin/cluster').catch(() => null) : null,
-        this.can('audit.read') ? api('GET', '/admin/audit?limit=8').catch(() => null) : null,
-      ]);
+      const [info, cluster, audit, failed, content, traffic, active, media, users] =
+        await Promise.all([
+          api('GET', '/public/info').catch(() => null),
+          this.can('cluster.read') ? api('GET', '/admin/cluster').catch(() => null) : null,
+          this.can('audit.read') ? api('GET', '/admin/audit?limit=8').catch(() => null) : null,
+          this.can('cluster.read')
+            ? api('GET', '/admin/system/jobs/failed').catch(() => null)
+            : null,
+          // Not pre-checked with meta.contentTypes here: right after an in-SPA sign-in (as opposed to a fresh
+          // page load), this component can mount before loadTypes() resolves — meta.contentTypes would still be
+          // stale/empty at that instant. The route itself already 403s with no readable type, which .catch()
+          // turns into the same "hide the tile" outcome, so the server's own gate is the only check needed.
+          api('GET', '/admin/content/summary').catch(() => null),
+          this.can('analytics.read')
+            ? api(
+                'GET',
+                `/admin/analytics/overview?surface=public&from=${Date.now() - 86_400_000}`,
+              ).catch(() => null)
+            : null,
+          this.can('analytics.read')
+            ? api('GET', '/admin/analytics/active?surface=public&windowMs=300000').catch(() => null)
+            : null,
+          this.can('media.read') ? api('GET', '/admin/media?limit=1').catch(() => null) : null,
+          this.can('users.read') ? api('GET', '/admin/users').catch(() => null) : null,
+        ]);
       this.maintenance = !!info?.maintenance;
       this.cluster = cluster;
       this.recent = audit?.entries || [];
+      this.failedJobs = failed ? failed.jobs.length : null;
+      this.content = content?.visible ? content : null;
+      this.traffic = traffic;
+      this.active = active;
+      this.mediaTotal = media ? media.total : null;
+      if (users?.users) {
+        this.usersTotal = users.users.length;
+        const weekAgo = Date.now() - 7 * 86_400_000;
+        this.usersActiveWeek = users.users.filter(
+          (u) => u.lastLoginAt && u.lastLoginAt >= weekAgo,
+        ).length;
+      }
     },
   }));
 

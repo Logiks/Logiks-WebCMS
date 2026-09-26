@@ -317,10 +317,16 @@ test('Menu: opening a screen by its address expands its group; groups with nothi
   const b = await openAdmin(node.url);
   await b.signIn('auditor@example.com', 'Some-long-pass-12');
   const shown = () => b.$$('.nav-link-x').map((a) => a.textContent.trim());
-  await until(() => shown().includes('Security'));
+  await until(() => shown().includes('Logs'));
   assert.ok(!shown().includes('Operations'), 'no Operations permissions, no Operations group');
   assert.ok(!shown().includes('Settings'));
-  b.click(b.button('Security'));
+  // audit.read alone (no users.read/roles.read) leaves Security with nothing to show — Audit log lives in
+  // Logs now (D-059), so Security doesn't render as a group at all for this role.
+  assert.ok(
+    !shown().includes('Security'),
+    'audit.read moved to Logs, so Security has no visible items',
+  );
+  b.click(b.button('Logs'));
   await until(() => b.$$('.nav-sub-link').some(b.visible));
   assert.deepEqual(
     b

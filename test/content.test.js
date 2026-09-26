@@ -374,6 +374,28 @@ test('listing filters by status and title, and pages come back in address order'
   assert.deepEqual(paths, [...paths].sort());
 });
 
+test('dashboardSummary: published/draft counts and this-week creations, scoped to types the actor can read', async () => {
+  await node.ctx.content.create('page', { ...page('KPI page 1'), status: 'published' }, null);
+  await node.ctx.content.create('page', page('KPI page 2 (draft)'), null);
+  await node.ctx.content.create('post', { title: 'KPI post', data: { body: blocks('hi') } }, null);
+
+  const full = await node.ctx.content.dashboardSummary(null);
+  assert.equal(full.visible, true);
+  assert.ok(full.published >= 1);
+  assert.ok(full.draft >= 2);
+  assert.ok(full.createdThisWeek >= 3);
+
+  // An actor who can read no content type at all gets a hidden, zeroed tile rather than an error.
+  const hidden = await node.ctx.content.dashboardSummary({ can: () => false });
+  assert.deepEqual(hidden, { visible: false, published: 0, draft: 0, createdThisWeek: 0 });
+
+  // The route sits behind the same `usesContent` gate as the rest of /content: no readable type, no access at all.
+  const noContent = await userWith('NoContentKpi', ['admin.access']);
+  assert.equal((await noContent.get('/api/admin/content/summary')).status, 403);
+  assert.equal((await admin.get('/api/admin/content/summary')).status, 200);
+  assert.equal((await admin.get('/api/admin/content/summary')).body.visible, true);
+});
+
 test('saving invalidates precisely: drafts touch nothing shared, body edits touch the entry, renames also the page tree and menus', async () => {
   const bumped = async (fn, tags) => {
     const before = await node.ctx.cache.versions(tags);

@@ -21,12 +21,13 @@ after(async () => {
   await node.close();
 });
 
-test('Activity is in the menu, under Content — not under Security with the general Audit log', async () => {
+test('Activity is in the Logs menu, alongside the general Audit log (D-059)', async () => {
   b.go('#/overview');
   const navText = () => `${b.$$('.nav-link-x').map((a) => a.textContent.trim())}`;
-  await wait(() => /Content/.test(navText()));
-  b.click(b.button('Content'));
+  await wait(() => /Logs/.test(navText()));
+  b.click(b.button('Logs'));
   await wait(() => /Activity/.test(navText()));
+  assert.match(navText(), /Audit log/);
 });
 
 test('shows a human-readable line for a content change, and never a security event', async () => {

@@ -167,13 +167,38 @@
       <section x-data="overviewPage">
         <div class="page-head"><h1>Overview</h1><p>What's running, and what changed recently.</p></div>
         <div class="alert alert-warning" x-show="maintenance">Maintenance mode is on. Visitors see a maintenance page; the admin is unaffected. <a href="#/settings/general">Turn it off</a></div>
+
+        <div class="row g-3 mb-3">
+          <div class="col-6 col-lg-3" x-show="content">
+            <div class="panel p-3 h-100"><div class="muted small mb-2">Content</div>
+              <div class="bigver" x-text="content ? content.published : '–'"></div>
+              <div class="small mt-2 muted"><span x-text="content ? content.draft : 0"></span> draft, <span x-text="content ? content.createdThisWeek : 0"></span> new this week</div></div>
+          </div>
+          <div class="col-6 col-lg-3" x-show="traffic">
+            <div class="panel p-3 h-100"><div class="muted small mb-2">Traffic, last 24h</div>
+              <div class="bigver" x-text="traffic ? traffic.pageviews : '–'"></div>
+              <div class="small mt-2 muted"><span x-text="active ? active.total : 0"></span> active now · <a href="#/analytics-active">View</a></div></div>
+          </div>
+          <div class="col-6 col-lg-3" x-show="mediaTotal !== null">
+            <div class="panel p-3 h-100"><div class="muted small mb-2">Media</div>
+              <div class="bigver" x-text="mediaTotal"></div>
+              <div class="small mt-2 muted">files in the library</div></div>
+          </div>
+          <div class="col-6 col-lg-3" x-show="usersTotal !== null">
+            <div class="panel p-3 h-100"><div class="muted small mb-2">Users</div>
+              <div class="bigver" x-text="usersTotal"></div>
+              <div class="small mt-2 muted"><span x-text="usersActiveWeek"></span> signed in this week</div></div>
+          </div>
+        </div>
+
         <div class="row g-3 mb-3" x-show="cluster">
-          <div class="col-md-4"><div class="panel p-3 h-100"><div class="muted small mb-2">Config version</div><div class="bigver" x-text="cluster?.dbConfigVersion"></div><div class="muted small mt-2">Bumps on every settings change</div></div></div>
-          <div class="col-md-4"><div class="panel p-3 h-100"><div class="muted small mb-2">Servers up</div><div class="bigver"><span x-text="up"></span><span class="muted" style="font-size:1.4rem"> / <span x-text="cluster?.nodes.length"></span></span></div><div class="small mt-2" :class="drifted ? 'text-warning' : 'muted'" x-text="drifted ? drifted + ' behind on config' : 'All on the latest config'"></div></div></div>
-          <div class="col-md-4"><div class="panel p-3 h-100"><div class="muted small mb-2">Runtime</div>
+          <div class="col-md-3"><div class="panel p-3 h-100"><div class="muted small mb-2">Config version</div><div class="bigver" x-text="cluster?.dbConfigVersion"></div><div class="muted small mt-2">Bumps on every settings change</div></div></div>
+          <div class="col-md-3"><div class="panel p-3 h-100"><div class="muted small mb-2">Servers up</div><div class="bigver"><span x-text="up"></span><span class="muted" style="font-size:1.4rem"> / <span x-text="cluster?.nodes.length"></span></span></div><div class="small mt-2" :class="drifted ? 'text-warning' : 'muted'" x-text="drifted ? drifted + ' behind on config' : 'All on the latest config'"></div></div></div>
+          <div class="col-md-3"><div class="panel p-3 h-100"><div class="muted small mb-2">Runtime</div>
             <div class="small"><span class="mono" x-text="cluster?.runtime.database"></span> database · <span class="mono" x-text="cluster?.runtime.bus"></span> bus</div>
             <div class="small"><span class="mono" x-text="cluster?.runtime.sessions"></span> sessions · <span class="mono" x-text="cluster?.runtime.jobs"></span> jobs</div>
             <div class="small mt-2 muted" x-show="cluster && !cluster.runtime.redis">Redis isn't configured. Fine for development; production clusters need it.</div></div></div>
+          <div class="col-md-3"><div class="panel p-3 h-100"><div class="muted small mb-2">Failed jobs</div><div class="bigver" x-text="failedJobs"></div><div class="small mt-2 muted"><a href="#/system">View in System</a></div></div></div>
         </div>
         <div class="panel" x-show="can('audit.read')">
           <div class="panel-h">Recent activity <a class="small fw-normal" href="#/audit">View all</a></div>

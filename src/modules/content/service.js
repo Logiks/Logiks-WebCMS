@@ -378,6 +378,35 @@ export function createContentService({ db, dialect, audit, cache, settings, regi
       return (await hydrate([row]))[0];
     },
 
+    /**
+     * Published/draft counts and this-week creations across every type `actor` can read — the Overview KPI
+     * tile, not a per-type report, so it's one aggregate query over whichever types are visible rather than
+     * `list()` called once per type. Returns `visible: false` (not an error) when the actor can't read any
+     * content type, so the caller can just hide the tile.
+     */
+    async dashboardSummary(actor = null) {
+      const allowed = registry
+        .types()
+        .filter((t) => can(actor, t.id, 'read'))
+        .map((t) => t.id);
+      if (!allowed.length) return { visible: false, published: 0, draft: 0, createdThisWeek: 0 };
+      const base = () => db('entries').whereIn('type', allowed);
+      const [published, draft, createdThisWeek] = await Promise.all([
+        base().where('status', 'published').count({ n: '*' }).first(),
+        base().where('status', 'draft').count({ n: '*' }).first(),
+        base()
+          .where('created_at', '>=', now() - 7 * 86_400_000)
+          .count({ n: '*' })
+          .first(),
+      ]);
+      return {
+        visible: true,
+        published: Number(published.n) || 0,
+        draft: Number(draft.n) || 0,
+        createdThisWeek: Number(createdThisWeek.n) || 0,
+      };
+    },
+
     // ───────── writing ─────────
     async create(typeId, input, actor = null) {
       const type = registry.type(typeId);

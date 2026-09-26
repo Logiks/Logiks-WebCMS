@@ -43,12 +43,16 @@ test('Content lives under its own menu group, with a link per content type', asy
   // The shell can paint before Alpine's nav x-for has flushed the permission-filtered list; wait for the button first.
   await wait(() => b.button('Content'));
   b.click(b.button('Content'));
-  await wait(() => b.$$('.nav-sub-link').some((a) => a.textContent.trim() === 'Pages'));
-  const links = b
-    .$$('.nav-sub')
-    .filter(b.visible)
-    .flatMap((g) => [...g.querySelectorAll('.nav-sub-link')].map((a) => a.textContent.trim()));
-  assert.deepEqual(links, ['Pages', 'Posts', 'Categories and tags', 'Media', 'Activity']);
+  // jsdom's textContent includes text hidden by x-show — 'Pages' exists in the DOM whether or not the group's
+  // wrapper (`.nav-sub`, not the link itself) is actually shown, so wait on the same visible-wrapper computation
+  // the assertion below uses, not on the link's own (always-unset) inline style.
+  const links = () =>
+    b
+      .$$('.nav-sub')
+      .filter(b.visible)
+      .flatMap((g) => [...g.querySelectorAll('.nav-sub-link')].map((a) => a.textContent.trim()));
+  await wait(() => links().includes('Pages'));
+  assert.deepEqual(links(), ['Pages', 'Posts', 'Categories and tags', 'Media']);
   b.click(b.button('Content'));
 });
 

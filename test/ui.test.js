@@ -99,6 +99,7 @@ test('signing in shows the shell with navigation for an administrator', async ()
       'Webmaster',
       'Content',
       'Analytics',
+      'Logs',
       'Appearance',
       'System',
       'Settings',
@@ -106,23 +107,29 @@ test('signing in shows the shell with navigation for an administrator', async ()
       'Operations',
       'Automation',
     ],
-    'top level: two links and eight groups',
+    'top level: two links and nine groups',
   );
   assert.deepEqual(subLinks(), [], 'groups start collapsed on Overview');
 
   click(button('Content'));
   await until(() => subLinks().length);
-  assert.deepEqual(subLinks(), ['Pages', 'Posts', 'Categories and tags', 'Media', 'Activity']);
+  assert.deepEqual(subLinks(), ['Pages', 'Posts', 'Categories and tags', 'Media']);
   click(button('Content'));
+  await until(() => subLinks().length === 0);
+
+  click(button('Logs'));
+  await until(() => subLinks().length);
+  assert.deepEqual(subLinks(), ['Audit log', 'Activity', 'Events']);
+  click(button('Logs'));
   await until(() => subLinks().length === 0);
 
   click(button('Security'));
   await until(() => subLinks().length);
-  assert.deepEqual(subLinks(), ['Users', 'Roles and permissions', 'Audit log']);
+  assert.deepEqual(subLinks(), ['Users', 'Roles and permissions']);
   assert.equal(button('Security').getAttribute('aria-expanded'), 'true');
   click(button('Operations'));
-  await until(() => subLinks().length === 6);
-  assert.deepEqual(subLinks().slice(3), ['Cluster', 'System', 'Updates']);
+  await until(() => subLinks().length === 5);
+  assert.deepEqual(subLinks().slice(2), ['Cluster', 'System', 'Updates']);
   click(button('Security'));
   await until(() => subLinks().length === 3);
   assert.equal(button('Security').getAttribute('aria-expanded'), 'false');

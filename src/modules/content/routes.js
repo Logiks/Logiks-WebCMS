@@ -60,6 +60,11 @@ export default function contentRoutes(ctx) {
     });
   });
 
+  // The Overview dashboard's KPI tile — aggregated across whatever types this actor can read, not a per-type report.
+  r.get('/content/summary', async (req, res) => {
+    res.json(await content.dashboardSummary(actorOf(req)));
+  });
+
   r.get('/content/types/:type/entries', async (req, res) => {
     const { status, q, parentId, termId, locale, limit, offset } = req.query;
     res.json(
