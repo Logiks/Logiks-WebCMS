@@ -118,6 +118,11 @@ body {
   height: 100vh;
   display: flex;
   flex-direction: column;
+  /* With every nav group open, the menu can be taller than the viewport — scroll the sidebar itself
+     rather than letting content overflow its fixed-height box (its dark background stops at 100vh,
+     so overflowing content used to render over the page's plain background once scrolled past it). */
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 .brand {
   font-weight: 600;

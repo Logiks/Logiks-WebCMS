@@ -157,18 +157,17 @@ test('preview frames keep the site origin (so theme files load) and nothing more
       .readdirSync(modulesDir)
       .flatMap((mod) => {
         const dir = path.join(modulesDir, mod, 'admin');
-        return fs.existsSync(dir)
-          ? fs.readdirSync(dir).map((file) => `${mod}/${file}`)
-          : [];
+        return fs.existsSync(dir) ? fs.readdirSync(dir).map((file) => `${mod}/${file}`) : [];
       })
       .map(async (rel) => (await fetch(`${node.url}/admin/modules/${rel}`)).text()),
   );
   const html = [shell, ...fragments].join('\n');
   const frames = [...html.matchAll(/<iframe title="([^"]+)"[^>]*sandbox="([^"]*)"/g)];
   // Order is just an artifact of which module's directory sorts where — not a meaningful invariant.
-  assert.deepEqual(
-    frames.map((m) => m[1]).sort(),
-    ['Component preview', 'Page preview', 'Theme preview'],
-  );
+  assert.deepEqual(frames.map((m) => m[1]).sort(), [
+    'Component preview',
+    'Page preview',
+    'Theme preview',
+  ]);
   for (const [, title, sandbox] of frames) assert.equal(sandbox, 'allow-same-origin', title);
 });
