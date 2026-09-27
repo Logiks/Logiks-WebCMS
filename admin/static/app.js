@@ -91,6 +91,22 @@ const H = {
     if (s === '') return '(empty)';
     return s.length > 60 ? s.slice(0, 57) + '…' : s;
   },
+  /** First line of a page's init(): fetches that screen's markup from its owning module and mounts
+   * it into this component's own (still-empty) root. Returns false (and shows an error) on failure,
+   * so callers can bail out of the rest of their init() rather than run data-loading against a DOM
+   * that never got its markup. */
+  async mountFragment(mod, file) {
+    try {
+      this.$el.innerHTML = await loadFragment(mod, file);
+    } catch {
+      this.$el.innerHTML = '<div class="alert alert-danger">Could not load this screen.</div>';
+      return false;
+    }
+    // Walk each new child individually, never `this.$el` itself — this component's own x-data is
+    // already bound (we're running inside its init()); re-walking the root risks double-binding it.
+    for (const child of [...this.$el.children]) Alpine.initTree(child);
+    return true;
+  },
 };
 
 const hashParts = () => location.hash.replace(/^#\/?/, '').split('/');
@@ -265,6 +281,24 @@ function parseCompose(body) {
     blocks.push({ uid: uid(), name: p.name, args: p.args });
   }
   return blocks;
+}
+
+// ───────── page fragments (each module owns its own admin-screen markup) ─────────
+// A page's `<section x-data="...">` ships empty in index.html; its actual markup is fetched once
+// (memoized per URL, same idiom as `loadEditor` below) from the owning module's own admin/ folder
+// and injected on that page's first visit.
+const fragmentCache = new Map();
+function loadFragment(mod, file) {
+  const key = `${mod}/${file}`;
+  if (!fragmentCache.has(key))
+    fragmentCache.set(
+      key,
+      fetch(`/admin/modules/${mod}/${file}.html`).then((r) => {
+        if (!r.ok) throw new Error(`${r.status}`);
+        return r.text();
+      }),
+    );
+  return fragmentCache.get(key);
 }
 
 // ───────── code editor (CodeJar + Prism.js, self-hosted — no CDN, loaded lazily) ─────────
@@ -858,6 +892,7 @@ document.addEventListener('alpine:init', () => {
     timer: null,
     tick: 0,
     async init() {
+      if (!(await this.mountFragment('updates', 'page'))) return;
       await this.refresh(true);
       this.timer = setInterval(() => this.refresh(), 3000);
     },
@@ -1038,6 +1073,7 @@ document.addEventListener('alpine:init', () => {
       );
     },
     async init() {
+      if (!(await this.mountFragment('content', 'list'))) return;
       await this.load();
     },
     async load(reset = false) {
@@ -1135,6 +1171,7 @@ document.addEventListener('alpine:init', () => {
       return base + (parent ? parent.path + '/' : '') + (slug || '…');
     },
     async init() {
+      if (!(await this.mountFragment('content', 'edit'))) return;
       try {
         if (this.type.hierarchical) {
           const list = await api('GET', `/admin/content/types/${this.typeId}/entries?limit=200`);
@@ -1424,6 +1461,7 @@ document.addEventListener('alpine:init', () => {
     thumb,
     bytes,
     async init() {
+      if (!(await this.mountFragment('media', 'page'))) return;
       await this.load();
     },
     async load() {
@@ -1494,6 +1532,7 @@ document.addEventListener('alpine:init', () => {
     names: {},
     error: '',
     async init() {
+      if (!(await this.mountFragment('content', 'terms'))) return;
       this.taxonomies = [
         ...new Map(meta.contentTypes.flatMap((t) => t.taxonomies).map((x) => [x.id, x])).values(),
       ];
@@ -1549,6 +1588,7 @@ document.addEventListener('alpine:init', () => {
     busy: false,
     error: '',
     async init() {
+      if (!(await this.mountFragment('themes', 'themes'))) return;
       await this.load();
     },
     async load() {
@@ -1639,6 +1679,7 @@ document.addEventListener('alpine:init', () => {
       );
     },
     async init() {
+      if (!(await this.mountFragment('themes', 'customize'))) return;
       this.themes = (await api('GET', '/admin/themes')).themes;
       const want = hashParts()[1];
       const first =
@@ -1754,6 +1795,7 @@ document.addEventListener('alpine:init', () => {
       return this.path === 'theme.json' || this.path === 'layouts/default.html';
     },
     async init() {
+      if (!(await this.mountFragment('themes', 'theme-editor'))) return;
       this.themes = (await api('GET', '/admin/themes')).themes;
       const want = hashParts()[1];
       const first =
@@ -1909,6 +1951,7 @@ document.addEventListener('alpine:init', () => {
       { key: 'include_images', label: 'Each entry’s featured image' },
     ],
     async init() {
+      if (!(await this.mountFragment('sitemap', 'page'))) return;
       this.types = meta.contentTypes;
       await this.load(0, true);
     },
@@ -2031,6 +2074,7 @@ document.addEventListener('alpine:init', () => {
       return /\.css$/i.test(p) || (this.allowScripts && /\.m?js$/i.test(p));
     },
     async init() {
+      if (!(await this.mountFragment('libraries', 'page'))) return;
       await this.load();
     },
     async load() {
@@ -2178,6 +2222,7 @@ document.addEventListener('alpine:init', () => {
     busy: false,
     error: '',
     async init() {
+      if (!(await this.mountFragment('site', 'menus'))) return;
       await this.load();
       try {
         this.pages = (
@@ -2297,6 +2342,7 @@ document.addEventListener('alpine:init', () => {
     pages: [],
     loaded: false,
     async init() {
+      if (!(await this.mountFragment('site', 'pages-list'))) return;
       await this.load();
     },
     async load() {
@@ -2365,6 +2411,7 @@ document.addEventListener('alpine:init', () => {
     preview: { html: '', busy: false, error: '' },
 
     async init() {
+      if (!(await this.mountFragment('site', 'pages-edit'))) return;
       const meta = await api('GET', '/admin/site/builder-meta');
       this.layouts = meta.layouts;
       this.entryTypes = meta.entryTypes;
@@ -2624,6 +2671,7 @@ document.addEventListener('alpine:init', () => {
     components: [],
     loaded: false,
     async init() {
+      if (!(await this.mountFragment('site', 'components-list'))) return;
       await this.load();
     },
     async load() {
@@ -2662,6 +2710,7 @@ document.addEventListener('alpine:init', () => {
     preview: { html: '', busy: false, error: '' },
 
     async init() {
+      if (!(await this.mountFragment('site', 'components-edit'))) return;
       if (this.isNew) this.originalContent = this.content();
       else await this.load();
       this.loaded = true;
@@ -2833,6 +2882,7 @@ document.addEventListener('alpine:init', () => {
     importBusy: false,
     importError: '',
     async init() {
+      if (!(await this.mountFragment('services', 'list'))) return;
       await this.load();
     },
     async load() {
@@ -2914,6 +2964,7 @@ document.addEventListener('alpine:init', () => {
     preview: { result: null, busy: false, error: '' },
 
     async init() {
+      if (!(await this.mountFragment('services', 'edit'))) return;
       const meta = await api('GET', '/admin/services/meta');
       this.entryTypes = meta.entryTypes;
       this.tables = meta.tables;
@@ -3135,6 +3186,7 @@ document.addEventListener('alpine:init', () => {
     rules: [],
     loaded: false,
     async init() {
+      if (!(await this.mountFragment('seo', 'list'))) return;
       await this.load();
     },
     async load() {
@@ -3173,6 +3225,7 @@ document.addEventListener('alpine:init', () => {
     error: '',
 
     async init() {
+      if (!(await this.mountFragment('seo', 'edit'))) return;
       if (!this.isNew) await this.load();
       this.loaded = true;
     },
@@ -3284,6 +3337,7 @@ document.addEventListener('alpine:init', () => {
     fireBusy: false,
 
     async init() {
+      if (!(await this.mountFragment('events', 'page'))) return;
       await this.load();
     },
     async load() {
@@ -3320,6 +3374,7 @@ document.addEventListener('alpine:init', () => {
     webhooks: [],
     loaded: false,
     async init() {
+      if (!(await this.mountFragment('webhooks', 'list'))) return;
       await this.load();
     },
     async load() {
@@ -3354,6 +3409,7 @@ document.addEventListener('alpine:init', () => {
     testBusy: false,
 
     async init() {
+      if (!(await this.mountFragment('webhooks', 'edit'))) return;
       if (!this.isNew) {
         await this.load();
         await this.loadDeliveries();
@@ -3447,6 +3503,7 @@ document.addEventListener('alpine:init', () => {
     tasks: [],
     loaded: false,
     async init() {
+      if (!(await this.mountFragment('scheduler', 'list'))) return;
       await this.load();
     },
     async load() {
@@ -3499,6 +3556,7 @@ document.addEventListener('alpine:init', () => {
     runBusy: false,
 
     async init() {
+      if (!(await this.mountFragment('scheduler', 'edit'))) return;
       const [svcs, whs] = await Promise.all([
         api('GET', '/admin/services'),
         api('GET', '/admin/webhooks'),
@@ -3628,6 +3686,7 @@ document.addEventListener('alpine:init', () => {
     busy: false,
     loaded: false,
     async init() {
+      if (!(await this.mountFragment('site', 'locales'))) return;
       const r = await api('GET', '/admin/site/locales');
       this.languages = r.languages;
       this.defaultLocale = r.defaultLocale;
@@ -3744,6 +3803,7 @@ document.addEventListener('alpine:init', () => {
     newQueryName: '',
 
     async init() {
+      if (!(await this.mountFragment('dbms', 'page'))) return;
       await this.loadTables();
       this.loaded = true;
     },
@@ -3938,6 +3998,7 @@ document.addEventListener('alpine:init', () => {
     form: { from: '', to: '', status: 301 },
     error: '',
     async init() {
+      if (!(await this.mountFragment('site', 'redirects'))) return;
       await this.load();
     },
     async load() {
@@ -3967,6 +4028,7 @@ document.addEventListener('alpine:init', () => {
     messages: [],
     loaded: false,
     async init() {
+      if (!(await this.mountFragment('site', 'messages'))) return;
       this.messages = (await api('GET', '/admin/messages')).messages;
       this.loaded = true;
     },
@@ -3991,6 +4053,7 @@ document.addEventListener('alpine:init', () => {
     loaded: false,
     minLength: meta.passwordMinLength,
     async init() {
+      if (!(await this.mountFragment('auth', 'account'))) return;
       await this.loadSessions();
     },
     async loadSessions() {
@@ -4075,6 +4138,7 @@ document.addEventListener('alpine:init', () => {
     failed: [],
     timer: null,
     async init() {
+      if (!(await this.mountFragment('system', 'page'))) return;
       await this.refresh();
       this.timer = setInterval(() => this.refresh(), 10000);
     },
@@ -4219,6 +4283,7 @@ document.addEventListener('alpine:init', () => {
     },
 
     async init() {
+      if (!(await this.mountFragment('settings', 'page'))) return;
       await this.reload();
       const want = hashParts()[1];
       if (want === 'history') await this.showHistory();
@@ -4402,6 +4467,7 @@ document.addEventListener('alpine:init', () => {
     busy: false,
     error: '',
     async init() {
+      if (!(await this.mountFragment('users', 'users'))) return;
       await this.load();
     },
     async load() {
@@ -4523,6 +4589,7 @@ document.addEventListener('alpine:init', () => {
     busy: false,
     error: '',
     async init() {
+      if (!(await this.mountFragment('users', 'roles'))) return;
       await this.load();
       this.groups = (await api('GET', '/admin/permissions')).groups;
     },
@@ -4585,6 +4652,7 @@ document.addEventListener('alpine:init', () => {
     to: '',
     more: false,
     async init() {
+      if (!(await this.mountFragment('audit', 'audit'))) return;
       await this.load(true);
     },
     /** Shared by `load` and the export link — `from`/`to` are <input type=date> strings (a whole day, local). */
@@ -4722,6 +4790,7 @@ document.addEventListener('alpine:init', () => {
     more: false,
     detail: contentActivityDetail,
     async init() {
+      if (!(await this.mountFragment('audit', 'content-activity'))) return;
       await this.load(true);
     },
     filterParams() {
@@ -4782,6 +4851,7 @@ document.addEventListener('alpine:init', () => {
     moreSessions: false,
     users: [],
     async init() {
+      if (!(await this.mountFragment('analytics', tab))) return;
       await this.load();
     },
     rangeParams() {
@@ -4966,6 +5036,7 @@ document.addEventListener('alpine:init', () => {
     data: null,
     timer: null,
     async init() {
+      if (!(await this.mountFragment('cluster', 'page'))) return;
       await this.refresh();
       this.timer = setInterval(() => this.refresh(), 5000);
     },
@@ -4994,6 +5065,7 @@ document.addEventListener('alpine:init', () => {
     data: null,
     timer: null,
     async init() {
+      if (!(await this.mountFragment('analytics', 'active'))) return;
       await this.refresh();
       this.timer = setInterval(() => this.refresh(), 15000);
     },

@@ -1,0 +1,24 @@
+              <div class="page-head d-flex justify-content-between align-items-end flex-wrap gap-2">
+                <div><h1>Services</h1><p>Custom API endpoints components — and, through the public content API, other callers — can read data from.</p></div>
+                <div class="d-flex gap-2 flex-wrap">
+                  <a class="btn btn-outline-secondary" href="/api/admin/services/export">Export .zip</a>
+                  <label class="btn btn-outline-secondary mb-0" x-show="can('services.write')" :class="{disabled: importBusy}">Import .zip<input type="file" hidden accept=".zip,application/zip" @change="importZip($event.target.files[0]); $event.target.value = ''"></label>
+                  <a class="btn btn-primary" x-show="can('services.write')" href="#/services/new">New service</a>
+                </div>
+              </div>
+              <div class="alert alert-danger" role="alert" style="white-space:pre-wrap" x-show="importError" x-text="importError"></div>
+              <div class="panel">
+                <div class="empty" x-show="loaded && !services.length">No services yet.</div>
+                <table class="table" x-show="services.length"><thead><tr><th>Slug</th><th>Name</th><th>Mode</th><th>Access</th><th></th><th></th></tr></thead><tbody>
+                  <template x-for="s in services" :key="s.slug"><tr>
+                    <td class="mono small" x-text="s.slug"></td>
+                    <td x-text="s.name"></td>
+                    <td class="muted small" x-text="s.mode === 'sql' ? 'Raw SQL' : s.mode === 'script' ? 'Script (Node.js)' : 'Query builder'"></td>
+                    <td class="muted small" x-text="s.access === 'customer' ? 'Signed-in customers' : 'Public'"></td>
+                    <td><span class="tag" :class="s.enabled ? 'ok' : 'warn'" x-text="s.enabled ? 'Enabled' : 'Disabled'"></span></td>
+                    <td class="text-end text-nowrap">
+                      <a class="btn btn-sm btn-outline-secondary" :href="'#/services/' + encodeURIComponent(s.slug)">Edit</a>
+                      <button class="btn btn-sm btn-outline-danger" type="button" x-show="can('services.write')" @click="remove(s)">Delete</button>
+                    </td>
+                  </tr></template></tbody></table>
+              </div>

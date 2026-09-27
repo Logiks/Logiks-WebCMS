@@ -1,0 +1,22 @@
+              <div class="page-head d-flex justify-content-between align-items-end flex-wrap gap-2"><div><h1 x-text="type.plural"></h1><p x-text="'Every ' + type.label.toLowerCase() + ', newest changes first.'"></p></div>
+                <a class="btn btn-primary" x-show="type.can.write" :href="'#/content/' + typeId + '/new'" x-text="'New ' + type.label.toLowerCase()"></a></div>
+              <div class="d-flex gap-2 mb-3 flex-wrap">
+                <input class="form-control" style="max-width:18rem" placeholder="Search titles" aria-label="Search titles" x-model="q" @input.debounce.300ms="load(true)">
+                <select class="form-select" style="max-width:12rem" aria-label="Filter by status" x-model="status" @change="load(true)"><option value="">All statuses</option><option value="draft">Draft</option><option value="scheduled">Scheduled</option><option value="published">Published</option><option value="archived">Archived</option></select>
+              </div>
+              <div class="alert alert-danger" role="alert" x-show="error" x-text="error"></div>
+              <div class="panel">
+                <div class="empty" x-show="loaded && !entries.length">Nothing here yet.</div>
+                <table class="table" x-show="entries.length"><thead><tr><th>Title</th><th>Status</th><th>By</th><th>Changed</th></tr></thead><tbody>
+                  <template x-for="e in entries" :key="e.id"><tr>
+                    <td><a :href="'#/content/' + typeId + '/' + e.id" :style="'padding-left:' + (depth(e) * 1.25) + 'rem'" x-text="e.title"></a><div class="muted small mono" :style="'padding-left:' + (depth(e) * 1.25) + 'rem'" x-text="'/' + e.path"></div></td>
+                    <td><span class="tag" :class="e.status === 'published' ? 'ok' : (e.status === 'scheduled' ? 'warn' : '')" x-text="statusLabel(e)"></span></td>
+                    <td class="muted" x-text="e.author || '–'"></td>
+                    <td class="muted text-nowrap" x-text="ago(e.updatedAt)"></td>
+                  </tr></template></tbody></table>
+              </div>
+              <div class="d-flex justify-content-between align-items-center mt-3" x-show="total > limit">
+                <button class="btn btn-outline-secondary" :disabled="offset === 0" @click="prev()">Newer</button>
+                <span class="muted small" x-text="(offset + 1) + '–' + Math.min(offset + limit, total) + ' of ' + total"></span>
+                <button class="btn btn-outline-secondary" :disabled="offset + limit >= total" @click="next()">Older</button>
+              </div>

@@ -1,0 +1,17 @@
+        <div class="page-head"><h1>User-wise analytics</h1><p>Activity for signed-in users — every admin session today; public visitors once customer accounts exist.</p></div>
+        <div class="mb-3 d-flex flex-wrap gap-2 align-items-end">
+          <div><label class="form-label small" for="an-surface-4">Surface</label><select id="an-surface-4" class="form-select" x-model="surface" @change="load()"><option value="admin">Admin panel</option><option value="public">Public site</option></select></div>
+          <div><label class="form-label small" for="an-from-4">From</label><input id="an-from-4" type="date" class="form-control" x-model="from" @change="load()"></div>
+          <div><label class="form-label small" for="an-to-4">To</label><input id="an-to-4" type="date" class="form-control" x-model="to" @change="load()"></div>
+        </div>
+        <div class="panel">
+          <div class="empty" x-show="!users.length">No signed-in activity yet.</div>
+          <table class="table" x-show="users.length"><thead><tr><th>User</th><th>Sessions</th><th>Page views</th><th>Last seen</th></tr></thead><tbody>
+            <template x-for="u in users" :key="u.userId"><tr>
+              <td><div x-text="u.name || ('user #' + u.userId)"></div><div class="muted small" x-text="u.email"></div></td>
+              <td x-text="u.sessions"></td>
+              <td x-text="u.pageviews"></td>
+              <td class="muted text-nowrap" x-text="ago(u.lastSeen)" :title="new Date(u.lastSeen).toLocaleString()"></td>
+            </tr></template>
+          </tbody></table>
+        </div>

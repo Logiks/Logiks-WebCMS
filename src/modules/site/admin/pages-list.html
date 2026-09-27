@@ -1,0 +1,24 @@
+              <div class="page-head d-flex justify-content-between align-items-end flex-wrap gap-2">
+                <div><h1>Pages</h1><p>Every address of your site. A page shows one or more components, in an order you choose, or a hand-written template for anything more custom.</p></div>
+                <div class="d-flex gap-2 flex-wrap">
+                  <a class="btn btn-outline-secondary" href="/api/admin/site/pages/export">Export .zip</a>
+                  <label class="btn btn-outline-secondary mb-0" x-show="can('pages.write')" :class="{disabled: importBusy}">Import .zip<input type="file" hidden accept=".zip,application/zip" @change="importZip($event.target.files[0]); $event.target.value = ''"></label>
+                  <a class="btn btn-primary" x-show="can('pages.write')" href="#/pages/new">New page</a>
+                </div>
+              </div>
+              <div class="form-check mb-2" x-show="can('pages.write')"><input id="p-prune" class="form-check-input" type="checkbox" x-model="prune"><label class="form-check-label small" for="p-prune">Importing replaces the whole tree (deletes pages the zip doesn't have) instead of adding to it</label></div>
+              <div class="alert alert-danger" role="alert" style="white-space:pre-wrap" x-show="importError" x-text="importError"></div>
+              <div class="panel">
+                <div class="empty" x-show="loaded && !pages.length">No pages yet.</div>
+                <table class="table" x-show="pages.length"><thead><tr><th>Address</th><th>Shows</th><th></th><th>Changed</th><th></th></tr></thead><tbody>
+                  <template x-for="p in pages" :key="p.path"><tr>
+                    <td class="mono small" x-text="addressOf(p)"></td>
+                    <td class="muted small" x-text="entryLabel(p)"></td>
+                    <td><span class="tag warn" x-show="p.front && p.front.noindex" title="Left out of search engines">noindex</span></td>
+                    <td class="muted text-nowrap" x-text="ago(p.updatedAt)"></td>
+                    <td class="text-end text-nowrap">
+                      <a class="btn btn-sm btn-outline-secondary" :href="'#/pages/' + encodeURIComponent(p.name)">Edit</a>
+                      <button class="btn btn-sm btn-outline-danger" type="button" x-show="can('pages.write')" @click="remove(p)">Delete</button>
+                    </td>
+                  </tr></template></tbody></table>
+              </div>

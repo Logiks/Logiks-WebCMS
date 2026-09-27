@@ -1,0 +1,77 @@
+              <div class="page-head d-flex justify-content-between align-items-end flex-wrap gap-2">
+                <div><h1 x-text="isNew ? 'New component' : (metaTitle || name)"></h1><p x-show="!isNew" class="mono" x-text="name"></p></div>
+                <a href="#/components" class="btn btn-outline-secondary">Back to components</a>
+              </div>
+              <div class="alert alert-danger" role="alert" x-show="error" x-text="error"></div>
+              <div class="row g-3" x-show="loaded">
+                <div class="col-lg-7">
+                  <div class="panel p-3 mb-3">
+                    <label class="form-label" for="c-name">Name</label>
+                    <div class="input-group">
+                      <span class="input-group-text mono">components/</span>
+                      <input id="c-name" class="form-control mono" placeholder="hero" x-model="newName">
+                      <span class="input-group-text mono">.html</span>
+                    </div>
+                    <div class="row g-2 mt-1">
+                      <div class="col-md-6"><label class="form-label" for="c-title">Title</label><input id="c-title" class="form-control" maxlength="80" placeholder="Shown in the page builder" x-model="metaTitle"></div>
+                      <div class="col-md-6"><label class="form-label" for="c-desc">Description</label><input id="c-desc" class="form-control" maxlength="300" x-model="metaDescription"></div>
+                    </div>
+                  </div>
+
+                  <div class="panel p-3 mb-3">
+                    <div class="d-flex justify-content-between align-items-center mb-2"><label class="form-label mb-0">Properties</label><button type="button" class="btn btn-sm btn-outline-secondary" @click="addProp()">Add property</button></div>
+                    <div class="empty small" x-show="!props.length">No properties: this component always shows the same thing.</div>
+                    <template x-for="(p, i) in props" :key="i">
+                      <div class="row g-2 mb-2 align-items-center">
+                        <div class="col-3"><input class="form-control form-control-sm mono" aria-label="Property key" placeholder="heading" x-model="p.key"></div>
+                        <div class="col-3"><input class="form-control form-control-sm" aria-label="Label" placeholder="Label" x-model="p.label"></div>
+                        <div class="col-3"><select class="form-select form-select-sm" aria-label="Type" x-model="p.type"><option value="string">Short text</option><option value="text">Long text</option><option value="number">Number</option><option value="boolean">On/off</option></select></div>
+                        <div class="col-2"><input class="form-control form-control-sm" aria-label="Default value" placeholder="Default" x-model="p.default"></div>
+                        <div class="col-1 text-end"><button type="button" class="btn btn-sm btn-outline-danger" @click="removeProp(i)" aria-label="Remove property">×</button></div>
+                      </div>
+                    </template>
+                  </div>
+
+                  <div class="panel p-3 mb-3">
+                    <div class="d-flex justify-content-between align-items-center mb-2"><label class="form-label mb-0">Data this component reads</label><button type="button" class="btn btn-sm btn-outline-secondary" @click="addApi()">Add endpoint</button></div>
+                    <div class="empty small" x-show="!apis.length">No data: this component only uses its properties.</div>
+                    <template x-for="(a, i) in apis" :key="i">
+                      <div class="row g-2 mb-2 align-items-center">
+                        <div class="col-3"><input class="form-control form-control-sm mono" aria-label="Name (api.name in the template)" placeholder="post" x-model="a.name"></div>
+                        <div class="col-6"><input class="form-control form-control-sm mono" aria-label="Address" placeholder="/api/public/content/post/{{ slug }}" x-model="a.url"></div>
+                        <div class="col-2 form-check"><input class="form-check-input" type="checkbox" :id="'api-req-' + i" x-model="a.required"><label class="form-check-label small" :for="'api-req-' + i">Required</label></div>
+                        <div class="col-1 text-end"><button type="button" class="btn btn-sm btn-outline-danger" @click="removeApi(i)" aria-label="Remove endpoint">×</button></div>
+                      </div>
+                    </template>
+                  </div>
+
+                  <div class="panel p-3 mb-3">
+                    <label class="form-label" for="c-template">Template (HTML + Liquid)</label>
+                    <textarea id="c-template" class="form-control mono" rows="14" spellcheck="false" x-codejar="{ mode: 'htmlmixed', get: template, set: (v) => (template = v) }"></textarea>
+                    <div class="help small muted mt-1">A <span class="mono">&lt;script&gt;</span> tag is allowed here and runs on the live page (it is not sandboxed — the same trust level as a script Service); the live preview does not run it, since the preview frame never runs scripts.</div>
+                  </div>
+                  <div class="panel p-3 mb-3">
+                    <label class="form-label" for="c-css">Scoped CSS</label>
+                    <textarea id="c-css" class="form-control mono" rows="8" spellcheck="false" x-codejar="{ mode: 'css', get: css, set: (v) => (css = v) }"></textarea>
+                  </div>
+                </div>
+
+                <div class="col-lg-5">
+                  <div class="panel mb-3" style="position:sticky;top:1rem">
+                    <div class="panel-h d-flex justify-content-between align-items-center">
+                      <span>Preview</span>
+                      <span class="muted small" x-show="preview.busy">Rendering…</span>
+                    </div>
+                    <div class="help small muted p-2" x-show="props.length">Shown with each property at its default value above.</div>
+                    <div class="alert alert-danger m-2" role="alert" x-show="preview.error" x-text="preview.error"></div>
+                    <iframe title="Component preview" style="width:100%;height:60vh;border:0;border-top:1px solid var(--line)" sandbox="allow-same-origin" :srcdoc="preview.html"></iframe>
+                  </div>
+                </div>
+              </div>
+
+              <div class="savebar" x-show="loaded && (isNew || dirty)">
+                <span x-show="dirty && !isNew">Unsaved changes</span>
+                <span class="ms-auto"></span>
+                <button class="btn btn-outline-secondary" type="button" x-show="!isNew" @click="discard()">Discard</button>
+                <button class="btn btn-primary" type="button" :disabled="busy" @click="save()" x-text="isNew ? 'Create component' : 'Save component'"></button>
+              </div>

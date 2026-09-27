@@ -1,0 +1,56 @@
+        <div class="page-head"><h1>System</h1><p>Health of the pieces this site depends on, the cache, and background work. Shows the server that answered this page.</p></div>
+
+        <div class="panel mb-3">
+          <div class="panel-h">Components</div>
+          <div class="empty" x-show="!data">Loading…</div>
+          <table class="table" x-show="data"><tbody>
+            <tr><td>Database</td><td class="mono" x-text="data?.components.database.kind"></td>
+              <td><span class="tag" :class="data?.components.database.ok ? 'ok' : 'warn'" x-text="data?.components.database.ok ? 'Up · ' + data.components.database.ms + ' ms' : 'Down'"></span></td></tr>
+            <tr><td>Redis</td><td class="muted" x-text="data?.components.redis ? 'Cache, sessions, queue, rate limits' : 'Not configured'"></td>
+              <td><span class="tag" :class="data?.components.redis ? (data.components.redis.ok ? 'ok' : 'warn') : ''" x-text="data?.components.redis ? (data.components.redis.ok ? 'Up · ' + data.components.redis.ms + ' ms' : 'Down') : 'Off'"></span></td></tr>
+            <tr><td>Background queue</td><td class="mono" x-text="data?.components.queue.driver"></td>
+              <td><span class="tag" :class="data?.components.queue.ok ? 'ok' : 'warn'" x-text="data?.components.queue.ok ? 'Up' : 'Down'"></span></td></tr>
+            <tr><td>Email</td><td class="muted" x-text="data?.components.mail.enabled ? 'Sending through ' + data.components.mail.transport : 'Not sending. Password reset is hidden.'"></td>
+              <td><a href="#/settings/mail" class="small">Email settings</a></td></tr>
+            <tr><td>Metrics</td><td class="muted" x-text="data?.components.metrics.enabled ? 'Served at /metrics with a bearer token' : 'Off'"></td>
+              <td><a href="#/settings/system" class="small">System settings</a></td></tr>
+          </tbody></table>
+        </div>
+
+        <div class="panel mb-3">
+          <div class="panel-h">Cache <button class="btn btn-sm btn-outline-danger fw-normal" x-show="can('cache.flush')" @click="flush()">Flush cache</button></div>
+          <div class="p-3 row g-3" x-show="data">
+            <div class="col-6 col-md-3"><div class="muted small">Backend</div><div class="mono" x-text="data?.cache.backend"></div></div>
+            <div class="col-6 col-md-3"><div class="muted small">Hit rate on this server</div><div class="mono" x-text="hitRate"></div></div>
+            <div class="col-6 col-md-3"><div class="muted small">In memory</div><div class="mono" x-text="data?.cache.l1Entries + ' / ' + data?.cache.l1Max"></div></div>
+            <div class="col-6 col-md-3"><div class="muted small">Invalidations</div><div class="mono" x-text="data?.cache.invalidations"></div></div>
+            <div class="col-12 small warn" x-show="data && !data.cache.enabled"><span class="tag warn">Cache is turned off in settings</span></div>
+          </div>
+        </div>
+
+        <div class="panel mb-3">
+          <div class="panel-h">Background jobs</div>
+          <div class="p-3 row g-3" x-show="data">
+            <template x-for="k in ['waiting','active','delayed','completed','failed']" :key="k">
+              <div class="col-6 col-md"><div class="muted small" x-text="k"></div><div class="bigver" style="font-size:1.6rem" :class="k === 'failed' && data?.components.queue.counts?.failed ? 'text-danger' : ''" x-text="data?.components.queue.counts?.[k] ?? 0"></div></div>
+            </template>
+          </div>
+          <table class="table" x-show="data?.components.queue.scheduled?.length"><thead><tr><th>Scheduled job</th><th>Runs</th></tr></thead><tbody>
+            <template x-for="j in data?.components.queue.scheduled || []" :key="j.name"><tr><td class="mono" x-text="j.name"></td><td class="muted" x-text="every(j.everyMs)"></td></tr></template></tbody></table>
+        </div>
+
+        <div class="panel mb-3" x-show="failed.length">
+          <div class="panel-h">Failed jobs</div>
+          <table class="table"><thead><tr><th>Job</th><th>Reason</th><th>When</th><th></th></tr></thead><tbody>
+            <template x-for="j in failed" :key="j.id"><tr>
+              <td><span class="mono" x-text="j.name"></span><div class="muted small" x-text="j.attemptsMade + ' attempts'"></div></td>
+              <td class="small" x-text="j.failedReason"></td>
+              <td class="muted" x-text="j.at ? ago(j.at) : ''"></td>
+              <td class="text-end text-nowrap"><template x-if="can('jobs.manage')"><span><button class="btn btn-sm btn-outline-secondary" @click="retry(j)">Run again</button> <button class="btn btn-sm btn-outline-danger" @click="discard(j)">Discard</button></span></template></td>
+            </tr></template></tbody></table>
+        </div>
+
+        <div class="panel p-3 small" x-show="data">
+          <div class="fw-semibold mb-1">This server</div>
+          <div class="muted mono" x-text="'v' + data?.version + ' · ' + data?.role + ' · node ' + data?.process.node + ' · up ' + since(Date.now() - data?.uptimeSeconds * 1000) + ' · ' + data?.process.rssMb + ' MB memory'"></div>
+        </div>

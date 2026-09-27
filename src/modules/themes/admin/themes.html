@@ -1,0 +1,22 @@
+        <div class="page-head"><h1>Themes</h1><p>A theme controls how the public site looks. Switching applies on every server within seconds.</p></div>
+        <div class="alert alert-danger" role="alert" x-show="error" x-text="error"></div>
+        <div class="panel">
+          <template x-for="t in themes" :key="t.id">
+            <div class="node" style="grid-template-columns: 1fr auto">
+              <div><strong x-text="t.name"></strong> <span class="tag" x-text="'v' + t.version"></span> <span class="tag ok" x-show="t.active">Live</span> <span class="tag" x-show="t.source === 'disk'">Built in</span>
+                <div class="muted small" x-text="t.description"></div><div class="muted small" x-show="t.author" x-text="'By ' + t.author"></div></div>
+              <div class="text-nowrap"><a class="btn btn-sm btn-outline-secondary" :href="'#/customize/' + t.id">Customize</a>
+                <a class="btn btn-sm btn-outline-secondary" :href="'#/theme-editor/' + t.id" x-text="t.source === 'db' && can('themes.edit') ? 'Edit files' : 'View files'"></a>
+                <button class="btn btn-sm btn-outline-secondary" x-show="can('themes.manage')" @click="duplicate(t)">Duplicate</button>
+                <a class="btn btn-sm btn-outline-secondary" :href="'/api/admin/themes/' + t.id + '/export'">Export .zip</a>
+                <button class="btn btn-sm btn-primary" x-show="!t.active && can('themes.manage')" @click="activate(t)">Make live</button>
+                <button class="btn btn-sm btn-outline-danger" x-show="!t.active && t.source === 'db' && can('themes.manage')" @click="remove(t)">Remove</button></div>
+            </div>
+          </template>
+        </div>
+        <div class="panel mt-3 p-3" x-show="can('themes.manage')">
+          <div class="fw-semibold mb-1">Install a theme</div>
+          <div class="muted small mb-2" x-text="'Upload a .zip (up to ' + maxZipMb + ' MB). It is checked before anything is saved: file types, paths, sizes and every template. ' + (allowJs ? 'Scripts are allowed.' : 'Themes with JavaScript are refused.')"></div>
+          <label class="btn btn-outline-secondary mb-0" :class="{disabled: busy}">Choose a .zip <input type="file" hidden accept=".zip,application/zip" @change="upload($event.target.files[0]); $event.target.value = ''"></label>
+          <span class="muted small ms-2" x-show="busy">Checking and installing…</span>
+        </div>

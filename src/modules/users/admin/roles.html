@@ -1,0 +1,30 @@
+        <div class="page-head d-flex justify-content-between align-items-end"><div><h1>Roles and permissions</h1><p>A role is a set of permissions. Every user has one role.</p></div>
+          <button class="btn btn-primary" x-show="can('roles.write')" @click="edit()">Add role</button></div>
+
+        <form class="panel mb-3" x-show="form" @submit.prevent="save()">
+          <div class="panel-h" x-text="form?.id ? (form.isSystem ? form.name : 'Edit role') : 'New role'"></div>
+          <template x-if="form">
+          <div>
+            <div class="p-3 row g-3">
+              <div class="col-md-5"><label class="form-label">Name</label><input class="form-control" required :disabled="form.isSystem" x-model="form.name"></div>
+              <div class="col-md-7"><label class="form-label">Description</label><input class="form-control" x-model="form.description"></div>
+            </div>
+            <div class="muted px-3 pb-3" x-show="form.isSystem">This is a system role with full access. Its permissions can't be changed.</div>
+            <template x-if="!form.isSystem"><div>
+              <template x-for="g in groups" :key="g.group"><div class="perm-group">
+                <div class="fw-semibold mb-1" x-text="g.group"></div>
+                <template x-for="p in g.permissions" :key="p.key"><div class="form-check"><input class="form-check-input" type="checkbox" :id="'p_' + p.key" :checked="form.permissions.includes(p.key)" @change="toggle(p.key, $event.target.checked)"><label class="form-check-label" :for="'p_' + p.key"><span x-text="p.label"></span> <span class="mono muted" x-text="p.key"></span></label></div></template>
+              </div></template></div></template>
+            <div class="p-3 text-danger small" x-show="error" x-text="error" role="alert"></div>
+            <div class="p-3 d-flex gap-2"><button class="btn btn-primary" :disabled="busy" x-show="!form.isSystem && can('roles.write')">Save role</button><button type="button" class="btn btn-outline-secondary" @click="form = null">Close</button></div>
+          </div></template>
+        </form>
+
+        <div class="panel"><table class="table">
+          <thead><tr><th>Role</th><th>Permissions</th><th>Users</th><th></th></tr></thead>
+          <tbody><template x-for="r in roles" :key="r.id"><tr>
+            <td><div x-text="r.name"></div><div class="muted small" x-text="r.description"></div></td>
+            <td class="muted" x-text="r.permissions.includes('*') ? 'Everything' : r.permissions.length + ' permissions'"></td>
+            <td x-text="r.userCount"></td>
+            <td class="text-end text-nowrap"><button class="btn btn-sm btn-outline-secondary" @click="edit(r)" x-text="can('roles.write') && !r.isSystem ? 'Edit' : 'View'"></button> <button class="btn btn-sm btn-outline-danger" x-show="can('roles.write') && !r.isSystem" @click="remove(r)">Delete</button></td>
+          </tr></template></tbody></table></div>

@@ -136,8 +136,9 @@ test(
     await b.ctx.jobs.startWorker();
 
     const schedulers = await admin.zcard('cms:bull:cms-default:repeat');
-    // one entry per built-in schedule (sessions, audit, nodes, auth cleanup, content publishing), however many workers registered them
-    assert.equal(schedulers, 5, 'built-in schedules must not be duplicated by the second worker');
+    // one entry per built-in schedule (sessions, audit, nodes, auth cleanup, content publishing,
+    // events prune, webhooks prune, analytics prune), however many workers registered them
+    assert.equal(schedulers, 8, 'built-in schedules must not be duplicated by the second worker');
 
     for (let i = 0; i < 6; i++) await a.ctx.jobs.enqueue('test.echo', { i });
     await until(() => ran.length >= 6);

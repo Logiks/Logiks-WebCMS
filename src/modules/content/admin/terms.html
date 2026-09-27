@@ -1,0 +1,12 @@
+        <div class="page-head"><h1>Categories and tags</h1><p>Group posts so visitors can browse them. Deleting one never deletes a post.</p></div>
+        <div class="alert alert-danger" role="alert" x-show="error" x-text="error"></div>
+        <div class="row g-3">
+          <template x-for="t in taxonomies" :key="t.id">
+            <div class="col-md-6"><div class="panel">
+              <div class="panel-h" x-text="t.plural"></div>
+              <div class="empty" x-show="!(terms[t.id] || []).length" x-text="'No ' + t.plural.toLowerCase() + ' yet.'"></div>
+              <table class="table" x-show="(terms[t.id] || []).length"><tbody><template x-for="term in (terms[t.id] || [])" :key="term.id"><tr><td><span x-text="term.name"></span><div class="muted small mono" x-text="term.slug"></div></td><td class="muted" x-text="term.uses + (term.uses === 1 ? ' use' : ' uses')"></td><td class="text-end text-nowrap"><button class="btn btn-sm btn-outline-secondary" @click="rename(t, term)">Rename</button> <button class="btn btn-sm btn-outline-danger" @click="remove(t, term)">Delete</button></td></tr></template></tbody></table>
+              <form class="p-3 d-flex gap-2" @submit.prevent="add(t)"><input class="form-control" :aria-label="'New ' + t.label.toLowerCase()" :placeholder="'New ' + t.label.toLowerCase()" required x-model="names[t.id]"><button class="btn btn-primary">Add</button></form>
+            </div></div>
+          </template>
+        </div>

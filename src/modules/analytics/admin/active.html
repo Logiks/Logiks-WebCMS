@@ -1,0 +1,19 @@
+        <div class="page-head"><h1>Active now</h1><p>Sessions seen in the last window, by the page they're currently on. Refreshes automatically.</p></div>
+        <div class="mb-3 d-flex flex-wrap gap-2 align-items-end">
+          <div><label class="form-label small" for="an-surface-0">Surface</label><select id="an-surface-0" class="form-select" x-model="surface" @change="refresh()"><option value="public">Public site</option><option value="admin">Admin panel</option></select></div>
+          <div><label class="form-label small" for="an-window">Active within</label><select id="an-window" class="form-select" x-model.number="windowMin" @change="refresh()"><option value="1">1 minute</option><option value="5">5 minutes</option><option value="15">15 minutes</option><option value="30">30 minutes</option></select></div>
+        </div>
+        <div class="panel p-3 mb-3"><div class="muted small">Active sessions</div><div class="bigver" x-text="data ? data.total : '–'"></div></div>
+        <div class="panel p-3">
+          <h2 class="h6 mb-2">By page</h2>
+          <div class="empty" x-show="data && !data.byPage.length">No active sessions right now.</div>
+          <div class="bar-list" x-show="data && data.byPage.length">
+            <template x-for="r in (data ? data.byPage : [])" :key="r.path">
+              <div class="bar-list-row">
+                <div class="bar-list-label mono" :title="r.path" x-text="r.path"></div>
+                <div class="bar-list-track"><div class="bar-list-fill" :style="'width:' + pctOf(r.count) + '%'"></div></div>
+                <div class="bar-list-value" x-text="r.count"></div>
+              </div>
+            </template>
+          </div>
+        </div>

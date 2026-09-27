@@ -1,0 +1,24 @@
+              <div class="page-head d-flex justify-content-between align-items-end flex-wrap gap-2">
+                <div><h1>Scheduler</h1><p>Run a saved Service or fire a Webhook automatically, on an interval or a cron schedule.</p></div>
+                <a class="btn btn-primary" x-show="can('scheduler.write')" href="#/scheduler/new">New task</a>
+              </div>
+              <div class="panel">
+                <div class="empty" x-show="loaded && !tasks.length">No scheduled tasks yet.</div>
+                <table class="table" x-show="tasks.length"><thead><tr><th>Name</th><th>Runs</th><th>Schedule</th><th>Last run</th><th></th><th></th></tr></thead><tbody>
+                  <template x-for="t in tasks" :key="t.id"><tr>
+                    <td x-text="t.name"></td>
+                    <td class="muted small" x-text="(t.kind === 'service' ? 'Service: ' : 'Webhook: ') + t.target"></td>
+                    <td class="mono small" x-text="describe(t)"></td>
+                    <td class="muted small">
+                      <span x-show="!t.lastRunAt">Never</span>
+                      <span x-show="t.lastRunAt"><span class="tag" :class="t.lastStatus === 'ok' ? 'ok' : 'warn'" x-text="t.lastStatus"></span> <span x-text="ago(t.lastRunAt)"></span></span>
+                    </td>
+                    <td><span class="tag" :class="t.enabled ? 'ok' : 'warn'" x-text="t.enabled ? 'Enabled' : 'Disabled'"></span></td>
+                    <td class="text-end text-nowrap">
+                      <button class="btn btn-sm btn-outline-secondary" type="button" x-show="can('scheduler.write')" @click="runNow(t)">Run now</button>
+                      <a class="btn btn-sm btn-outline-secondary" :href="'#/scheduler/' + t.id">Edit</a>
+                      <button class="btn btn-sm btn-outline-danger" type="button" x-show="can('scheduler.write')" @click="remove(t)">Delete</button>
+                    </td>
+                  </tr></template>
+                </tbody></table>
+              </div>

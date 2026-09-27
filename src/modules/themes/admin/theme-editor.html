@@ -1,0 +1,41 @@
+        <div class="page-head d-flex justify-content-between align-items-end flex-wrap gap-2">
+          <div><h1>Theme editor</h1><p>Edit a theme’s layouts, components, styles and wording. Every save is checked like an upload, so a mistake is refused instead of reaching visitors.</p></div>
+          <div class="d-flex gap-2 align-items-center flex-wrap">
+            <label class="small muted" for="te-theme">Theme</label>
+            <select id="te-theme" class="form-select" style="max-width:14rem" @change="open($event.target.value)"><template x-for="t in themes" :key="t.id"><option :value="t.id" :selected="t.id === id" x-text="t.name + (t.source === 'disk' ? ' (built in)' : '')"></option></template></select>
+            <a class="btn btn-outline-secondary" :href="'/api/admin/themes/' + id + '/export'" x-show="id">Export .zip</a>
+          </div>
+        </div>
+        <div class="alert alert-danger" role="alert" x-show="error" x-text="error"></div>
+        <div class="alert alert-warning d-flex gap-2 align-items-center flex-wrap" x-show="loaded && !editable">
+          <span>Built-in themes ship read-only with the code, so an edit would be lost on the next update. Duplicate it to get a copy you can edit.</span>
+          <button class="btn btn-sm btn-primary ms-auto" x-show="can('themes.manage')" @click="duplicate()">Duplicate this theme</button>
+        </div>
+        <div class="row g-3" x-show="loaded">
+          <div class="col-lg-3">
+            <div class="panel">
+              <div class="panel-h">Files</div>
+              <div class="te-files">
+                <template x-for="f in files" :key="f.path">
+                  <button type="button" class="te-file" :class="{active: f.path === path}" @click="select(f.path)"><span class="mono small" x-text="f.path"></span><span class="muted small" x-text="bytes(f.size)"></span></button>
+                </template>
+              </div>
+              <div class="p-2 border-top" x-show="editable && can('themes.edit')">
+                <form class="d-flex gap-1" @submit.prevent="create()"><input class="form-control form-control-sm mono" aria-label="New file path" placeholder="components/banner.html" x-model="newPath"><button class="btn btn-sm btn-outline-secondary">Add</button></form>
+                <label class="btn btn-sm btn-outline-secondary w-100 mt-2 mb-0">Upload image or font to assets/<input type="file" hidden accept=".png,.jpg,.jpeg,.gif,.webp,.avif,.ico,.svg,.woff,.woff2,.ttf" @change="upload($event.target.files[0]); $event.target.value = ''"></label>
+              </div>
+            </div>
+          </div>
+          <div class="col-lg-9">
+            <div class="panel" x-show="path">
+              <div class="panel-h d-flex gap-2 align-items-center flex-wrap"><span class="mono" x-text="path"></span><span class="tag warn" x-show="dirty">Unsaved</span>
+                <span class="ms-auto"></span>
+                <button class="btn btn-sm btn-outline-danger" x-show="editable && can('themes.edit') && !required" @click="del()">Delete file</button>
+                <button class="btn btn-sm btn-primary" x-show="editable && can('themes.edit') && file && file.text" :disabled="saving || !dirty" @click="save()" x-text="saving ? 'Checking and saving…' : 'Save file'"></button>
+              </div>
+              <template x-if="file && file.text"><textarea id="te-content" class="form-control mono border-0 rounded-0" rows="28" spellcheck="false" aria-label="File content" x-codejar="{ mode: /\.css$/.test(path) ? 'css' : /\.js$/.test(path) ? 'javascript' : /\.json$/.test(path) ? 'application/json' : 'htmlmixed', get: content, set: (v) => (content = v), readOnly: !editable || !can('themes.edit') }"></textarea></template>
+              <div class="p-3 muted" x-show="file && !file.text">A binary file (<span x-text="bytes(file?.size || 0)"></span>). Reach it from a template with <span class="mono" x-text="`{{ '${path.replace(/^assets\//, '')}' | asset_url }}`"></span>.</div>
+            </div>
+            <div class="panel p-4 muted" x-show="!path">Choose a file on the left.</div>
+          </div>
+        </div>

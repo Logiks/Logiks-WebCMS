@@ -1,0 +1,35 @@
+        <div class="page-head d-flex justify-content-between align-items-end flex-wrap gap-2">
+          <div><h1>Events</h1><p>Everything the platform (or a script Service) has emitted. A Webhook subscribes to one of these by name or pattern.</p></div>
+        </div>
+        <div class="btn-group mb-3" role="group" aria-label="Events view">
+          <button type="button" class="btn btn-outline-secondary" :class="{active: tab === 'log'}" @click="tab = 'log'">Log</button>
+          <button type="button" class="btn btn-outline-secondary" :class="{active: tab === 'fire'}" x-show="can('events.write')" @click="tab = 'fire'">Fire test event</button>
+        </div>
+        <template x-if="tab === 'log'">
+          <div>
+            <div class="d-flex gap-2 mb-2">
+              <input class="form-control" style="max-width:20rem" placeholder="Filter by name prefix&hellip;" x-model="filterName" @keydown.enter="load()">
+              <button type="button" class="btn btn-outline-secondary" @click="load()">Filter</button>
+            </div>
+            <div class="panel">
+              <div class="empty" x-show="loaded && !events.length">Nothing logged yet.</div>
+              <table class="table" x-show="events.length"><thead><tr><th>Name</th><th>Payload</th><th></th></tr></thead><tbody>
+                <template x-for="e in events" :key="e.id"><tr>
+                  <td class="mono small" x-text="e.name"></td>
+                  <td class="muted small mono" x-text="JSON.stringify(e.payload)"></td>
+                  <td class="muted small text-end" x-text="ago(e.at)"></td>
+                </tr></template>
+              </tbody></table>
+            </div>
+          </div>
+        </template>
+        <template x-if="tab === 'fire' && can('events.write')">
+          <div class="panel p-3" style="max-width:40rem">
+            <label class="form-label" for="ev-name">Event name</label>
+            <input id="ev-name" class="form-control mono" placeholder="orders.created" x-model="fireName">
+            <label class="form-label mt-2" for="ev-payload">Payload (JSON)</label>
+            <textarea id="ev-payload" class="form-control mono" rows="6" spellcheck="false" x-codejar="{ mode: 'application/json', get: firePayload, set: (v) => (firePayload = v) }"></textarea>
+            <div class="alert alert-danger mt-2" role="alert" x-show="fireError" x-text="fireError"></div>
+            <button type="button" class="btn btn-primary mt-2" :disabled="fireBusy || !fireName.trim()" @click="fire()">Fire</button>
+          </div>
+        </template>

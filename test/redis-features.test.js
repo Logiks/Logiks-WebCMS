@@ -119,13 +119,14 @@ test(
     await until(() => smtp.messages.some((m) => /Reset your/.test(m.subject)), { timeout: 5000 });
     assert.match(smtp.messages.at(-1).text, /#\/reset\//);
 
-    // the job payload sitting in Redis is sealed
+    // the mail.send job payload sitting in Redis is sealed (other job types, e.g. webhooks.dispatch_event
+    // for the seeded admin's own user.created event, carry plain PII by design — D-050 — so only mail.send
+    // jobs are in scope here)
     const keys = await admin.keys('cms:bull:cms-default:*');
-    const dump = JSON.stringify(
-      await Promise.all(
-        keys.map(async (k) => ((await admin.type(k)) === 'hash' ? admin.hgetall(k) : null)),
-      ),
+    const hashes = await Promise.all(
+      keys.map(async (k) => ((await admin.type(k)) === 'hash' ? admin.hgetall(k) : null)),
     );
+    const dump = JSON.stringify(hashes.filter((h) => h?.name === 'mail.send'));
     assert.ok(!dump.includes(ADMIN.email), 'no recipient address readable in Redis');
   },
 );

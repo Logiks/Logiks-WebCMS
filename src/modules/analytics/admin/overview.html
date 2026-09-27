@@ -1,0 +1,62 @@
+        <div class="page-head"><h1>Analytics overview</h1><p>Page views, sessions and bounces. The public site and the admin panel are tracked separately.</p></div>
+        <div class="mb-3 d-flex flex-wrap gap-2 align-items-end">
+          <div><label class="form-label small" for="an-surface-1">Surface</label><select id="an-surface-1" class="form-select" x-model="surface" @change="load()"><option value="public">Public site</option><option value="admin">Admin panel</option></select></div>
+          <div><label class="form-label small" for="an-from-1">From</label><input id="an-from-1" type="date" class="form-control" x-model="from" @change="load()"></div>
+          <div><label class="form-label small" for="an-to-1">To</label><input id="an-to-1" type="date" class="form-control" x-model="to" @change="load()"></div>
+        </div>
+        <div class="row g-3">
+          <div class="col-6 col-lg-4"><div class="panel p-3"><div class="muted small">Page views</div><div class="bigver" x-text="overview ? overview.pageviews : '–'"></div></div></div>
+          <div class="col-6 col-lg-4"><div class="panel p-3"><div class="muted small">Unique visitors</div><div class="bigver" x-text="overview ? overview.sessions : '–'"></div></div></div>
+          <div class="col-6 col-lg-4"><div class="panel p-3"><div class="muted small">Avg. pages / visitor</div><div class="bigver" x-text="overview ? overview.avgPagesPerSession.toFixed(1) : '–'"></div></div></div>
+          <div class="col-6 col-lg-4"><div class="panel p-3"><div class="muted small">Bounce rate</div><div class="bigver" x-text="overview ? pct(overview.bounceRate) : '–'"></div></div></div>
+          <div class="col-6 col-lg-4"><div class="panel p-3"><div class="muted small">Avg. time on page</div><div class="bigver" x-text="overview ? duration(overview.avgDwellMs) : '–'"></div></div></div>
+          <div class="col-6 col-lg-4"><div class="panel p-3"><div class="muted small">Clicks tracked</div><div class="bigver" x-text="overview ? overview.clicks : '–'"></div></div></div>
+        </div>
+
+        <div class="panel p-3 mt-3">
+          <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-2">
+            <h2 class="h6 mb-0">Traffic over time</h2>
+            <div class="legend">
+              <span class="legend-item"><span class="legend-swatch" style="background:var(--chart-1)"></span>Page views</span>
+              <span class="legend-item"><span class="legend-swatch" style="background:var(--chart-2)"></span>Visitors</span>
+            </div>
+          </div>
+          <div class="empty" x-show="!trend.length">No page views in this range yet.</div>
+          <svg x-show="trend.length" x-ref="trendSvg" class="chart-svg" viewBox="0 0 600 195" preserveAspectRatio="none" @mousemove="onTrendMove($event)" @mouseleave="onTrendLeave()" role="img" aria-label="Page views and visitors per day">
+            <g x-html="trendSvgInner"></g>
+          </svg>
+        </div>
+
+        <div class="row g-3 mt-1">
+          <div class="col-lg-6">
+            <div class="panel p-3 h-100">
+              <h2 class="h6 mb-2">Devices</h2>
+              <div class="empty" x-show="!devices.length">No sessions in this range yet.</div>
+              <div class="donut-wrap" x-show="devices.length">
+                <svg viewBox="0 0 200 200" width="160" height="160" role="img" aria-label="Sessions by device type">
+                  <g x-html="donutSvgInner"></g>
+                </svg>
+                <div class="legend flex-column">
+                  <template x-for="seg in donutSegments" :key="seg.device + '-legend'">
+                    <span class="legend-item"><span class="legend-swatch" :style="'background:' + seg.color"></span><span class="text-capitalize" x-text="seg.device"></span><span class="muted ms-auto" x-text="seg.count + ' · ' + pct(seg.pct)"></span></span>
+                  </template>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="col-lg-6">
+            <div class="panel p-3 h-100">
+              <h2 class="h6 mb-2">Top referrers</h2>
+              <div class="empty" x-show="!referrerRows.length">No sessions in this range yet.</div>
+              <div class="bar-list" x-show="referrerRows.length">
+                <template x-for="r in referrerRows" :key="r.host">
+                  <div class="bar-list-row">
+                    <div class="bar-list-label" :title="r.host" x-text="r.host"></div>
+                    <div class="bar-list-track"><div class="bar-list-fill" :style="'width:' + r.pct + '%'"></div></div>
+                    <div class="bar-list-value" x-text="r.sessions"></div>
+                  </div>
+                </template>
+              </div>
+            </div>
+          </div>
+        </div>

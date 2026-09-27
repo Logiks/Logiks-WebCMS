@@ -1,0 +1,18 @@
+              <div class="page-head d-flex justify-content-between align-items-end flex-wrap gap-2">
+                <div><h1>Webhooks</h1><p>HTTP callbacks that fire automatically when a matching event happens.</p></div>
+                <a class="btn btn-primary" x-show="can('webhooks.write')" href="#/webhooks/new">New webhook</a>
+              </div>
+              <div class="panel">
+                <div class="empty" x-show="loaded && !webhooks.length">No webhooks yet.</div>
+                <table class="table" x-show="webhooks.length"><thead><tr><th>Name</th><th>Event</th><th></th><th></th></tr></thead><tbody>
+                  <template x-for="w in webhooks" :key="w.id"><tr>
+                    <td x-text="w.name"></td>
+                    <td class="mono small" x-text="w.event"></td>
+                    <td><span class="tag" :class="w.enabled ? 'ok' : 'warn'" x-text="w.enabled ? 'Enabled' : 'Disabled'"></span></td>
+                    <td class="text-end text-nowrap">
+                      <a class="btn btn-sm btn-outline-secondary" :href="'#/webhooks/' + w.id">Edit</a>
+                      <button class="btn btn-sm btn-outline-danger" type="button" x-show="can('webhooks.write')" @click="remove(w)">Delete</button>
+                    </td>
+                  </tr></template>
+                </tbody></table>
+              </div>

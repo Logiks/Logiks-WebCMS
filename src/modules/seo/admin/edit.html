@@ -1,0 +1,79 @@
+              <div class="page-head d-flex justify-content-between align-items-end flex-wrap gap-2">
+                <div><h1 x-text="isNew ? 'New SEO rule' : pattern"></h1></div>
+                <a href="#/seo" class="btn btn-outline-secondary">Back to SEO Manager</a>
+              </div>
+              <div class="alert alert-danger" role="alert" x-show="error" x-text="error"></div>
+              <div class="row g-3" x-show="loaded">
+                <div class="col-lg-7">
+                  <div class="panel p-3 mb-3">
+                    <label class="form-label" for="seo-pattern">Address pattern</label>
+                    <input id="seo-pattern" class="form-control mono" placeholder="/about or /blog/* or /docs/**" x-model="pattern">
+                    <div class="help small muted mt-1">An exact address (<code>/about</code>) matches only that page. <code>*</code> matches within one part of the address (<code>/blog/*</code>); <code>**</code> matches any depth (<code>/docs/**</code>).</div>
+                    <div class="row g-2 mt-1 align-items-center">
+                      <div class="col-6 col-md-4"><label class="form-label small mb-0" for="seo-priority">Priority</label><input id="seo-priority" type="number" class="form-control form-control-sm" x-model.number="priority"></div>
+                      <div class="col-6 col-md-4"><div class="form-check"><input id="seo-enabled" class="form-check-input" type="checkbox" x-model="enabled"><label class="form-check-label small" for="seo-enabled">Enabled</label></div></div>
+                    </div>
+                    <div class="help small muted mt-1">When two wildcard patterns both match an address, the one with the longer fixed part wins; priority breaks a further tie.</div>
+                  </div>
+
+                  <div class="panel p-3 mb-3">
+                    <div class="panel-h">Overrides</div>
+                    <div class="help small muted mb-2">Leave a field blank to use what the page would otherwise show.</div>
+                    <label class="form-label" for="seo-title">Title</label>
+                    <input id="seo-title" class="form-control" maxlength="200" x-model="title">
+                    <label class="form-label mt-2" for="seo-desc">Description</label>
+                    <textarea id="seo-desc" class="form-control" rows="2" maxlength="400" x-model="description"></textarea>
+                    <label class="form-label mt-2">Image</label>
+                    <div class="d-flex align-items-center gap-3">
+                      <span class="ph thumb" x-show="image"><img x-show="imageMeta && imageMeta.kind === 'image'" :src="imageMeta ? thumb(imageMeta) : ''" alt=""></span>
+                      <span class="muted small" x-show="image" x-text="imageMeta ? imageMeta.filename : ''"></span>
+                      <button type="button" class="btn btn-outline-secondary btn-sm" @click="pickImage()" x-text="image ? 'Change' : 'Choose from the library'"></button>
+                      <button type="button" class="btn btn-link btn-sm" x-show="image" @click="image = null; imageMeta = null">Remove</button>
+                    </div>
+                    <div class="row g-2 mt-2">
+                      <div class="col-md-4"><label class="form-label" for="seo-type">Content type</label>
+                        <select id="seo-type" class="form-select" x-model="type"><option value="">Use the page’s default</option><option value="website">Website</option><option value="article">Article</option></select>
+                      </div>
+                      <div class="col-md-4"><label class="form-label" for="seo-twitter">Twitter card</label>
+                        <select id="seo-twitter" class="form-select" x-model="twitterCard"><option value="">Use the page’s default</option><option value="summary">Summary</option><option value="summary_large_image">Summary with large image</option></select>
+                      </div>
+                      <div class="col-md-4"><label class="form-label" for="seo-canonical">Canonical address</label>
+                        <input id="seo-canonical" class="form-control" x-model="canonical" placeholder="https://… or /path">
+                      </div>
+                    </div>
+                    <div class="row g-2 mt-1">
+                      <div class="col-md-6"><label class="form-label small" for="seo-noindex">Search indexing</label>
+                        <select id="seo-noindex" class="form-select form-select-sm" x-model="noindexMode"><option value="inherit">Use the page’s default</option><option value="no">Allow indexing</option><option value="yes">Block indexing (noindex)</option></select>
+                      </div>
+                      <div class="col-md-6"><label class="form-label small" for="seo-nofollow">Link following</label>
+                        <select id="seo-nofollow" class="form-select form-select-sm" x-model="nofollowMode"><option value="inherit">Use the page’s default</option><option value="no">Follow links</option><option value="yes">Don’t follow links (nofollow)</option></select>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="panel p-3 mb-3">
+                    <div class="panel-h">Custom meta tags</div>
+                    <div class="help small muted mb-2">Anything not covered above — Facebook’s <code>fb:pages</code>, a verification tag, or whatever a platform asks for next.</div>
+                    <template x-for="(m, i) in metaTags" :key="i">
+                      <div class="row g-2 mb-2 align-items-center">
+                        <div class="col-3"><select class="form-select form-select-sm" aria-label="Tag kind" x-model="m.kind"><option value="name">name=</option><option value="property">property=</option></select></div>
+                        <div class="col-4"><input class="form-control form-control-sm mono" aria-label="Tag key" placeholder="e.g. fb:pages" x-model="m.key"></div>
+                        <div class="col-4"><input class="form-control form-control-sm" aria-label="Tag content" placeholder="content" x-model="m.content"></div>
+                        <div class="col-1 text-end"><button type="button" class="btn btn-sm btn-outline-danger" @click="removeMetaTag(i)" aria-label="Remove tag">×</button></div>
+                      </div>
+                    </template>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" @click="addMetaTag()">Add tag</button>
+                  </div>
+
+                  <div class="panel p-3 mb-3">
+                    <div class="panel-h">Extra structured data (JSON-LD)</div>
+                    <div class="help small muted mb-2">Added alongside what the page already emits — a FAQPage or HowTo block for answer engines, a Product/Review schema, anything <a href="https://schema.org" target="_blank" rel="noopener">schema.org</a> defines. A JSON array of objects; leave as <code>[]</code> for none.</div>
+                    <textarea class="form-control mono" rows="8" spellcheck="false" x-codejar="{ mode: 'application/json', get: ldJsonText, set: (v) => (ldJsonText = v) }"></textarea>
+                  </div>
+                </div>
+              </div>
+
+              <div class="savebar" x-show="loaded">
+                <span class="ms-auto"></span>
+                <button class="btn btn-primary" type="button" :disabled="busy" @click="save()" x-text="isNew ? 'Create rule' : 'Save rule'"></button>
+              </div>

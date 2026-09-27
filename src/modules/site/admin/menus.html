@@ -1,0 +1,25 @@
+        <div class="page-head"><h1>Menus</h1><p>Navigation your theme shows, like the main menu and the footer. Pages you link stay correct if you rename them.</p></div>
+        <div class="alert alert-danger" role="alert" x-show="error" x-text="error"></div>
+        <div class="d-flex gap-2 flex-wrap align-items-center mb-3">
+          <template x-for="m in menus" :key="m.name"><button type="button" class="btn btn-sm" :class="name === m.name ? 'btn-primary' : 'btn-outline-secondary'" @click="select(m.name)" x-text="m.title || m.name"></button></template>
+          <form class="d-flex gap-1" @submit.prevent="create()"><input class="form-control form-control-sm" style="width:9rem" placeholder="New menu name" aria-label="New menu name" x-model="newName"><button class="btn btn-sm btn-outline-secondary">Add menu</button></form>
+        </div>
+        <div class="panel" x-show="name">
+          <div class="panel-h">Items in “<span x-text="name"></span>” <span class="muted small fw-normal">Themes reach it as <span class="mono" x-text="'menus.' + name"></span></span></div>
+          <div class="empty" x-show="!items.length">No items yet.</div>
+          <template x-for="row in flat" :key="row.item._id">
+            <div class="frow" :style="'padding-left:' + (1.25 + row.depth * 1.5) + 'rem'" style="grid-template-columns: 1fr">
+              <div class="d-flex gap-2 flex-wrap align-items-center">
+                <select class="form-select" style="width:8rem" aria-label="Link to" x-model="row.item.kind"><option value="entry" x-show="pages.length">A page</option><option value="url">An address</option></select>
+                <select class="form-select" style="max-width:16rem" aria-label="Page" x-show="row.item.kind === 'entry'" x-model.number="row.item.entryId"><template x-for="p in pages" :key="p.id"><option :value="p.id" :selected="p.id === row.item.entryId" x-text="'/' + p.path"></option></template></select>
+                <input class="form-control" style="max-width:16rem" aria-label="Address" placeholder="/about or https://…" x-show="row.item.kind === 'url'" x-model="row.item.url">
+                <input class="form-control" style="max-width:14rem" aria-label="Label" placeholder="Label" x-model="row.item.label">
+                <button type="button" class="btn btn-sm btn-link" @click="move(row, -1)" aria-label="Move up"><i class="bi bi-arrow-up"></i></button>
+                <button type="button" class="btn btn-sm btn-link" @click="move(row, 1)" aria-label="Move down"><i class="bi bi-arrow-down"></i></button>
+                <button type="button" class="btn btn-sm btn-link" x-show="row.depth < 2" @click="add(row.item.children)">Add sub-item</button>
+                <button type="button" class="btn btn-sm btn-link text-danger" @click="remove(row)" aria-label="Remove item"><i class="bi bi-x-lg"></i></button>
+              </div>
+            </div>
+          </template>
+          <div class="p-3 d-flex gap-2"><button type="button" class="btn btn-outline-secondary" @click="add()">Add item</button><span class="ms-auto"></span><button type="button" class="btn btn-outline-danger" @click="del()">Delete menu</button><button type="button" class="btn btn-primary" :disabled="busy" @click="save()" x-text="busy ? 'Saving…' : 'Save menu'"></button></div>
+        </div>

@@ -1,0 +1,176 @@
+              <div class="page-head d-flex justify-content-between align-items-end flex-wrap gap-2">
+                <div><h1 x-text="isNew ? 'New service' : (name || slug)"></h1><p x-show="!isNew" class="mono" x-text="slug"></p></div>
+                <a href="#/services" class="btn btn-outline-secondary">Back to services</a>
+              </div>
+              <div class="alert alert-danger" role="alert" x-show="error" x-text="error"></div>
+              <div class="row g-3" x-show="loaded">
+                <div class="col-lg-7">
+                  <div class="panel p-3 mb-3">
+                    <div class="row g-2">
+                      <div class="col-md-6"><label class="form-label" for="s-name">Name</label><input id="s-name" class="form-control" maxlength="200" x-model="name"></div>
+                      <div class="col-md-6"><label class="form-label" for="s-slug">Slug</label>
+                        <div class="input-group"><span class="input-group-text mono">/services/</span><input id="s-slug" class="form-control mono" placeholder="recent-posts" x-model="newSlug"></div>
+                      </div>
+                    </div>
+                    <label class="form-label mt-2" for="s-desc">Description</label>
+                    <textarea id="s-desc" class="form-control" rows="2" maxlength="1000" x-model="description"></textarea>
+                    <div class="row g-2 mt-1 align-items-center">
+                      <div class="col-6 col-md-4"><div class="form-check"><input id="s-enabled" class="form-check-input" type="checkbox" x-model="enabled"><label class="form-check-label small" for="s-enabled">Enabled</label></div></div>
+                      <div class="col-6 col-md-4"><select class="form-select form-select-sm" aria-label="Who can call this" x-model="access"><option value="public">Public</option><option value="customer">Signed-in customers</option></select></div>
+                    </div>
+                    <div class="help small muted mt-1" x-show="access === 'customer'">Customer accounts aren't built yet — this will take effect once they are.</div>
+                  </div>
+
+                  <div class="panel p-3 mb-3">
+                    <label class="form-label">Mode</label>
+                    <div class="btn-group d-flex mb-3" role="group" aria-label="Service mode">
+                      <input type="radio" class="btn-check" id="mode-query" value="query" x-model="mode" autocomplete="off">
+                      <label class="btn btn-outline-secondary" for="mode-query">Query builder</label>
+                      <input type="radio" class="btn-check" id="mode-sql" value="sql" x-model="mode" autocomplete="off" x-show="can('services.sql')">
+                      <label class="btn btn-outline-secondary" for="mode-sql" x-show="can('services.sql')">Raw SQL</label>
+                      <input type="radio" class="btn-check" id="mode-script" value="script" x-model="mode" autocomplete="off" x-show="can('services.script')">
+                      <label class="btn btn-outline-secondary" for="mode-script" x-show="can('services.script')">Script (Node.js)</label>
+                    </div>
+
+                    <template x-if="mode === 'query'">
+                      <div>
+                        <div class="btn-group d-flex mb-3" role="group" aria-label="What this reads" x-show="can('services.sql')">
+                          <input type="radio" class="btn-check" id="src-type" value="type" x-model="qSource" autocomplete="off">
+                          <label class="btn btn-outline-secondary btn-sm" for="src-type">Content type</label>
+                          <input type="radio" class="btn-check" id="src-table" value="table" x-model="qSource" autocomplete="off">
+                          <label class="btn btn-outline-secondary btn-sm" for="src-table">Database table</label>
+                        </div>
+
+                        <template x-if="qSource === 'type'">
+                          <div>
+                            <div class="row g-2">
+                              <div class="col-md-6"><label class="form-label" for="s-type">Content type</label>
+                                <select id="s-type" class="form-select" x-model="qType"><option value="">Choose a type…</option><template x-for="t in entryTypes" :key="t.id"><option :value="t.id" x-text="t.label"></option></template></select>
+                              </div>
+                              <div class="col-md-6"><label class="form-label" for="s-sort">Sort</label>
+                                <select id="s-sort" class="form-select" x-model="qSort"><option value="newest">Newest first</option><option value="path">By address</option></select>
+                              </div>
+                            </div>
+                            <div class="row g-2 mt-1">
+                              <div class="col-md-4"><label class="form-label" for="s-perpage">Per page (default)</label><input id="s-perpage" type="number" min="1" max="200" class="form-control" x-model.number="qPerPageDefault"></div>
+                              <div class="col-md-4"><label class="form-label" for="s-permax">Per page (max)</label><input id="s-permax" type="number" min="1" max="200" class="form-control" x-model.number="qPerPageMax"></div>
+                              <div class="col-md-4"><label class="form-label" for="s-term">Taxonomy term id (optional)</label><input id="s-term" type="number" class="form-control" x-model="qTermId"></div>
+                            </div>
+                            <div class="mt-2" x-show="qType">
+                              <label class="form-label">Fields to include (none checked = all)</label>
+                              <div class="d-flex flex-wrap gap-3">
+                                <template x-for="f in fieldsOf(qType)" :key="f.key">
+                                  <div class="form-check"><input class="form-check-input" type="checkbox" :id="'f-' + f.key" :checked="qFields.includes(f.key)" @change="toggleField(f.key)"><label class="form-check-label small" :for="'f-' + f.key" x-text="f.label"></label></div>
+                                </template>
+                              </div>
+                            </div>
+                          </div>
+                        </template>
+
+                        <template x-if="qSource === 'table'">
+                          <div>
+                            <label class="form-label" for="t-table">Table or view</label>
+                            <select id="t-table" class="form-select" x-model="tTable" @change="onTableChange()">
+                              <option value="">Choose a table or view…</option>
+                              <template x-for="t in tables" :key="t.name"><option :value="t.name" x-text="t.name + (t.view ? ' (view)' : '')"></option></template>
+                            </select>
+                            <div class="help small muted mt-1">A fixed list of tables (users, sessions, settings, audit logs and a few others) can never be read here, whatever your permissions.</div>
+
+                            <div class="mt-2" x-show="tTable">
+                              <label class="form-label">Columns to return</label>
+                              <div class="empty small" x-show="!tAvailableColumns.length">Loading columns…</div>
+                              <div class="d-flex flex-wrap gap-3">
+                                <template x-for="c in tAvailableColumns" :key="c">
+                                  <div class="form-check"><input class="form-check-input" type="checkbox" :id="'tc-' + c" :checked="tColumns.includes(c)" @change="toggleColumn(c)"><label class="form-check-label small mono" :for="'tc-' + c" x-text="c"></label></div>
+                                </template>
+                              </div>
+                            </div>
+
+                            <div class="row g-2 mt-2" x-show="tTable">
+                              <div class="col-md-6"><label class="form-label" for="t-sort">Sort by</label>
+                                <select id="t-sort" class="form-select" x-model="tSortColumn"><option value="">Unsorted</option><template x-for="c in tAvailableColumns" :key="c"><option :value="c" x-text="c"></option></template></select>
+                              </div>
+                              <div class="col-md-6"><label class="form-label" for="t-dir">Direction</label>
+                                <select id="t-dir" class="form-select" x-model="tSortDir"><option value="asc">Ascending</option><option value="desc">Descending</option></select>
+                              </div>
+                            </div>
+                            <div class="row g-2 mt-1" x-show="tTable">
+                              <div class="col-md-6"><label class="form-label" for="t-perpage">Per page (default)</label><input id="t-perpage" type="number" min="1" max="200" class="form-control" x-model.number="tPerPageDefault"></div>
+                              <div class="col-md-6"><label class="form-label" for="t-permax">Per page (max)</label><input id="t-permax" type="number" min="1" max="200" class="form-control" x-model.number="tPerPageMax"></div>
+                            </div>
+
+                            <div class="d-flex justify-content-between align-items-center mt-3 mb-2" x-show="tTable"><label class="form-label mb-0">Parameters</label><button type="button" class="btn btn-sm btn-outline-secondary" @click="addTableParam()">Add parameter</button></div>
+                            <template x-for="(p, i) in tParams" :key="i">
+                              <div class="row g-2 mb-2 align-items-center">
+                                <div class="col-4"><input class="form-control form-control-sm mono" aria-label="Parameter name" placeholder="status" x-model="p.name"></div>
+                                <div class="col-3"><select class="form-select form-select-sm" aria-label="Parameter type" x-model="p.type"><option value="string">Text</option><option value="number">Number</option><option value="boolean">On/off</option></select></div>
+                                <div class="col-3 form-check"><input class="form-check-input" type="checkbox" :id="'treq-' + i" x-model="p.required"><label class="form-check-label small" :for="'treq-' + i">Required</label></div>
+                                <div class="col-2 text-end"><button type="button" class="btn btn-sm btn-outline-danger" @click="removeTableParam(i)" aria-label="Remove parameter">×</button></div>
+                              </div>
+                            </template>
+
+                            <div class="d-flex justify-content-between align-items-center mt-3 mb-2" x-show="tTable"><label class="form-label mb-0">Filter by column = parameter</label><button type="button" class="btn btn-sm btn-outline-secondary" @click="addWhere()">Add filter</button></div>
+                            <template x-for="(w, i) in tWhere" :key="i">
+                              <div class="row g-2 mb-2 align-items-center">
+                                <div class="col-5"><select class="form-select form-select-sm mono" aria-label="Column" x-model="w.column"><option value="">Column…</option><template x-for="c in tAvailableColumns" :key="c"><option :value="c" x-text="c"></option></template></select></div>
+                                <span class="col-auto">=</span>
+                                <div class="col-5"><select class="form-select form-select-sm mono" aria-label="Parameter" x-model="w.param"><option value="">Parameter…</option><template x-for="p in tParams" :key="p.name"><option :value="p.name" x-text="p.name"></option></template></select></div>
+                                <div class="col-1 text-end"><button type="button" class="btn btn-sm btn-outline-danger" @click="removeWhere(i)" aria-label="Remove filter">×</button></div>
+                              </div>
+                            </template>
+                          </div>
+                        </template>
+                      </div>
+                    </template>
+
+                    <template x-if="mode === 'script'">
+                      <div>
+                        <label class="form-label" for="sc-code">Script</label>
+                        <textarea id="sc-code" class="form-control mono" rows="14" spellcheck="false" x-codejar="{ mode: 'javascript', get: scCode, set: (v) => (scCode = v), placeholder: &quot;const rows = await ctx.db('entries').where({ type: 'post' }).limit(5);\nreturn { rows };&quot; }"></textarea>
+                        <div class="help small muted mt-1">Complete, <strong>unsandboxed</strong> Node.js — the same trust level as shell access to this server. The code becomes an <code>async (req, ctx) =&gt; { … }</code> function: <code>req.query</code> is the request's query string; <code>ctx</code> is the entire platform (database, settings — including secrets, email, everything). Whatever it <code>return</code>s is the response body. A timeout stops the site from WAITING on it, but cannot stop code that's already running.</div>
+                      </div>
+                    </template>
+
+                    <template x-if="mode === 'sql'">
+                      <div>
+                        <label class="form-label" for="s-sql">SQL (read-only SELECT, named :params)</label>
+                        <textarea id="s-sql" class="form-control mono" rows="8" spellcheck="false" x-codejar="{ mode: 'text/x-sql', get: sSql, set: (v) => (sSql = v), placeholder: 'select title, published_at from entries where type = :type order by published_at desc' }"></textarea>
+                        <div class="help small muted mt-1">This runs against your live database, in the dialect it is written for. Only a single SELECT/WITH statement, read-only. Write your own LIMIT — results are also capped by the setting below.</div>
+
+                        <div class="d-flex justify-content-between align-items-center mt-3 mb-2"><label class="form-label mb-0">Parameters</label><button type="button" class="btn btn-sm btn-outline-secondary" @click="addParam()">Add parameter</button></div>
+                        <div class="empty small" x-show="!sParams.length">No parameters.</div>
+                        <template x-for="(p, i) in sParams" :key="i">
+                          <div class="row g-2 mb-2 align-items-center">
+                            <div class="col-4"><input class="form-control form-control-sm mono" aria-label="Parameter name" placeholder="type" x-model="p.name"></div>
+                            <div class="col-3"><select class="form-select form-select-sm" aria-label="Parameter type" x-model="p.type"><option value="string">Text</option><option value="number">Number</option><option value="boolean">On/off</option></select></div>
+                            <div class="col-3 form-check"><input class="form-check-input" type="checkbox" :id="'req-' + i" x-model="p.required"><label class="form-check-label small" :for="'req-' + i">Required</label></div>
+                            <div class="col-2 text-end"><button type="button" class="btn btn-sm btn-outline-danger" @click="removeParam(i)" aria-label="Remove parameter">×</button></div>
+                          </div>
+                        </template>
+
+                        <label class="form-label mt-2" for="s-rowlimit">Row limit (blank = the site default)</label>
+                        <input id="s-rowlimit" type="number" min="1" max="10000" class="form-control" style="max-width:12rem" x-model="sRowLimit">
+                      </div>
+                    </template>
+                  </div>
+                </div>
+
+                <div class="col-lg-5">
+                  <div class="panel mb-3" style="position:sticky;top:1rem">
+                    <div class="panel-h d-flex justify-content-between align-items-center">
+                      <span>Preview</span>
+                      <span class="muted small" x-show="preview.busy">Running…</span>
+                    </div>
+                    <div class="empty small p-3" x-show="!canPreview">Choose a content type or table (or write a query or script) to see a preview.</div>
+                    <div class="alert alert-danger m-2" role="alert" x-show="preview.error" x-text="preview.error"></div>
+                    <pre class="p-3 mb-0 small" style="max-height:60vh;overflow:auto" x-show="preview.result" x-text="JSON.stringify(preview.result, null, 2)"></pre>
+                  </div>
+                </div>
+              </div>
+
+              <div class="savebar" x-show="loaded && (isNew || dirty)">
+                <span x-show="dirty && !isNew">Unsaved changes</span>
+                <span class="ms-auto"></span>
+                <button class="btn btn-outline-secondary" type="button" x-show="!isNew" @click="discard()">Discard</button>
+                <button class="btn btn-primary" type="button" :disabled="busy" @click="save()" x-text="isNew ? 'Create service' : 'Save service'"></button>
+              </div>

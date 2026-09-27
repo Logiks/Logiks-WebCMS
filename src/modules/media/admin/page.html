@@ -1,0 +1,31 @@
+        <div class="page-head d-flex justify-content-between align-items-end flex-wrap gap-2"><div><h1>Media</h1><p>Images and documents. Images get a private copy without camera data and smaller sizes for fast pages.</p></div>
+          <label class="btn btn-primary mb-0" x-show="can('media.upload')">Upload files <input type="file" hidden multiple accept="image/jpeg,image/png,image/gif,image/webp,image/avif,application/pdf" @change="upload($event.target.files); $event.target.value = ''"></label></div>
+        <div class="alert alert-warning" x-show="!available">Image processing isn't installed on this server, so images can't be uploaded. Run <span class="mono">npm install</span> without <span class="mono">--omit=optional</span>.</div>
+        <div class="alert alert-danger" role="alert" x-show="error" x-text="error"></div>
+        <div class="d-flex gap-2 mb-3 flex-wrap">
+          <input class="form-control" style="max-width:18rem" placeholder="Search files" aria-label="Search files" x-model="q" @input.debounce.300ms="load()">
+          <select class="form-select" style="max-width:10rem" aria-label="Type" x-model="kind" @change="load()"><option value="">All</option><option value="image">Images</option><option value="file">Documents</option></select>
+          <span class="muted align-self-center small" x-show="busy">Uploading…</span>
+        </div>
+        <div class="row g-3">
+          <div :class="current ? 'col-lg-8' : 'col-12'">
+            <div class="dropzone" :class="{on: dragging}">
+              <div class="empty" x-show="!items.length">No files yet. Upload some, or drop them here.</div>
+              <div class="media-grid">
+                <template x-for="m in items" :key="m.id"><button type="button" class="media-tile" :class="{sel: current && current.id === m.id}" @click="open(m)"><span class="ph"><img x-show="m.kind === 'image'" :src="thumb(m)" :alt="m.alt" loading="lazy"><i class="bi bi-file-earmark-pdf" x-show="m.kind !== 'image'"></i></span><span class="nm" x-text="m.filename"></span></button></template>
+              </div>
+            </div>
+          </div>
+          <template x-if="current"><div class="col-lg-4">
+            <div class="panel p-3">
+              <div class="ph big mb-2" x-show="current && current.kind === 'image'"><img :src="current ? '/media/' + current.id + '/' + current.originalFile : ''" :alt="current ? current.alt : ''"></div>
+              <div class="fw-semibold" x-text="current ? current.filename : ''"></div>
+              <div class="muted small mb-2" x-text="current ? (current.mime + ' · ' + bytes(current.size) + (current.width ? ' · ' + current.width + '×' + current.height : '')) : ''"></div>
+              <div class="small mono mb-2" x-text="current ? current.url : ''"></div>
+              <label class="form-label" for="m-alt">Description for screen readers (alt text)</label>
+              <input id="m-alt" class="form-control mb-2" maxlength="500" :disabled="!can('media.upload')" x-model="current.alt" x-show="current">
+              <div class="d-flex gap-2 flex-wrap"><button class="btn btn-primary btn-sm" x-show="can('media.upload')" @click="saveAlt()">Save description</button><button class="btn btn-outline-danger btn-sm" x-show="can('media.delete')" @click="remove()">Delete</button></div>
+              <div class="small muted mt-2" x-text="usage ? 'Used in ' + usage + (usage === 1 ? ' entry.' : ' entries.') : 'Not used anywhere yet.'"></div>
+            </div>
+          </div></template>
+        </div>

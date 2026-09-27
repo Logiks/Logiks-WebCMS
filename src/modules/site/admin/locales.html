@@ -1,0 +1,35 @@
+        <div class="page-head d-flex justify-content-between align-items-end flex-wrap gap-2">
+          <div><h1>Translations</h1><p>The words your site and its theme show to visitors, in each language. What you type here is your own wording: it wins over the theme, and switching themes keeps it.</p></div>
+          <div class="d-flex gap-2 flex-wrap">
+            <a class="btn btn-outline-secondary" href="/api/admin/site/locales/export">Export .zip</a>
+            <label class="btn btn-outline-secondary mb-0" x-show="can('locales.write')" :class="{disabled: busy}">Import .zip<input type="file" hidden accept=".zip,application/zip" @change="importZip($event.target.files[0]); $event.target.value = ''"></label>
+          </div>
+        </div>
+        <div class="panel p-3 mb-3 d-flex gap-2 flex-wrap align-items-center">
+          <label class="me-1" for="lang">Language</label>
+          <select id="lang" class="form-select" style="max-width:16rem" :value="code" @change="open($event.target.value)"><template x-for="l in languages" :key="l.code"><option :value="l.code" :selected="l.code === code" x-text="l.name + ' (' + l.code + ')'"></option></template></select>
+          <span class="mx-2 muted">or</span>
+          <input class="form-control" style="max-width:8rem" aria-label="New language code" placeholder="fr" x-model="newCode" @keydown.enter.prevent="addLanguage()">
+          <button class="btn btn-outline-secondary" type="button" @click="addLanguage()">Add language</button>
+          <div class="text-danger small w-100" role="alert" x-show="error" x-text="error"></div>
+        </div>
+        <div class="panel">
+          <div class="panel-h d-flex gap-3 align-items-center flex-wrap">
+            <span x-text="name || 'Translations'"></span>
+            <input class="form-control form-control-sm" style="max-width:14rem" aria-label="Filter" placeholder="Filter" x-model="filter">
+            <div class="form-check mb-0"><input id="only-missing" class="form-check-input" type="checkbox" x-model="onlyMissing"><label class="form-check-label small" for="only-missing">Only missing (<span x-text="missing"></span>)</label></div>
+          </div>
+          <div class="empty" x-show="loaded && !entries.length">This site has no translatable text yet.</div>
+          <table class="table" x-show="entries.length"><thead><tr><th>Text</th><th>Default language</th><th>Theme</th><th>Site default</th><th>Your wording</th></tr></thead><tbody>
+            <template x-for="e in shown" :key="e.key"><tr>
+              <td class="mono small" x-text="e.key"></td>
+              <td class="muted" x-text="e.reference ?? '–'"></td>
+              <td class="muted" x-text="e.theme ?? '–'"></td>
+              <td class="muted" x-text="e.shipped ?? '–'"></td>
+              <td><input class="form-control form-control-sm" :aria-label="'Your wording for ' + e.key" :placeholder="e.shipped ?? e.theme ?? e.reference ?? ''" x-model="e.edit"></td>
+            </tr></template></tbody></table>
+          <div class="p-3 d-flex gap-2 align-items-center" x-show="can('locales.write')">
+            <button class="btn btn-primary" :disabled="busy || !dirty" @click="save()">Save translations</button>
+            <span class="muted small" x-show="dirty" x-text="dirty + ' changed'"></span>
+          </div>
+        </div>

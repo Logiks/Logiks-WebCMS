@@ -1,0 +1,80 @@
+              <div class="page-head d-flex justify-content-between align-items-end flex-wrap gap-2">
+                <div><h1 x-text="isNew ? 'New scheduled task' : name"></h1></div>
+                <a href="#/scheduler" class="btn btn-outline-secondary">Back to Scheduler</a>
+              </div>
+              <div class="alert alert-danger" role="alert" x-show="error" x-text="error"></div>
+              <div class="row g-3" x-show="loaded">
+                <div class="col-lg-7">
+                  <div class="panel p-3 mb-3">
+                    <div class="row g-2">
+                      <div class="col-md-6"><label class="form-label" for="sc-name">Name</label><input id="sc-name" class="form-control" maxlength="200" x-model="name"></div>
+                      <div class="col-md-6"><div class="form-check mt-4"><input id="sc-enabled" class="form-check-input" type="checkbox" x-model="enabled"><label class="form-check-label small" for="sc-enabled">Enabled</label></div></div>
+                    </div>
+                    <div class="row g-2 mt-1">
+                      <div class="col-md-4"><label class="form-label" for="sc-kind">What to run</label>
+                        <select id="sc-kind" class="form-select" x-model="kind" @change="target = ''"><option value="service">A Service</option><option value="webhook">A Webhook</option></select>
+                      </div>
+                      <div class="col-md-8">
+                        <label class="form-label" for="sc-target">Target</label>
+                        <template x-if="kind === 'service'">
+                          <select id="sc-target" class="form-select" x-model="target"><option value="">Choose a Service&hellip;</option><template x-for="s in services" :key="s.slug"><option :value="s.slug" x-text="s.name + ' (' + s.slug + ')'"></option></template></select>
+                        </template>
+                        <template x-if="kind === 'webhook'">
+                          <select id="sc-target" class="form-select" x-model="target"><option value="">Choose a webhook&hellip;</option><template x-for="w in webhooks" :key="w.id"><option :value="String(w.id)" x-text="w.name"></option></template></select>
+                        </template>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="panel p-3 mb-3">
+                    <div class="panel-h">Schedule</div>
+                    <div class="btn-group d-flex mb-3" role="group" aria-label="Schedule type">
+                      <input type="radio" class="btn-check" id="sc-type-interval" value="interval" x-model="scheduleType" autocomplete="off">
+                      <label class="btn btn-outline-secondary" for="sc-type-interval">Interval</label>
+                      <input type="radio" class="btn-check" id="sc-type-cron" value="cron" x-model="scheduleType" autocomplete="off">
+                      <label class="btn btn-outline-secondary" for="sc-type-cron">Cron expression</label>
+                    </div>
+                    <template x-if="scheduleType === 'interval'">
+                      <div class="row g-2 align-items-end">
+                        <div class="col-4"><label class="form-label" for="sc-every-value">Every</label><input id="sc-every-value" type="number" min="1" class="form-control" x-model.number="everyValue"></div>
+                        <div class="col-4"><select class="form-select" aria-label="Unit" x-model="everyUnit"><option value="minutes">Minutes</option><option value="hours">Hours</option><option value="days">Days</option></select></div>
+                      </div>
+                      <div class="help small muted mt-1">At least a minute &mdash; this runs real work, not a cheap check.</div>
+                    </template>
+                    <template x-if="scheduleType === 'cron'">
+                      <div>
+                        <label class="form-label" for="sc-cron">Cron expression</label>
+                        <input id="sc-cron" class="form-control mono" placeholder="0 * * * *" x-model="cronExpr" @input="updateCronPreview()">
+                        <div class="alert alert-danger mt-2 py-2" role="alert" x-show="cronError" x-text="cronError"></div>
+                        <div class="help small muted mt-1" x-show="cronPreview.length">
+                          Next runs: <template x-for="(t, i) in cronPreview" :key="i"><span x-text="new Date(t).toLocaleString() + (i < cronPreview.length - 1 ? '; ' : '')"></span></template>
+                        </div>
+                      </div>
+                    </template>
+                  </div>
+
+                  <div class="panel p-3 mb-3">
+                    <div class="panel-h">Parameters</div>
+                    <div class="help small muted mb-2">For a Service: its query parameters. For a Webhook: merged into the delivery's payload. A JSON object; leave as <code>{}</code> for none.</div>
+                    <textarea class="form-control mono" rows="5" spellcheck="false" x-codejar="{ mode: 'application/json', get: paramsText, set: (v) => (paramsText = v) }"></textarea>
+                  </div>
+
+                  <div class="panel p-3 mb-3" x-show="!isNew">
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                      <div class="panel-h mb-0">Last run</div>
+                      <button type="button" class="btn btn-sm btn-outline-secondary" :disabled="runBusy" @click="runNow()">Run now</button>
+                    </div>
+                    <div class="empty small" x-show="!lastRunAt">Never run yet.</div>
+                    <div x-show="lastRunAt">
+                      <span class="tag" :class="lastStatus === 'ok' ? 'ok' : 'warn'" x-text="lastStatus"></span>
+                      <span class="muted small" x-text="lastRunAt ? ago(lastRunAt) : ''"></span>
+                      <div class="alert alert-danger mt-2 py-2" role="alert" x-show="lastError" x-text="lastError"></div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="savebar" x-show="loaded">
+                <span class="ms-auto"></span>
+                <button class="btn btn-primary" type="button" :disabled="busy" @click="save()" x-text="isNew ? 'Create task' : 'Save task'"></button>
+              </div>

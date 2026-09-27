@@ -1,0 +1,64 @@
+        <div class="page-head d-flex justify-content-between align-items-end flex-wrap gap-2">
+          <div><h1>Libraries</h1><p>Add npm packages to your site — icon sets, fonts, CSS frameworks. Each server keeps its own copy, checked against the package’s published hash.</p></div>
+          <div class="d-flex gap-2 flex-wrap">
+            <a class="btn btn-outline-secondary" href="/api/admin/libraries/export">Export list</a>
+            <label class="btn btn-outline-secondary mb-0" x-show="can('libraries.manage')" :class="{disabled: busy}">Import list<input type="file" hidden accept=".json,application/json" @change="importList($event.target.files[0]); $event.target.value = ''"></label>
+          </div>
+        </div>
+        <div class="alert alert-danger" role="alert" x-show="error" x-text="error"></div>
+        <div class="alert alert-info small" x-show="loaded && !allowScripts">Library JavaScript is off, so only stylesheets, fonts and images are served. To use a package’s scripts, turn on “Let libraries add JavaScript” under Settings → Libraries.</div>
+        <div class="alert alert-success small" x-show="report" x-text="report"></div>
+        <div class="panel mb-3 p-3" x-show="can('libraries.manage')">
+          <div class="fw-semibold mb-2">Add a package</div>
+          <form class="d-flex gap-2 flex-wrap align-items-center" @submit.prevent="search()">
+            <input id="lib-q" class="form-control" style="max-width:18rem" aria-label="Search packages" placeholder="Search npm, e.g. font awesome" x-model="q">
+            <button class="btn btn-outline-secondary" :disabled="busy">Search</button>
+            <span class="mx-1 muted">or</span>
+            <input id="lib-name" class="form-control mono" style="max-width:16rem" aria-label="Package name" placeholder="@fortawesome/fontawesome-free" x-model="name">
+            <input id="lib-version" class="form-control mono" style="max-width:7rem" aria-label="Version" placeholder="latest" x-model="version">
+            <button type="button" class="btn btn-primary" :disabled="busy || !name" @click="install(name, version || 'latest')" x-text="busy ? 'Installing…' : 'Install'"></button>
+            <div class="form-check ms-2"><input id="lib-autoload" class="form-check-input" type="checkbox" x-model="autoload"><label class="form-check-label" for="lib-autoload">Load on every page</label></div>
+          </form>
+          <table class="table table-sm mt-3 mb-0" x-show="results.length"><tbody>
+            <template x-for="p in results" :key="p.name"><tr>
+              <td><span class="mono fw-semibold" x-text="p.name"></span> <span class="muted small" x-text="p.version"></span><div class="muted small" x-text="p.description"></div></td>
+              <td class="text-end text-nowrap"><span class="tag ok" x-show="p.installed" x-text="'Installed ' + p.installed"></span> <button class="btn btn-sm btn-outline-primary" :disabled="busy" @click="install(p.name, 'latest')" x-text="p.installed ? 'Install latest' : 'Install'"></button></td>
+            </tr></template></tbody></table>
+        </div>
+        <div class="panel">
+          <div class="panel-h">Installed</div>
+          <div class="empty" x-show="loaded && !libraries.length">No libraries yet.</div>
+          <table class="table" x-show="libraries.length"><thead><tr><th>Package</th><th>Loads on every page</th><th>Size</th><th></th></tr></thead><tbody>
+            <template x-for="l in libraries" :key="l.name"><tr>
+              <td><span class="mono fw-semibold" x-text="l.name"></span> <span class="tag" x-text="l.version"></span> <span class="muted small" x-show="l.license" x-text="l.license"></span>
+                <div class="muted small" x-text="l.description"></div></td>
+              <td><div class="form-check form-switch mb-0"><input class="form-check-input" type="checkbox" role="switch" :aria-label="'Load ' + l.name + ' on every page'" :checked="l.autoload" :disabled="!can('libraries.manage')" @change="setAutoload(l, $event.target.checked)"></div>
+                <div class="muted small mono" x-text="l.include.join(', ') || 'No files chosen'"></div></td>
+              <td class="muted small text-nowrap" x-text="bytes(l.unpackedSize) + ' · ' + l.fileCount + ' files'"></td>
+              <td class="text-end text-nowrap">
+                <button class="btn btn-sm btn-outline-secondary" @click="configure(l)">Files</button>
+                <button class="btn btn-sm btn-outline-secondary" x-show="can('libraries.manage')" :disabled="busy" @click="install(l.name, 'latest')">Update</button>
+                <button class="btn btn-sm btn-outline-danger" x-show="can('libraries.manage')" @click="remove(l)">Remove</button>
+              </td>
+            </tr></template></tbody></table>
+        </div>
+        <div class="panel mt-3" x-show="current">
+          <div class="panel-h d-flex gap-2 align-items-center flex-wrap"><span>Files of <span class="mono" x-text="current?.name"></span></span>
+            <input class="form-control form-control-sm ms-auto" style="max-width:14rem" aria-label="Filter files" placeholder="Filter, e.g. .min.css" x-model="fileFilter">
+            <button type="button" class="btn btn-sm btn-outline-secondary" @click="current = null">Close</button>
+          </div>
+          <div class="p-3 small">In a template: <span class="mono" x-text="snippet"></span></div>
+          <div class="lib-files">
+            <template x-for="f in shownFiles" :key="f.path">
+              <div class="d-flex gap-2 align-items-center px-3 py-1 border-top">
+                <input type="checkbox" class="form-check-input" :id="'lf-' + f.path" :checked="picked.includes(f.path)" :disabled="!can('libraries.manage') || !loadable(f.path)" @change="pick(f.path, $event.target.checked)">
+                <label class="mono small flex-grow-1 mb-0" :for="'lf-' + f.path" x-text="f.path"></label>
+                <span class="muted small" x-text="bytes(f.size)"></span>
+              </div>
+            </template>
+          </div>
+          <div class="p-3 d-flex gap-2 align-items-center" x-show="can('libraries.manage')">
+            <button class="btn btn-primary" :disabled="busy" @click="saveFiles()">Save chosen files</button>
+            <span class="muted small">Ticked stylesheets and scripts load on every page, in this order, when the library is set to load.</span>
+          </div>
+        </div>

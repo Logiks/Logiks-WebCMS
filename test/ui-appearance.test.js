@@ -1,8 +1,13 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { makeNode, ADMIN, until } from './helpers.js';
 import { openAdmin } from './ui-harness.js';
 import { startRegistry } from './fake-registry.js';
+
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 let node, b, reg;
 before(async () => {
@@ -41,6 +46,17 @@ test('the menu: themes and their tools under Appearance; sitemap and libraries u
   b.go('#/customize');
   await wait(() => openGroupLinks().includes('Customize'));
   assert.deepEqual(openGroupLinks(), ['Themes', 'Customize', 'Theme editor', 'Menus']);
+  // Let customizePage's own async chain (its history.replaceState to the default theme id, then its
+  // preview refresh()) fully settle before navigating away — leaving it in flight desyncs jsdom's
+  // history state against real (non-instant) DB latency and the next hashchange silently never fires
+  // (reproduces reliably against MySQL/PostgreSQL, never against SQLite).
+  await wait(() =>
+    b
+      .$('section[x-data="customizePage"]')
+      ?.querySelector('iframe')
+      ?.getAttribute('srcdoc')
+      ?.includes('</html>'),
+  );
   b.go('#/sitemap');
   await wait(() => openGroupLinks().includes('Sitemap'));
   assert.deepEqual(openGroupLinks().slice(-6), [
@@ -132,11 +148,27 @@ test('Libraries: install a package by name; it is listed and its stylesheet is c
 test('preview frames keep the site origin (so theme files load) and nothing more', async () => {
   // Theme, library and media files are served with Cross-Origin-Resource-Policy: same-origin. An empty sandbox gives a
   // frame a "null" origin, and real browsers then block every one of them (jsdom doesn't, so this checks the attribute).
-  const html = await (await fetch(`${node.url}/admin`)).text();
+  // Each module owns its own admin-screen markup (fetched lazily, never in the shell's raw HTML), so this fetches the
+  // shell plus every module's fragment over HTTP, the same way the SPA itself does, rather than assuming one file.
+  const shell = await (await fetch(`${node.url}/admin`)).text();
+  const modulesDir = path.join(ROOT, 'src/modules');
+  const fragments = await Promise.all(
+    fs
+      .readdirSync(modulesDir)
+      .flatMap((mod) => {
+        const dir = path.join(modulesDir, mod, 'admin');
+        return fs.existsSync(dir)
+          ? fs.readdirSync(dir).map((file) => `${mod}/${file}`)
+          : [];
+      })
+      .map(async (rel) => (await fetch(`${node.url}/admin/modules/${rel}`)).text()),
+  );
+  const html = [shell, ...fragments].join('\n');
   const frames = [...html.matchAll(/<iframe title="([^"]+)"[^>]*sandbox="([^"]*)"/g)];
+  // Order is just an artifact of which module's directory sorts where — not a meaningful invariant.
   assert.deepEqual(
-    frames.map((m) => m[1]),
-    ['Page preview', 'Component preview', 'Theme preview'],
+    frames.map((m) => m[1]).sort(),
+    ['Component preview', 'Page preview', 'Theme preview'],
   );
   for (const [, title, sandbox] of frames) assert.equal(sandbox, 'allow-same-origin', title);
 });

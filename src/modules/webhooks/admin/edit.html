@@ -1,0 +1,64 @@
+              <div class="page-head d-flex justify-content-between align-items-end flex-wrap gap-2">
+                <div><h1 x-text="isNew ? 'New webhook' : name"></h1></div>
+                <a href="#/webhooks" class="btn btn-outline-secondary">Back to webhooks</a>
+              </div>
+              <div class="alert alert-danger" role="alert" x-show="error" x-text="error"></div>
+              <div class="row g-3" x-show="loaded">
+                <div class="col-lg-7">
+                  <div class="panel p-3 mb-3">
+                    <div class="row g-2">
+                      <div class="col-md-6"><label class="form-label" for="wh-name">Name</label><input id="wh-name" class="form-control" maxlength="200" x-model="name"></div>
+                      <div class="col-md-6"><label class="form-label" for="wh-event">Event pattern</label><input id="wh-event" class="form-control mono" placeholder="content.published or orders.*" x-model="event"></div>
+                    </div>
+                    <label class="form-label mt-2" for="wh-url">URL</label>
+                    <input id="wh-url" class="form-control mono" placeholder="https://&hellip;" x-model="url">
+                    <div class="help small muted mt-1">This URL is called exactly as given, with no restriction &mdash; the same trust level as a script Service.</div>
+                    <div class="form-check mt-2"><input id="wh-enabled" class="form-check-input" type="checkbox" x-model="enabled"><label class="form-check-label small" for="wh-enabled">Enabled</label></div>
+                  </div>
+
+                  <div class="panel p-3 mb-3">
+                    <label class="form-label" for="wh-secret">Signing secret</label>
+                    <input id="wh-secret" type="password" class="form-control mono" autocomplete="new-password" x-model="secret" :placeholder="hasSecret ? 'Set — leave blank to keep it' : 'Optional — signs deliveries with X-CMS-Signature'">
+                    <div class="help small muted mt-1" x-show="hasSecret">A secret is set. It is never shown again &mdash; type a new one to replace it.</div>
+                  </div>
+
+                  <div class="panel p-3 mb-3">
+                    <div class="panel-h">Custom headers</div>
+                    <template x-for="(h, i) in headers" :key="i">
+                      <div class="row g-2 mb-2 align-items-center">
+                        <div class="col-5"><input class="form-control form-control-sm mono" aria-label="Header name" placeholder="X-Example" x-model="h.name"></div>
+                        <div class="col-6"><input class="form-control form-control-sm" aria-label="Header value" placeholder="value" x-model="h.value"></div>
+                        <div class="col-1 text-end"><button type="button" class="btn btn-sm btn-outline-danger" @click="removeHeader(i)" aria-label="Remove header">&times;</button></div>
+                      </div>
+                    </template>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" @click="addHeader()">Add header</button>
+                  </div>
+
+                  <div class="panel p-3 mb-3">
+                    <div class="panel-h">Payload</div>
+                    <div class="help small muted mb-2">Sent as the delivery's <code>payload</code>, merged under the real event's own data (the event's fields win). Also what "Send test" sends when set.</div>
+                    <textarea class="form-control mono" rows="6" spellcheck="false" x-codejar="{ mode: 'application/json', get: payloadText, set: (v) => (payloadText = v) }"></textarea>
+                  </div>
+
+                  <div class="panel p-3 mb-3" x-show="!isNew">
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                      <div class="panel-h mb-0">Recent deliveries</div>
+                      <button type="button" class="btn btn-sm btn-outline-secondary" :disabled="testBusy" @click="sendTest()">Send test</button>
+                    </div>
+                    <div class="empty small" x-show="!deliveries.length">No deliveries yet.</div>
+                    <table class="table" x-show="deliveries.length"><thead><tr><th>Event</th><th>Status</th><th>Response</th><th></th></tr></thead><tbody>
+                      <template x-for="d in deliveries" :key="d.id"><tr>
+                        <td class="mono small" x-text="d.event"></td>
+                        <td><span class="tag" :class="d.status === 'success' ? 'ok' : 'warn'" x-text="d.status"></span></td>
+                        <td class="muted small" x-text="d.responseCode ?? d.error ?? ''"></td>
+                        <td class="muted small text-end" x-text="ago(d.at)"></td>
+                      </tr></template>
+                    </tbody></table>
+                  </div>
+                </div>
+              </div>
+
+              <div class="savebar" x-show="loaded">
+                <span class="ms-auto"></span>
+                <button class="btn btn-primary" type="button" :disabled="busy" @click="save()" x-text="isNew ? 'Create webhook' : 'Save webhook'"></button>
+              </div>

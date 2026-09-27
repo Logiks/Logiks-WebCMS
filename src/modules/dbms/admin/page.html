@@ -1,0 +1,144 @@
+        <div class="page-head"><h1>Database</h1><p>Browse and edit tables directly. The SQL console can run anything the database allows — no undo.</p></div>
+        <div class="alert alert-danger" role="alert" x-show="error" x-text="error"></div>
+
+        <div class="btn-group mb-3" role="group" aria-label="Database view">
+          <button type="button" class="btn btn-outline-secondary" :class="{active: tab === 'tables'}" @click="tab = 'tables'">Tables</button>
+          <button type="button" class="btn btn-outline-secondary" :class="{active: tab === 'table'}" x-show="selectedTable" @click="tab = 'table'" x-text="selectedTable"></button>
+          <button type="button" class="btn btn-outline-secondary" :class="{active: tab === 'console'}" x-show="can('dbms.query')" @click="openConsole()">SQL console</button>
+        </div>
+
+        <template x-if="tab === 'tables'">
+          <div>
+            <div class="d-flex justify-content-end mb-2" x-show="can('dbms.write')">
+              <button type="button" class="btn btn-outline-secondary btn-sm" @click="showCreateForm = !showCreateForm" x-text="showCreateForm ? 'Cancel' : 'New table'"></button>
+            </div>
+            <div class="panel p-3 mb-3" x-show="showCreateForm">
+              <div class="row g-2">
+                <div class="col-md-6"><label class="form-label" for="nt-name">Table name</label><input id="nt-name" class="form-control mono" x-model="newTable.name"></div>
+              </div>
+              <div class="d-flex justify-content-between align-items-center mt-3 mb-2"><label class="form-label mb-0">Columns</label><button type="button" class="btn btn-sm btn-outline-secondary" @click="addColumn()">Add column</button></div>
+              <template x-for="(c, i) in newTable.columns" :key="i">
+                <div class="row g-2 mb-2 align-items-center">
+                  <div class="col-3"><input class="form-control form-control-sm mono" aria-label="Column name" placeholder="name" x-model="c.name"></div>
+                  <div class="col-2"><select class="form-select form-select-sm" aria-label="Column type" x-model="c.type"><option value="string">Short text</option><option value="text">Long text</option><option value="integer">Whole number</option><option value="bigInteger">Big whole number</option><option value="boolean">On/off</option><option value="float">Decimal</option><option value="json">JSON (text)</option></select></div>
+                  <div class="col-2 form-check"><input class="form-check-input" type="checkbox" :id="'pk-' + i" x-model="c.primaryKey"><label class="form-check-label small" :for="'pk-' + i">Primary key</label></div>
+                  <div class="col-2 form-check" x-show="c.primaryKey"><input class="form-check-input" type="checkbox" :id="'ai-' + i" x-model="c.autoIncrement"><label class="form-check-label small" :for="'ai-' + i">Auto-increment</label></div>
+                  <div class="col-2"><input class="form-control form-control-sm" aria-label="Default value" placeholder="Default" x-model="c.default" x-show="!(c.primaryKey && c.autoIncrement)"></div>
+                  <div class="col-1 text-end"><button type="button" class="btn btn-sm btn-outline-danger" @click="removeColumn(i)" aria-label="Remove column">×</button></div>
+                </div>
+              </template>
+              <div class="help small muted mt-1">No date/time type on purpose — this platform stores every timestamp as milliseconds in a big whole number.</div>
+              <button type="button" class="btn btn-primary mt-2" :disabled="busy || !newTable.name || !newTable.columns.length" @click="createTable()">Create table</button>
+            </div>
+
+            <div class="panel">
+              <div class="empty" x-show="loaded && !tables.length">No tables.</div>
+              <table class="table" x-show="tables.length"><thead><tr><th>Name</th><th></th><th></th></tr></thead><tbody>
+                <template x-for="t in tables" :key="t.name"><tr>
+                  <td class="mono"><a href="#" @click.prevent="openTable(t.name)" x-text="t.name"></a></td>
+                  <td class="muted small" x-text="t.view ? 'View' : ''"></td>
+                  <td class="text-end"><button class="btn btn-sm btn-outline-danger" type="button" x-show="can('dbms.write') && !t.view" @click="dropTable(t.name)">Drop</button></td>
+                </tr></template>
+              </tbody></table>
+            </div>
+          </div>
+        </template>
+
+        <template x-if="tab === 'table' && tableInfo">
+          <div>
+            <div class="panel mb-3">
+              <div class="panel-h">Structure</div>
+              <table class="table mb-0"><thead><tr><th>Column</th><th>Type</th><th>Nullable</th><th>Default</th><th></th></tr></thead><tbody>
+                <template x-for="c in tableInfo.columns" :key="c.name"><tr>
+                  <td class="mono small" x-text="c.name"></td>
+                  <td class="muted small" x-text="c.type"></td>
+                  <td class="muted small" x-text="c.nullable ? 'Yes' : 'No'"></td>
+                  <td class="muted small" x-text="c.default ?? '–'"></td>
+                  <td><span class="tag ok" x-show="c.primaryKey">Primary key</span> <span class="tag" x-show="c.autoIncrement">Auto-increment</span></td>
+                </tr></template>
+              </tbody></table>
+              <div class="p-2 small muted" x-show="tableInfo.indexes.length">Indexes: <template x-for="idx in tableInfo.indexes" :key="idx.name"><span class="mono me-3" x-text="idx.name + ' (' + idx.columns.join(', ') + (idx.unique ? ', unique' : '') + ')'"></span></template></div>
+            </div>
+
+            <div class="d-flex justify-content-between align-items-center mb-2">
+              <span class="muted small" x-text="rowsTotal + ' record' + (rowsTotal === 1 ? '' : 's')"></span>
+              <button class="btn btn-sm btn-primary" type="button" x-show="can('dbms.write') && !tableInfo.sensitive" @click="startNewRow()">Add record</button>
+            </div>
+            <div class="alert alert-warning" role="alert" x-show="tableInfo.sensitive">This table is only editable through the SQL console.</div>
+
+            <div class="panel p-3 mb-3" x-show="editingRow">
+              <div class="panel-h" x-text="editingRow === 'new' ? 'New record' : 'Edit record'"></div>
+              <template x-for="c in (tableInfo?.columns || [])" :key="c.name">
+                <div class="mb-2" x-show="!(editingRow !== 'new' && c.primaryKey)">
+                  <label class="form-label small" x-text="c.name"></label>
+                  <template x-if="/bool/i.test(c.type)"><div class="form-check"><input class="form-check-input" type="checkbox" x-model="editForm[c.name]"></div></template>
+                  <template x-if="!/bool/i.test(c.type)"><input class="form-control form-control-sm" x-model="editForm[c.name]"></template>
+                </div>
+              </template>
+              <div class="d-flex gap-2 mt-2">
+                <button class="btn btn-primary btn-sm" type="button" :disabled="busy" @click="saveRow()">Save</button>
+                <button class="btn btn-outline-secondary btn-sm" type="button" @click="cancelEdit()">Cancel</button>
+              </div>
+            </div>
+
+            <div class="panel">
+              <div class="empty" x-show="!rows.length">No records.</div>
+              <div class="table-responsive" x-show="rows.length">
+                <table class="table mb-0"><thead><tr>
+                  <template x-for="c in tableInfo.columns" :key="c.name"><th><a href="#" @click.prevent="sortBy(c.name)" x-text="c.name + (sortCol === c.name ? (sortDir === 'asc' ? ' ↑' : ' ↓') : '')"></a></th></template>
+                  <th></th>
+                </tr></thead><tbody>
+                  <template x-for="(row, i) in rows" :key="i"><tr>
+                    <template x-for="c in tableInfo.columns" :key="c.name"><td class="small" x-text="show(row[c.name])"></td></template>
+                    <td class="text-end text-nowrap">
+                      <button class="btn btn-sm btn-outline-secondary" type="button" x-show="can('dbms.write') && !tableInfo.sensitive" @click="startEditRow(row)">Edit</button>
+                      <button class="btn btn-sm btn-outline-danger" type="button" x-show="can('dbms.write') && !tableInfo.sensitive" @click="deleteRow(row)">Delete</button>
+                    </td>
+                  </tr></template>
+                </tbody></table>
+              </div>
+              <div class="d-flex justify-content-between align-items-center p-2" x-show="rowsPages > 1">
+                <button class="btn btn-sm btn-outline-secondary" type="button" :disabled="rowsPage <= 1" @click="changePage(rowsPage - 1)">Newer</button>
+                <span class="muted small" x-text="'Page ' + rowsPage + ' of ' + rowsPages"></span>
+                <button class="btn btn-sm btn-outline-secondary" type="button" :disabled="rowsPage >= rowsPages" @click="changePage(rowsPage + 1)">Older</button>
+              </div>
+            </div>
+          </div>
+        </template>
+
+        <template x-if="tab === 'console'">
+          <div class="row g-3">
+            <div class="col-lg-8">
+              <label class="form-label" for="dbms-sql">SQL</label>
+              <textarea id="dbms-sql" class="form-control mono" rows="8" spellcheck="false" x-codejar="{ mode: 'text/x-sql', get: sql, set: (v) => (sql = v) }"></textarea>
+              <div class="d-flex gap-2 align-items-center mt-2">
+                <button class="btn btn-primary" type="button" :disabled="consoleBusy || !sql.trim()" @click="runQuery()">Run</button>
+                <input class="form-control form-control-sm" style="max-width:16rem" aria-label="Name this query to save it" placeholder="Save as…" x-model="newQueryName" @keydown.enter.prevent="saveCurrentQuery()">
+                <button class="btn btn-outline-secondary btn-sm" type="button" @click="saveCurrentQuery()">Save query</button>
+              </div>
+              <div class="alert alert-danger mt-2" role="alert" x-show="consoleError" x-text="consoleError"></div>
+              <template x-if="consoleResult">
+                <div class="panel mt-3">
+                  <div class="panel-h" x-text="consoleResult.rows.length ? consoleResult.rowCount + ' row(s)' : consoleResult.rowCount + ' row(s) affected'"></div>
+                  <div class="table-responsive" x-show="consoleResult.rows.length">
+                    <table class="table mb-0"><thead><tr><template x-for="k in Object.keys(consoleResult.rows[0] || {})" :key="k"><th x-text="k"></th></template></tr></thead><tbody>
+                      <template x-for="(row, i) in consoleResult.rows" :key="i"><tr><template x-for="k in Object.keys(consoleResult.rows[0] || {})" :key="k"><td class="small" x-text="show(row[k])"></td></template></tr></template>
+                    </tbody></table>
+                  </div>
+                </div>
+              </template>
+            </div>
+            <div class="col-lg-4">
+              <div class="panel">
+                <div class="panel-h">Saved queries</div>
+                <div class="empty small" x-show="!savedQueries.length">None yet.</div>
+                <template x-for="q in savedQueries" :key="q.id">
+                  <div class="frow" style="grid-template-columns: 1fr auto">
+                    <div><a href="#" @click.prevent="loadSavedQuery(q)" x-text="q.name"></a></div>
+                    <div><button class="btn btn-sm btn-outline-danger" type="button" @click="deleteSavedQuery(q)" aria-label="Delete saved query">×</button></div>
+                  </div>
+                </template>
+              </div>
+            </div>
+          </div>
+        </template>

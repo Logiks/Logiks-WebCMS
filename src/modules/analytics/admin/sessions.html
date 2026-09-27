@@ -1,0 +1,21 @@
+        <div class="page-head"><h1>Sessions</h1><p>One row per visit — entry and exit page, device and referrer.</p></div>
+        <div class="mb-3 d-flex flex-wrap gap-2 align-items-end">
+          <div><label class="form-label small" for="an-surface-3">Surface</label><select id="an-surface-3" class="form-select" x-model="surface" @change="loadSessions(true)"><option value="public">Public site</option><option value="admin">Admin panel</option></select></div>
+          <div><label class="form-label small" for="an-from-3">From</label><input id="an-from-3" type="date" class="form-control" x-model="from" @change="loadSessions(true)"></div>
+          <div><label class="form-label small" for="an-to-3">To</label><input id="an-to-3" type="date" class="form-control" x-model="to" @change="loadSessions(true)"></div>
+        </div>
+        <div class="panel">
+          <div class="empty" x-show="!sessions.length">No sessions yet.</div>
+          <table class="table" x-show="sessions.length"><thead><tr><th>Entry page</th><th>Exit page</th><th>Pages</th><th>Device</th><th>Referrer</th><th>Bounce</th><th>Last seen</th></tr></thead><tbody>
+            <template x-for="s in sessions" :key="s.token"><tr>
+              <td class="mono" x-text="s.entryPath"></td>
+              <td class="mono" x-text="s.exitPath"></td>
+              <td x-text="s.pageCount"></td>
+              <td x-text="s.deviceType"></td>
+              <td class="muted small" x-text="s.referrer || '–'"></td>
+              <td x-text="s.isBounce ? 'Yes' : 'No'"></td>
+              <td class="muted text-nowrap" x-text="ago(s.lastSeen)" :title="new Date(s.lastSeen).toLocaleString()"></td>
+            </tr></template>
+          </tbody></table>
+        </div>
+        <div class="text-center mt-3"><button class="btn btn-outline-secondary" x-show="moreSessions" @click="loadSessions(false)">Load older</button></div>

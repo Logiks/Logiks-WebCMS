@@ -123,6 +123,14 @@ export function createApp(ctx) {
     '/admin/static',
     express.static(path.join(ROOT, 'admin/static'), { maxAge: env.isProd ? '5m' : 0 }),
   );
+  // Each module's own admin-screen HTML fragments (fetched lazily by the SPA, `H.mountFragment` in
+  // app.js) — a module owns its admin markup under its own directory rather than one central file,
+  // so it stays self-contained if it's ever copied/removed between installations. Auto-discovered:
+  // adding or removing a module's admin/ folder needs no change here.
+  for (const name of fs.readdirSync(path.join(ROOT, 'src/modules'))) {
+    const dir = path.join(ROOT, 'src/modules', name, 'admin');
+    if (fs.existsSync(dir)) app.use(`/admin/modules/${name}`, express.static(dir, cache));
+  }
   app.get(['/admin', '/admin/*splat'], (_req, res) => {
     res.setHeader('Cache-Control', 'no-cache');
     res.sendFile(path.join(ROOT, 'admin/static/index.html'));

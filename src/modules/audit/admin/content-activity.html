@@ -1,0 +1,19 @@
+        <div class="page-head d-flex justify-content-between align-items-end flex-wrap gap-2">
+          <div><h1>Activity</h1><p>Who created, edited, published, restored or deleted a page, entry or file. Security events (sign-ins, settings, webhooks) are in the Audit log.</p></div>
+          <a class="btn btn-outline-secondary" :href="exportUrl" download>Export CSV</a>
+        </div>
+        <div class="mb-3 d-flex flex-wrap gap-2 align-items-end">
+          <div><label class="form-label small" for="ca-actor">Actor email</label><input id="ca-actor" class="form-control" style="max-width:16rem" placeholder="e.g. you@example.com" x-model="actorEmail" @input.debounce.400ms="load(true)"></div>
+          <div><label class="form-label small" for="ca-from">From</label><input id="ca-from" type="date" class="form-control" x-model="from" @change="load(true)"></div>
+          <div><label class="form-label small" for="ca-to">To</label><input id="ca-to" type="date" class="form-control" x-model="to" @change="load(true)"></div>
+          <button type="button" class="btn btn-link" x-show="actorEmail || from || to" @click="clearFilters()">Clear filters</button>
+        </div>
+        <div class="panel">
+          <div class="empty" x-show="!entries.length">No content activity yet.</div>
+          <table class="table" x-show="entries.length"><thead><tr><th>What happened</th><th>By</th><th>When</th></tr></thead><tbody>
+            <template x-for="e in entries" :key="e.id"><tr>
+              <td class="small"><span x-html="detail(e)"></span></td>
+              <td x-text="e.actor"></td>
+              <td class="muted text-nowrap" x-text="ago(e.at)" :title="new Date(e.at).toLocaleString()"></td></tr></template></tbody></table>
+        </div>
+        <div class="text-center mt-3"><button class="btn btn-outline-secondary" x-show="more" @click="load(false)">Load older</button></div>

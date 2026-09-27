@@ -1,0 +1,18 @@
+              <div class="page-head d-flex justify-content-between align-items-end flex-wrap gap-2">
+                <div><h1>SEO Manager</h1><p>Override title, description, social tags and structured data for one specific address. A page’s own SEO section (Webmaster → Site pages) sets the default for everything else.</p></div>
+                <a class="btn btn-primary" x-show="can('seo.write')" href="#/seo/new">New rule</a>
+              </div>
+              <div class="panel">
+                <div class="empty" x-show="loaded && !rules.length">No rules yet — every page uses its own defaults.</div>
+                <table class="table" x-show="rules.length"><thead><tr><th>Address</th><th>Priority</th><th>Overrides</th><th></th><th></th></tr></thead><tbody>
+                  <template x-for="r in rules" :key="r.id"><tr>
+                    <td class="mono small" x-text="r.pattern"></td>
+                    <td class="muted small" x-text="r.priority"></td>
+                    <td class="muted small" x-text="r.title || r.description ? 'Title/description' : (r.metaTags.length || r.ldJson.length ? 'Tags only' : '—')"></td>
+                    <td><span class="tag" :class="r.enabled ? 'ok' : 'warn'" x-text="r.enabled ? 'Enabled' : 'Disabled'"></span></td>
+                    <td class="text-end text-nowrap">
+                      <a class="btn btn-sm btn-outline-secondary" :href="'#/seo/' + r.id">Edit</a>
+                      <button class="btn btn-sm btn-outline-danger" type="button" x-show="can('seo.write')" @click="remove(r)">Delete</button>
+                    </td>
+                  </tr></template></tbody></table>
+              </div>

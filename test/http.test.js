@@ -6,6 +6,7 @@ import request from 'supertest';
 import { makeNode, signedIn, ADMIN, loopback } from './helpers.js';
 import { securityHeaders } from '../src/core/http/securityHeaders.js';
 import { createCsrf } from '../src/core/http/csrf.js';
+import { dialect } from '../src/core/db/index.js';
 
 let node;
 before(async () => {
@@ -334,7 +335,7 @@ describe('settings apply live, without a restart', () => {
   test('/api/public/info exposes login-page branding, resolving media ids to urls', async () => {
     const s = await signedIn(node.app);
     const now = Date.now();
-    const [id] = await node.ctx.db('media').insert({
+    const id = await dialect(node.ctx.db).insertGetId(node.ctx.db('media'), {
       filename: 'logo.png',
       mime: 'image/png',
       kind: 'image',

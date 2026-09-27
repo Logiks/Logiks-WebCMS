@@ -1,0 +1,57 @@
+        <div class="page-head d-flex justify-content-between align-items-end flex-wrap gap-2">
+          <div><h1>Customize</h1><p>Change the theme’s options and add your own CSS. The preview updates as you type; visitors see nothing until you save.</p></div>
+          <div class="d-flex gap-2 align-items-center">
+            <label class="small muted" for="cz-theme">Theme</label>
+            <select id="cz-theme" class="form-select" style="max-width:14rem" @change="open($event.target.value)"><template x-for="t in themes" :key="t.id"><option :value="t.id" :selected="t.id === id" x-text="t.name + (t.active ? ' (live)' : '')"></option></template></select>
+          </div>
+        </div>
+        <div class="alert alert-danger" role="alert" x-show="error" x-text="error"></div>
+        <div class="alert alert-info small" x-show="theme && !theme.active">This theme isn’t live. What you save here applies when it is made live under Appearance → Themes.</div>
+        <div class="row g-3" x-show="loaded">
+          <div class="col-lg-5">
+            <div class="panel">
+              <div class="panel-h">Options</div>
+              <div class="empty" x-show="!optionFields.length">This theme has no options of its own.</div>
+              <template x-for="f in optionFields" :key="f.key">
+                <div class="p-3 border-bottom">
+                  <label class="form-label fw-semibold mb-1" :for="'cz_' + f.key" x-text="f.label"></label>
+                  <template x-if="f.type === 'string'"><input :id="'cz_' + f.key" class="form-control" :class="{'is-invalid': errors[f.key]}" :value="values[f.key]" @input="set(f.key, $event.target.value)"></template>
+                  <template x-if="f.type === 'text'"><textarea :id="'cz_' + f.key" rows="3" class="form-control" :value="values[f.key]" @input="set(f.key, $event.target.value)"></textarea></template>
+                  <template x-if="f.type === 'number'"><input :id="'cz_' + f.key" type="number" class="form-control" style="max-width:10rem" :value="values[f.key]" :min="f.min" :max="f.max" @input="set(f.key, $event.target.value === '' ? '' : Number($event.target.value))"></template>
+                  <template x-if="f.type === 'boolean'"><div class="form-check form-switch"><input :id="'cz_' + f.key" type="checkbox" class="form-check-input" role="switch" :checked="values[f.key]" @change="set(f.key, $event.target.checked)"><label class="form-check-label muted" :for="'cz_' + f.key" x-text="values[f.key] ? 'On' : 'Off'"></label></div></template>
+                  <template x-if="f.type === 'select'"><select :id="'cz_' + f.key" class="form-select" @change="set(f.key, $event.target.value)"><template x-for="o in f.options" :key="o.value"><option :value="o.value" :selected="o.value === values[f.key]" x-text="o.label"></option></template></select></template>
+                  <div class="form-text" x-show="f.help" x-text="f.help"></div>
+                  <div class="invalid-feedback d-block" x-show="errors[f.key]" x-text="errors[f.key]"></div>
+                </div>
+              </template>
+            </div>
+            <div class="panel mt-3">
+              <div class="panel-h">Custom CSS <span class="muted small fw-normal">Added after the theme’s styles on every page</span></div>
+              <div class="p-3">
+                <textarea id="cz-css" class="form-control mono" rows="14" spellcheck="false" aria-label="Custom CSS" x-codejar="{ mode: 'css', get: values.custom_css, set: (v) => set('custom_css', v), placeholder: ':root { --accent: #c0392b; }\n.site-header { border-bottom: 3px solid var(--accent); }' }"></textarea>
+                <div class="invalid-feedback d-block" x-show="errors.custom_css" x-text="errors.custom_css"></div>
+                <div class="form-text">Tip: themes keep colours and spacing in CSS variables (<span class="mono">--accent</span>, <span class="mono">--ink</span>, <span class="mono">--bg</span>…), so changing one restyles the whole site. Fonts and icon sets: install them under System → Libraries.</div>
+              </div>
+            </div>
+            <div class="d-flex gap-2 mt-3 align-items-center" x-show="can('themes.customize')">
+              <button class="btn btn-primary" :disabled="saving || !dirty" @click="save()" x-text="saving ? 'Saving…' : 'Save changes'"></button>
+              <button class="btn btn-outline-secondary" :disabled="!dirty" @click="discard()">Discard</button>
+              <span class="muted small" x-show="dirty">Unsaved changes</span>
+            </div>
+          </div>
+          <div class="col-lg-7">
+            <div class="panel">
+              <div class="panel-h d-flex gap-2 align-items-center flex-wrap">
+                <span>Preview</span>
+                <input class="form-control form-control-sm mono" style="max-width:16rem" aria-label="Preview address" x-model="previewPath" @keydown.enter.prevent="refresh()">
+                <button type="button" class="btn btn-sm btn-outline-secondary" @click="refresh()">Show</button>
+                <span class="muted small" x-show="previewing">Rendering…</span>
+                <span class="text-danger small" x-show="previewError" x-text="previewError"></span>
+              </div>
+              <!-- allow-same-origin and nothing else: scripts, forms and popups stay off, but the frame keeps the site's origin, so
+                   theme/library/media files (served with Cross-Origin-Resource-Policy: same-origin) load. An empty sandbox gives
+                   the frame a "null" origin and the browser blocks every one of them, leaving the preview unstyled. -->
+              <iframe title="Theme preview" style="width:100%;height:75vh;border:0;border-top:1px solid var(--line)" sandbox="allow-same-origin" :srcdoc="previewHtml"></iframe>
+            </div>
+          </div>
+        </div>

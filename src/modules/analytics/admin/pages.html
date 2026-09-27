@@ -1,0 +1,18 @@
+        <div class="page-head"><h1>Page analytics</h1><p>Views and time on page, page-wise.</p></div>
+        <div class="mb-3 d-flex flex-wrap gap-2 align-items-end">
+          <div><label class="form-label small" for="an-surface-2">Surface</label><select id="an-surface-2" class="form-select" x-model="surface" @change="load()"><option value="public">Public site</option><option value="admin">Admin panel</option></select></div>
+          <div><label class="form-label small" for="an-from-2">From</label><input id="an-from-2" type="date" class="form-control" x-model="from" @change="load()"></div>
+          <div><label class="form-label small" for="an-to-2">To</label><input id="an-to-2" type="date" class="form-control" x-model="to" @change="load()"></div>
+        </div>
+        <div class="panel">
+          <div class="empty" x-show="!pages.length">No page views yet.</div>
+          <table class="table" x-show="pages.length"><thead><tr><th>Page</th><th>Views</th><th>Sessions</th><th>Avg. time</th><th>Bounce rate</th></tr></thead><tbody>
+            <template x-for="p in pages" :key="p.path"><tr>
+              <td class="mono" x-text="p.path"></td>
+              <td x-text="p.views"></td>
+              <td x-text="p.sessions"></td>
+              <td x-text="duration(p.avgDwellMs)"></td>
+              <td x-text="p.bounceRate == null ? '–' : pct(p.bounceRate)"></td>
+            </tr></template>
+          </tbody></table>
+        </div>

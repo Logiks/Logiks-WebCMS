@@ -1,0 +1,79 @@
+        <div class="page-head"><h1>Settings</h1><p>Stored in the database and applied on every server within seconds. No restart, no deploy.</p></div>
+        <div class="settings-grid" x-show="loaded">
+          <nav class="subnav">
+            <template x-for="n in namespaces" :key="n.namespace">
+              <a href="#" :class="{active: ns === n.namespace}" @click.prevent="select(n.namespace)"><span x-text="n.title"></span><span class="dirty-dot" x-show="dirtyCount(n.namespace)" title="Unsaved changes"></span></a>
+            </template>
+            <a href="#" class="mt-3" :class="{active: ns === '__history'}" @click.prevent="showHistory()"><i class="bi bi-clock-history me-1"></i>History</a>
+          </nav>
+
+          <div>
+            <!-- form -->
+            <div class="panel" x-show="current && ns !== '__history'">
+              <div class="panel-h"><span x-text="current?.title"></span>
+                <span class="muted small fw-normal" x-text="current?.description"></span></div>
+              <template x-for="f in (current?.fields || [])" :key="f.key">
+                <div class="frow" :class="{changed: isDirty(f)}">
+                  <div>
+                    <label class="title" :for="'f_' + f.key" x-text="f.label"></label>
+                    <span class="tag" x-show="st(f).locked">Set by environment</span>
+                    <span class="tag warn" x-show="f.restartRequired">Needs restart</span>
+                    <span class="tag ok" x-show="f.secret && st(f).isSet && !isRemoved(f)">Saved</span>
+                    <div class="key" x-text="ns + '.' + f.key"></div>
+                    <div class="help" x-show="f.help" x-text="f.help"></div>
+                  </div>
+                  <div class="ctl">
+                    <template x-if="(f.type === 'string') && !f.secret"><input :id="'f_' + f.key" class="form-control" :class="{'is-invalid': errors[f.key]}" :value="val(f)" :disabled="st(f).locked" :placeholder="f.placeholder || ''" @input="set(f, $event.target.value)"></template>
+                    <template x-if="f.type === 'string' && f.secret">
+                      <div>
+                        <input :id="'f_' + f.key" type="password" autocomplete="new-password" class="form-control" :class="{'is-invalid': errors[f.key]}" :value="val(f)" :disabled="st(f).locked || isRemoved(f)" :placeholder="st(f).isSet ? '••••••••  (leave blank to keep)' : 'Not set'" @input="set(f, $event.target.value)">
+                        <button type="button" class="btn btn-link btn-sm px-0" x-show="st(f).isSet && !isRemoved(f) && !st(f).locked" @click="remove(f)">Remove saved value</button>
+                        <span class="small text-warning" x-show="isRemoved(f)">Will be removed when you save. <a href="#" @click.prevent="undoRemove(f)">Undo</a></span>
+                      </div>
+                    </template>
+                    <template x-if="f.type === 'text'"><textarea :id="'f_' + f.key" rows="3" class="form-control" :class="{'is-invalid': errors[f.key]}" :value="val(f)" :disabled="st(f).locked" @input="set(f, $event.target.value)"></textarea></template>
+                    <template x-if="f.type === 'number' && !f.media"><input :id="'f_' + f.key" type="number" class="form-control" style="max-width:10rem" :class="{'is-invalid': errors[f.key]}" :value="val(f)" :min="f.min" :max="f.max" :disabled="st(f).locked" @input="set(f, $event.target.value === '' ? '' : Number($event.target.value))"></template>
+                    <template x-if="f.type === 'number' && f.media">
+                      <div class="d-flex align-items-center gap-3">
+                        <span class="ph thumb" x-show="val(f)"><img x-show="media[val(f)] && media[val(f)].kind === 'image'" :src="thumb(media[val(f)])" alt=""></span>
+                        <span class="muted small" x-show="val(f)" x-text="media[val(f)] ? media[val(f)].filename : ''"></span>
+                        <button type="button" class="btn btn-outline-secondary btn-sm" :disabled="st(f).locked" @click="pickMedia(f)" x-text="val(f) ? 'Change' : 'Choose from the library'"></button>
+                        <button type="button" class="btn btn-link btn-sm" x-show="val(f)" :disabled="st(f).locked" @click="set(f, 0)">Remove</button>
+                      </div>
+                    </template>
+                    <template x-if="f.type === 'boolean'"><div class="form-check form-switch"><input :id="'f_' + f.key" type="checkbox" class="form-check-input" role="switch" :checked="val(f)" :disabled="st(f).locked" @change="set(f, $event.target.checked)"><label class="form-check-label muted" :for="'f_' + f.key" x-text="val(f) ? 'On' : 'Off'"></label></div></template>
+                    <template x-if="f.type === 'select'"><select :id="'f_' + f.key" class="form-select" :disabled="st(f).locked" @change="set(f, $event.target.value)"><template x-for="o in f.options" :key="o.value"><option :value="o.value" :selected="o.value === val(f)" x-text="o.label"></option></template></select></template>
+                    <template x-if="f.type === 'list'"><textarea :id="'f_' + f.key" rows="3" class="form-control mono" placeholder="One per line" :value="listText(f)" :disabled="st(f).locked" @input="setList(f, $event.target.value)"></textarea></template>
+                    <div class="invalid-feedback d-block" x-show="errors[f.key]" x-text="errors[f.key]"></div>
+                    <button type="button" class="btn btn-link btn-sm px-0 muted" x-show="st(f).source === 'db' && !f.secret && !st(f).locked && !isDirty(f)" @click="resetToDefault(f)">Reset to default</button>
+                  </div>
+                </div>
+              </template>
+              <div class="frow" x-show="current?.tests?.length">
+                <div><span class="title">Check settings</span><div class="help">Tries the values above without saving them.</div></div>
+                <div class="ctl"><template x-for="t in current?.tests || []" :key="t.id"><button class="btn btn-outline-secondary btn-sm" :disabled="testing" @click="runTest(t)" x-text="testing ? 'Testing…' : t.label"></button></template>
+                  <div class="small mt-2" :class="testResult?.ok ? 'text-success' : 'text-danger'" x-show="testResult" x-text="testResult?.message"></div></div>
+              </div>
+            </div>
+
+            <!-- history -->
+            <div class="panel" x-show="ns === '__history'">
+              <div class="panel-h">Change history</div>
+              <div class="empty" x-show="!history.length">No changes yet.</div>
+              <table class="table" x-show="history.length"><thead><tr><th>Setting</th><th>Change</th><th>By</th><th></th></tr></thead><tbody>
+                <template x-for="r in history" :key="r.id"><tr>
+                  <td class="mono" x-text="r.namespace + '.' + r.key"></td>
+                  <td><span class="diff" x-show="!r.secret"><del x-text="show(r.from)"></del> → <ins x-text="r.wasReset ? 'default' : show(r.to)"></ins></span><span class="muted" x-show="r.secret">Secret value changed</span></td>
+                  <td class="muted"><span x-text="r.by"></span><br><small x-text="ago(r.at)"></small></td>
+                  <td class="text-end"><button class="btn btn-sm btn-outline-secondary" x-show="r.restorable" @click="restore(r)">Restore previous</button></td>
+                </tr></template></tbody></table>
+            </div>
+          </div>
+        </div>
+
+        <div class="savebar" x-show="dirtyCount(ns) > 0">
+          <span><strong x-text="dirtyCount(ns)"></strong> unsaved change<span x-show="dirtyCount(ns) !== 1">s</span></span>
+          <span class="ms-auto"></span>
+          <button class="btn btn-outline-secondary" @click="discard()">Discard</button>
+          <button class="btn btn-primary" :disabled="saving" @click="save()" x-text="saving ? 'Saving…' : 'Save changes'"></button>
+        </div>

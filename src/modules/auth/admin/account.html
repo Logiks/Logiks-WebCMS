@@ -1,0 +1,46 @@
+        <div class="page-head"><h1>My account</h1><p>Your sign-in details, your password, and the devices you're signed in on.</p></div>
+
+        <div class="panel mb-3">
+          <div class="panel-h">Profile</div>
+          <form class="frow" id="profile-form" @submit.prevent="saveName()">
+            <div><label class="title" for="profile-name">Name</label></div>
+            <div class="ctl d-flex gap-2 flex-wrap"><input id="profile-name" class="form-control" style="max-width:20rem" maxlength="128" required :class="{'is-invalid': nameError}" x-model="profile.name" autocomplete="name">
+              <button class="btn btn-primary" :disabled="savingName || !nameDirty">Save name</button>
+              <div class="invalid-feedback d-block" x-show="nameError" x-text="nameError"></div></div>
+          </form>
+          <div class="frow"><div><span class="title">Email</span></div><div class="ctl" x-text="me.email"></div></div>
+          <div class="frow"><div><span class="title">Role</span></div><div class="ctl" x-text="me.role"></div></div>
+        </div>
+
+        <form class="panel mb-3" @submit.prevent="changePassword()" id="password-form">
+          <div class="panel-h">Change password</div>
+          <div class="frow">
+            <div><label class="title" for="pw-current">Current password</label></div>
+            <div class="ctl"><input id="pw-current" type="password" class="form-control" :class="{'is-invalid': errors.current}" autocomplete="current-password" required x-model="form.current"><div class="invalid-feedback d-block" x-show="errors.current" x-text="errors.current"></div></div>
+          </div>
+          <div class="frow">
+            <div><label class="title" for="pw-new">New password</label><div class="help" x-text="'At least ' + minLength + ' characters.'"></div></div>
+            <div class="ctl"><input id="pw-new" type="password" class="form-control" :class="{'is-invalid': errors.next}" autocomplete="new-password" required x-model="form.next"><div class="invalid-feedback d-block" x-show="errors.next" x-text="errors.next"></div></div>
+          </div>
+          <div class="frow">
+            <div><label class="title" for="pw-confirm">Repeat the new password</label></div>
+            <div class="ctl"><input id="pw-confirm" type="password" class="form-control" :class="{'is-invalid': errors.confirm}" autocomplete="new-password" required x-model="form.confirm"><div class="invalid-feedback d-block" x-show="errors.confirm" x-text="errors.confirm"></div></div>
+          </div>
+          <div class="frow">
+            <div class="help">Changing your password signs you out on every other device.</div>
+            <div class="ctl"><button class="btn btn-primary" :disabled="busy"><span x-text="busy ? 'Saving…' : 'Change password'"></span></button></div>
+          </div>
+        </form>
+
+        <div class="panel">
+          <div class="panel-h">Where you're signed in <button class="btn btn-sm btn-outline-secondary fw-normal" x-show="others > 0" @click="revokeOthers()">Sign out all other devices</button></div>
+          <div class="empty" x-show="loaded && !sessions.length">No active sessions.</div>
+          <table class="table" x-show="sessions.length"><thead><tr><th>Device</th><th>Address</th><th>Signed in</th><th>Last active</th><th></th></tr></thead><tbody>
+            <template x-for="s in sessions" :key="s.id"><tr>
+              <td><span x-text="s.device"></span> <span class="tag ok" x-show="s.current">This device</span></td>
+              <td class="mono" x-text="s.ip || '–'"></td>
+              <td class="muted" x-text="s.createdAt ? ago(s.createdAt) : '–'"></td>
+              <td class="muted" x-text="s.lastSeen ? ago(s.lastSeen) : '–'"></td>
+              <td class="text-end"><button class="btn btn-sm btn-outline-secondary" x-show="!s.current" @click="revoke(s)">Sign out</button></td>
+            </tr></template></tbody></table>
+        </div>

@@ -211,456 +211,59 @@
 
     <!-- Settings -->
     <template x-if="route === 'settings'">
-      <section x-data="settingsPage">
-        <div class="page-head"><h1>Settings</h1><p>Stored in the database and applied on every server within seconds. No restart, no deploy.</p></div>
-        <div class="settings-grid" x-show="loaded">
-          <nav class="subnav">
-            <template x-for="n in namespaces" :key="n.namespace">
-              <a href="#" :class="{active: ns === n.namespace}" @click.prevent="select(n.namespace)"><span x-text="n.title"></span><span class="dirty-dot" x-show="dirtyCount(n.namespace)" title="Unsaved changes"></span></a>
-            </template>
-            <a href="#" class="mt-3" :class="{active: ns === '__history'}" @click.prevent="showHistory()"><i class="bi bi-clock-history me-1"></i>History</a>
-          </nav>
-
-          <div>
-            <!-- form -->
-            <div class="panel" x-show="current && ns !== '__history'">
-              <div class="panel-h"><span x-text="current?.title"></span>
-                <span class="muted small fw-normal" x-text="current?.description"></span></div>
-              <template x-for="f in (current?.fields || [])" :key="f.key">
-                <div class="frow" :class="{changed: isDirty(f)}">
-                  <div>
-                    <label class="title" :for="'f_' + f.key" x-text="f.label"></label>
-                    <span class="tag" x-show="st(f).locked">Set by environment</span>
-                    <span class="tag warn" x-show="f.restartRequired">Needs restart</span>
-                    <span class="tag ok" x-show="f.secret && st(f).isSet && !isRemoved(f)">Saved</span>
-                    <div class="key" x-text="ns + '.' + f.key"></div>
-                    <div class="help" x-show="f.help" x-text="f.help"></div>
-                  </div>
-                  <div class="ctl">
-                    <template x-if="(f.type === 'string') && !f.secret"><input :id="'f_' + f.key" class="form-control" :class="{'is-invalid': errors[f.key]}" :value="val(f)" :disabled="st(f).locked" :placeholder="f.placeholder || ''" @input="set(f, $event.target.value)"></template>
-                    <template x-if="f.type === 'string' && f.secret">
-                      <div>
-                        <input :id="'f_' + f.key" type="password" autocomplete="new-password" class="form-control" :class="{'is-invalid': errors[f.key]}" :value="val(f)" :disabled="st(f).locked || isRemoved(f)" :placeholder="st(f).isSet ? '••••••••  (leave blank to keep)' : 'Not set'" @input="set(f, $event.target.value)">
-                        <button type="button" class="btn btn-link btn-sm px-0" x-show="st(f).isSet && !isRemoved(f) && !st(f).locked" @click="remove(f)">Remove saved value</button>
-                        <span class="small text-warning" x-show="isRemoved(f)">Will be removed when you save. <a href="#" @click.prevent="undoRemove(f)">Undo</a></span>
-                      </div>
-                    </template>
-                    <template x-if="f.type === 'text'"><textarea :id="'f_' + f.key" rows="3" class="form-control" :class="{'is-invalid': errors[f.key]}" :value="val(f)" :disabled="st(f).locked" @input="set(f, $event.target.value)"></textarea></template>
-                    <template x-if="f.type === 'number' && !f.media"><input :id="'f_' + f.key" type="number" class="form-control" style="max-width:10rem" :class="{'is-invalid': errors[f.key]}" :value="val(f)" :min="f.min" :max="f.max" :disabled="st(f).locked" @input="set(f, $event.target.value === '' ? '' : Number($event.target.value))"></template>
-                    <template x-if="f.type === 'number' && f.media">
-                      <div class="d-flex align-items-center gap-3">
-                        <span class="ph thumb" x-show="val(f)"><img x-show="media[val(f)] && media[val(f)].kind === 'image'" :src="thumb(media[val(f)])" alt=""></span>
-                        <span class="muted small" x-show="val(f)" x-text="media[val(f)] ? media[val(f)].filename : ''"></span>
-                        <button type="button" class="btn btn-outline-secondary btn-sm" :disabled="st(f).locked" @click="pickMedia(f)" x-text="val(f) ? 'Change' : 'Choose from the library'"></button>
-                        <button type="button" class="btn btn-link btn-sm" x-show="val(f)" :disabled="st(f).locked" @click="set(f, 0)">Remove</button>
-                      </div>
-                    </template>
-                    <template x-if="f.type === 'boolean'"><div class="form-check form-switch"><input :id="'f_' + f.key" type="checkbox" class="form-check-input" role="switch" :checked="val(f)" :disabled="st(f).locked" @change="set(f, $event.target.checked)"><label class="form-check-label muted" :for="'f_' + f.key" x-text="val(f) ? 'On' : 'Off'"></label></div></template>
-                    <template x-if="f.type === 'select'"><select :id="'f_' + f.key" class="form-select" :disabled="st(f).locked" @change="set(f, $event.target.value)"><template x-for="o in f.options" :key="o.value"><option :value="o.value" :selected="o.value === val(f)" x-text="o.label"></option></template></select></template>
-                    <template x-if="f.type === 'list'"><textarea :id="'f_' + f.key" rows="3" class="form-control mono" placeholder="One per line" :value="listText(f)" :disabled="st(f).locked" @input="setList(f, $event.target.value)"></textarea></template>
-                    <div class="invalid-feedback d-block" x-show="errors[f.key]" x-text="errors[f.key]"></div>
-                    <button type="button" class="btn btn-link btn-sm px-0 muted" x-show="st(f).source === 'db' && !f.secret && !st(f).locked && !isDirty(f)" @click="resetToDefault(f)">Reset to default</button>
-                  </div>
-                </div>
-              </template>
-              <div class="frow" x-show="current?.tests?.length">
-                <div><span class="title">Check settings</span><div class="help">Tries the values above without saving them.</div></div>
-                <div class="ctl"><template x-for="t in current?.tests || []" :key="t.id"><button class="btn btn-outline-secondary btn-sm" :disabled="testing" @click="runTest(t)" x-text="testing ? 'Testing…' : t.label"></button></template>
-                  <div class="small mt-2" :class="testResult?.ok ? 'text-success' : 'text-danger'" x-show="testResult" x-text="testResult?.message"></div></div>
-              </div>
-            </div>
-
-            <!-- history -->
-            <div class="panel" x-show="ns === '__history'">
-              <div class="panel-h">Change history</div>
-              <div class="empty" x-show="!history.length">No changes yet.</div>
-              <table class="table" x-show="history.length"><thead><tr><th>Setting</th><th>Change</th><th>By</th><th></th></tr></thead><tbody>
-                <template x-for="r in history" :key="r.id"><tr>
-                  <td class="mono" x-text="r.namespace + '.' + r.key"></td>
-                  <td><span class="diff" x-show="!r.secret"><del x-text="show(r.from)"></del> → <ins x-text="r.wasReset ? 'default' : show(r.to)"></ins></span><span class="muted" x-show="r.secret">Secret value changed</span></td>
-                  <td class="muted"><span x-text="r.by"></span><br><small x-text="ago(r.at)"></small></td>
-                  <td class="text-end"><button class="btn btn-sm btn-outline-secondary" x-show="r.restorable" @click="restore(r)">Restore previous</button></td>
-                </tr></template></tbody></table>
-            </div>
-          </div>
-        </div>
-
-        <div class="savebar" x-show="dirtyCount(ns) > 0">
-          <span><strong x-text="dirtyCount(ns)"></strong> unsaved change<span x-show="dirtyCount(ns) !== 1">s</span></span>
-          <span class="ms-auto"></span>
-          <button class="btn btn-outline-secondary" @click="discard()">Discard</button>
-          <button class="btn btn-primary" :disabled="saving" @click="save()" x-text="saving ? 'Saving…' : 'Save changes'"></button>
-        </div>
-      </section>
+      <section x-data="settingsPage"></section>
     </template>
 
     <!-- Users -->
     <template x-if="route === 'users'">
-      <section x-data="usersPage">
-        <div class="page-head d-flex justify-content-between align-items-end"><div><h1>Users</h1><p>People who can sign in to the admin.</p></div>
-          <button class="btn btn-primary" x-show="can('users.write')" @click="edit()">Add user</button></div>
-
-        <form class="panel mb-3" x-show="form" @submit.prevent="save()">
-          <div class="panel-h" x-text="form?.id ? 'Edit user' : 'New user'"></div>
-          <template x-if="form"><div class="p-3 row g-3">
-            <div class="col-md-6"><label class="form-label">Name</label><input class="form-control" required x-model="form.name"></div>
-            <div class="col-md-6"><label class="form-label">Email</label><input type="email" class="form-control" required x-model="form.email"></div>
-            <div class="col-md-4"><label class="form-label">Role</label><select class="form-select" x-model.number="form.roleId"><template x-for="r in roles" :key="r.id"><option :value="r.id" :selected="r.id === form.roleId" x-text="r.name"></option></template></select></div>
-            <div class="col-md-4"><label class="form-label">Status</label><select class="form-select" x-model="form.status"><option value="active">Active</option><option value="disabled">Disabled</option></select></div>
-            <div class="col-md-4" x-show="!form.invite"><label class="form-label" x-text="form.id ? 'New password' : 'Password'"></label><input type="password" autocomplete="new-password" class="form-control" :required="!form.id && !form.invite" :placeholder="form.id ? 'Leave blank to keep' : ''" x-model="form.password"></div>
-            <div class="col-12" x-show="!form.id"><div class="form-check"><input class="form-check-input" type="checkbox" id="u-invite" x-model="form.invite"><label class="form-check-label" for="u-invite">Email them a link to choose their own password</label></div></div>
-            <div class="col-12 text-danger small" x-show="error" x-text="error" role="alert"></div>
-            <div class="col-12 d-flex gap-2"><button class="btn btn-primary" :disabled="busy" x-text="form.invite ? 'Send invitation' : 'Save user'"></button><button type="button" class="btn btn-outline-secondary" @click="form = null">Cancel</button>
-              <button type="button" class="btn btn-link" x-show="form.id && form.locked" @click="unlock()">Unlock account</button>
-              <button type="button" class="btn btn-link" x-show="form.id" @click="sendLink()">Email a password link</button>
-              <button type="button" class="btn btn-link" x-show="form.id" @click="signOutEverywhere()">Sign out everywhere</button></div>
-          </div></template>
-        </form>
-
-        <div class="panel"><table class="table">
-          <thead><tr><th>Name</th><th>Role</th><th>Status</th><th>Last sign-in</th><th></th></tr></thead>
-          <tbody><template x-for="u in users" :key="u.id"><tr>
-            <td><div x-text="u.name"></div><div class="muted small" x-text="u.email"></div></td>
-            <td x-text="u.role"></td>
-            <td><span class="tag" :class="u.status === 'active' ? 'ok' : ''" x-text="u.lockedUntil ? 'Locked' : u.status"></span></td>
-            <td class="muted" x-text="u.lastLoginAt ? ago(u.lastLoginAt) : 'Never'"></td>
-            <td class="text-end text-nowrap"><template x-if="can('users.write')"><span><button class="btn btn-sm btn-outline-secondary" @click="edit(u)">Edit</button> <button class="btn btn-sm btn-outline-danger" @click="remove(u)">Delete</button></span></template></td>
-          </tr></template></tbody></table></div>
-      </section>
+      <section x-data="usersPage"></section>
     </template>
 
     <!-- Roles -->
     <template x-if="route === 'roles'">
-      <section x-data="rolesPage">
-        <div class="page-head d-flex justify-content-between align-items-end"><div><h1>Roles and permissions</h1><p>A role is a set of permissions. Every user has one role.</p></div>
-          <button class="btn btn-primary" x-show="can('roles.write')" @click="edit()">Add role</button></div>
-
-        <form class="panel mb-3" x-show="form" @submit.prevent="save()">
-          <div class="panel-h" x-text="form?.id ? (form.isSystem ? form.name : 'Edit role') : 'New role'"></div>
-          <template x-if="form">
-          <div>
-            <div class="p-3 row g-3">
-              <div class="col-md-5"><label class="form-label">Name</label><input class="form-control" required :disabled="form.isSystem" x-model="form.name"></div>
-              <div class="col-md-7"><label class="form-label">Description</label><input class="form-control" x-model="form.description"></div>
-            </div>
-            <div class="muted px-3 pb-3" x-show="form.isSystem">This is a system role with full access. Its permissions can't be changed.</div>
-            <template x-if="!form.isSystem"><div>
-              <template x-for="g in groups" :key="g.group"><div class="perm-group">
-                <div class="fw-semibold mb-1" x-text="g.group"></div>
-                <template x-for="p in g.permissions" :key="p.key"><div class="form-check"><input class="form-check-input" type="checkbox" :id="'p_' + p.key" :checked="form.permissions.includes(p.key)" @change="toggle(p.key, $event.target.checked)"><label class="form-check-label" :for="'p_' + p.key"><span x-text="p.label"></span> <span class="mono muted" x-text="p.key"></span></label></div></template>
-              </div></template></div></template>
-            <div class="p-3 text-danger small" x-show="error" x-text="error" role="alert"></div>
-            <div class="p-3 d-flex gap-2"><button class="btn btn-primary" :disabled="busy" x-show="!form.isSystem && can('roles.write')">Save role</button><button type="button" class="btn btn-outline-secondary" @click="form = null">Close</button></div>
-          </div></template>
-        </form>
-
-        <div class="panel"><table class="table">
-          <thead><tr><th>Role</th><th>Permissions</th><th>Users</th><th></th></tr></thead>
-          <tbody><template x-for="r in roles" :key="r.id"><tr>
-            <td><div x-text="r.name"></div><div class="muted small" x-text="r.description"></div></td>
-            <td class="muted" x-text="r.permissions.includes('*') ? 'Everything' : r.permissions.length + ' permissions'"></td>
-            <td x-text="r.userCount"></td>
-            <td class="text-end text-nowrap"><button class="btn btn-sm btn-outline-secondary" @click="edit(r)" x-text="can('roles.write') && !r.isSystem ? 'Edit' : 'View'"></button> <button class="btn btn-sm btn-outline-danger" x-show="can('roles.write') && !r.isSystem" @click="remove(r)">Delete</button></td>
-          </tr></template></tbody></table></div>
-      </section>
+      <section x-data="rolesPage"></section>
     </template>
 
     <!-- Audit -->
     <template x-if="route === 'audit'">
-      <section x-data="auditPage">
-        <div class="page-head d-flex justify-content-between align-items-end flex-wrap gap-2">
-          <div><h1>Audit log</h1><p>Who changed what, and when. Secret values are never recorded.</p></div>
-          <a class="btn btn-outline-secondary" :href="exportUrl" download>Export CSV</a>
-        </div>
-        <div class="mb-3 d-flex flex-wrap gap-2 align-items-end">
-          <div><label class="form-label small" for="au-action">Action</label><input id="au-action" class="form-control" style="max-width:16rem" placeholder="e.g. settings" x-model="filter" @input.debounce.400ms="load(true)"></div>
-          <div><label class="form-label small" for="au-actor">Actor email</label><input id="au-actor" class="form-control" style="max-width:16rem" placeholder="e.g. you@example.com" x-model="actorEmail" @input.debounce.400ms="load(true)"></div>
-          <div><label class="form-label small" for="au-from">From</label><input id="au-from" type="date" class="form-control" x-model="from" @change="load(true)"></div>
-          <div><label class="form-label small" for="au-to">To</label><input id="au-to" type="date" class="form-control" x-model="to" @change="load(true)"></div>
-          <button type="button" class="btn btn-link" x-show="filter || actorEmail || from || to" @click="clearFilters()">Clear filters</button>
-        </div>
-        <div class="panel">
-          <div class="empty" x-show="!entries.length">No entries match.</div>
-          <table class="table" x-show="entries.length"><thead><tr><th>Action</th><th>Detail</th><th>By</th><th>When</th></tr></thead><tbody>
-            <template x-for="e in entries" :key="e.id"><tr>
-              <td class="mono" x-text="e.action"></td>
-              <td class="small"><span x-html="detail(e)"></span></td>
-              <td x-text="e.actor"></td>
-              <td class="muted text-nowrap" x-text="ago(e.at)" :title="new Date(e.at).toLocaleString()"></td></tr></template></tbody></table>
-        </div>
-        <div class="text-center mt-3"><button class="btn btn-outline-secondary" x-show="more" @click="load(false)">Load older</button></div>
-      </section>
+      <section x-data="auditPage"></section>
     </template>
 
     <!-- Analytics -->
     <template x-if="route === 'analytics-overview'">
-      <section x-data="analyticsPage('overview')">
-        <div class="page-head"><h1>Analytics overview</h1><p>Page views, sessions and bounces. The public site and the admin panel are tracked separately.</p></div>
-        <div class="mb-3 d-flex flex-wrap gap-2 align-items-end">
-          <div><label class="form-label small" for="an-surface-1">Surface</label><select id="an-surface-1" class="form-select" x-model="surface" @change="load()"><option value="public">Public site</option><option value="admin">Admin panel</option></select></div>
-          <div><label class="form-label small" for="an-from-1">From</label><input id="an-from-1" type="date" class="form-control" x-model="from" @change="load()"></div>
-          <div><label class="form-label small" for="an-to-1">To</label><input id="an-to-1" type="date" class="form-control" x-model="to" @change="load()"></div>
-        </div>
-        <div class="row g-3">
-          <div class="col-6 col-lg-4"><div class="panel p-3"><div class="muted small">Page views</div><div class="bigver" x-text="overview ? overview.pageviews : '–'"></div></div></div>
-          <div class="col-6 col-lg-4"><div class="panel p-3"><div class="muted small">Unique visitors</div><div class="bigver" x-text="overview ? overview.sessions : '–'"></div></div></div>
-          <div class="col-6 col-lg-4"><div class="panel p-3"><div class="muted small">Avg. pages / visitor</div><div class="bigver" x-text="overview ? overview.avgPagesPerSession.toFixed(1) : '–'"></div></div></div>
-          <div class="col-6 col-lg-4"><div class="panel p-3"><div class="muted small">Bounce rate</div><div class="bigver" x-text="overview ? pct(overview.bounceRate) : '–'"></div></div></div>
-          <div class="col-6 col-lg-4"><div class="panel p-3"><div class="muted small">Avg. time on page</div><div class="bigver" x-text="overview ? duration(overview.avgDwellMs) : '–'"></div></div></div>
-          <div class="col-6 col-lg-4"><div class="panel p-3"><div class="muted small">Clicks tracked</div><div class="bigver" x-text="overview ? overview.clicks : '–'"></div></div></div>
-        </div>
-
-        <div class="panel p-3 mt-3">
-          <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-2">
-            <h2 class="h6 mb-0">Traffic over time</h2>
-            <div class="legend">
-              <span class="legend-item"><span class="legend-swatch" style="background:var(--chart-1)"></span>Page views</span>
-              <span class="legend-item"><span class="legend-swatch" style="background:var(--chart-2)"></span>Visitors</span>
-            </div>
-          </div>
-          <div class="empty" x-show="!trend.length">No page views in this range yet.</div>
-          <svg x-show="trend.length" x-ref="trendSvg" class="chart-svg" viewBox="0 0 600 195" preserveAspectRatio="none" @mousemove="onTrendMove($event)" @mouseleave="onTrendLeave()" role="img" aria-label="Page views and visitors per day">
-            <g x-html="trendSvgInner"></g>
-          </svg>
-        </div>
-
-        <div class="row g-3 mt-1">
-          <div class="col-lg-6">
-            <div class="panel p-3 h-100">
-              <h2 class="h6 mb-2">Devices</h2>
-              <div class="empty" x-show="!devices.length">No sessions in this range yet.</div>
-              <div class="donut-wrap" x-show="devices.length">
-                <svg viewBox="0 0 200 200" width="160" height="160" role="img" aria-label="Sessions by device type">
-                  <g x-html="donutSvgInner"></g>
-                </svg>
-                <div class="legend flex-column">
-                  <template x-for="seg in donutSegments" :key="seg.device + '-legend'">
-                    <span class="legend-item"><span class="legend-swatch" :style="'background:' + seg.color"></span><span class="text-capitalize" x-text="seg.device"></span><span class="muted ms-auto" x-text="seg.count + ' · ' + pct(seg.pct)"></span></span>
-                  </template>
-                </div>
-              </div>
-            </div>
-          </div>
-          <div class="col-lg-6">
-            <div class="panel p-3 h-100">
-              <h2 class="h6 mb-2">Top referrers</h2>
-              <div class="empty" x-show="!referrerRows.length">No sessions in this range yet.</div>
-              <div class="bar-list" x-show="referrerRows.length">
-                <template x-for="r in referrerRows" :key="r.host">
-                  <div class="bar-list-row">
-                    <div class="bar-list-label" :title="r.host" x-text="r.host"></div>
-                    <div class="bar-list-track"><div class="bar-list-fill" :style="'width:' + r.pct + '%'"></div></div>
-                    <div class="bar-list-value" x-text="r.sessions"></div>
-                  </div>
-                </template>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
+      <section x-data="analyticsPage('overview')"></section>
     </template>
 
     <template x-if="route === 'analytics-active'">
-      <section x-data="analyticsActivePage">
-        <div class="page-head"><h1>Active now</h1><p>Sessions seen in the last window, by the page they're currently on. Refreshes automatically.</p></div>
-        <div class="mb-3 d-flex flex-wrap gap-2 align-items-end">
-          <div><label class="form-label small" for="an-surface-0">Surface</label><select id="an-surface-0" class="form-select" x-model="surface" @change="refresh()"><option value="public">Public site</option><option value="admin">Admin panel</option></select></div>
-          <div><label class="form-label small" for="an-window">Active within</label><select id="an-window" class="form-select" x-model.number="windowMin" @change="refresh()"><option value="1">1 minute</option><option value="5">5 minutes</option><option value="15">15 minutes</option><option value="30">30 minutes</option></select></div>
-        </div>
-        <div class="panel p-3 mb-3"><div class="muted small">Active sessions</div><div class="bigver" x-text="data ? data.total : '–'"></div></div>
-        <div class="panel p-3">
-          <h2 class="h6 mb-2">By page</h2>
-          <div class="empty" x-show="data && !data.byPage.length">No active sessions right now.</div>
-          <div class="bar-list" x-show="data && data.byPage.length">
-            <template x-for="r in (data ? data.byPage : [])" :key="r.path">
-              <div class="bar-list-row">
-                <div class="bar-list-label mono" :title="r.path" x-text="r.path"></div>
-                <div class="bar-list-track"><div class="bar-list-fill" :style="'width:' + pctOf(r.count) + '%'"></div></div>
-                <div class="bar-list-value" x-text="r.count"></div>
-              </div>
-            </template>
-          </div>
-        </div>
-      </section>
+      <section x-data="analyticsActivePage"></section>
     </template>
 
     <template x-if="route === 'analytics-pages'">
-      <section x-data="analyticsPage('pages')">
-        <div class="page-head"><h1>Page analytics</h1><p>Views and time on page, page-wise.</p></div>
-        <div class="mb-3 d-flex flex-wrap gap-2 align-items-end">
-          <div><label class="form-label small" for="an-surface-2">Surface</label><select id="an-surface-2" class="form-select" x-model="surface" @change="load()"><option value="public">Public site</option><option value="admin">Admin panel</option></select></div>
-          <div><label class="form-label small" for="an-from-2">From</label><input id="an-from-2" type="date" class="form-control" x-model="from" @change="load()"></div>
-          <div><label class="form-label small" for="an-to-2">To</label><input id="an-to-2" type="date" class="form-control" x-model="to" @change="load()"></div>
-        </div>
-        <div class="panel">
-          <div class="empty" x-show="!pages.length">No page views yet.</div>
-          <table class="table" x-show="pages.length"><thead><tr><th>Page</th><th>Views</th><th>Sessions</th><th>Avg. time</th><th>Bounce rate</th></tr></thead><tbody>
-            <template x-for="p in pages" :key="p.path"><tr>
-              <td class="mono" x-text="p.path"></td>
-              <td x-text="p.views"></td>
-              <td x-text="p.sessions"></td>
-              <td x-text="duration(p.avgDwellMs)"></td>
-              <td x-text="p.bounceRate == null ? '–' : pct(p.bounceRate)"></td>
-            </tr></template>
-          </tbody></table>
-        </div>
-      </section>
+      <section x-data="analyticsPage('pages')"></section>
     </template>
 
     <template x-if="route === 'analytics-sessions'">
-      <section x-data="analyticsPage('sessions')">
-        <div class="page-head"><h1>Sessions</h1><p>One row per visit — entry and exit page, device and referrer.</p></div>
-        <div class="mb-3 d-flex flex-wrap gap-2 align-items-end">
-          <div><label class="form-label small" for="an-surface-3">Surface</label><select id="an-surface-3" class="form-select" x-model="surface" @change="loadSessions(true)"><option value="public">Public site</option><option value="admin">Admin panel</option></select></div>
-          <div><label class="form-label small" for="an-from-3">From</label><input id="an-from-3" type="date" class="form-control" x-model="from" @change="loadSessions(true)"></div>
-          <div><label class="form-label small" for="an-to-3">To</label><input id="an-to-3" type="date" class="form-control" x-model="to" @change="loadSessions(true)"></div>
-        </div>
-        <div class="panel">
-          <div class="empty" x-show="!sessions.length">No sessions yet.</div>
-          <table class="table" x-show="sessions.length"><thead><tr><th>Entry page</th><th>Exit page</th><th>Pages</th><th>Device</th><th>Referrer</th><th>Bounce</th><th>Last seen</th></tr></thead><tbody>
-            <template x-for="s in sessions" :key="s.token"><tr>
-              <td class="mono" x-text="s.entryPath"></td>
-              <td class="mono" x-text="s.exitPath"></td>
-              <td x-text="s.pageCount"></td>
-              <td x-text="s.deviceType"></td>
-              <td class="muted small" x-text="s.referrer || '–'"></td>
-              <td x-text="s.isBounce ? 'Yes' : 'No'"></td>
-              <td class="muted text-nowrap" x-text="ago(s.lastSeen)" :title="new Date(s.lastSeen).toLocaleString()"></td>
-            </tr></template>
-          </tbody></table>
-        </div>
-        <div class="text-center mt-3"><button class="btn btn-outline-secondary" x-show="moreSessions" @click="loadSessions(false)">Load older</button></div>
-      </section>
+      <section x-data="analyticsPage('sessions')"></section>
     </template>
 
     <template x-if="route === 'analytics-users'">
-      <section x-data="analyticsPage('users')">
-        <div class="page-head"><h1>User-wise analytics</h1><p>Activity for signed-in users — every admin session today; public visitors once customer accounts exist.</p></div>
-        <div class="mb-3 d-flex flex-wrap gap-2 align-items-end">
-          <div><label class="form-label small" for="an-surface-4">Surface</label><select id="an-surface-4" class="form-select" x-model="surface" @change="load()"><option value="admin">Admin panel</option><option value="public">Public site</option></select></div>
-          <div><label class="form-label small" for="an-from-4">From</label><input id="an-from-4" type="date" class="form-control" x-model="from" @change="load()"></div>
-          <div><label class="form-label small" for="an-to-4">To</label><input id="an-to-4" type="date" class="form-control" x-model="to" @change="load()"></div>
-        </div>
-        <div class="panel">
-          <div class="empty" x-show="!users.length">No signed-in activity yet.</div>
-          <table class="table" x-show="users.length"><thead><tr><th>User</th><th>Sessions</th><th>Page views</th><th>Last seen</th></tr></thead><tbody>
-            <template x-for="u in users" :key="u.userId"><tr>
-              <td><div x-text="u.name || ('user #' + u.userId)"></div><div class="muted small" x-text="u.email"></div></td>
-              <td x-text="u.sessions"></td>
-              <td x-text="u.pageviews"></td>
-              <td class="muted text-nowrap" x-text="ago(u.lastSeen)" :title="new Date(u.lastSeen).toLocaleString()"></td>
-            </tr></template>
-          </tbody></table>
-        </div>
-      </section>
+      <section x-data="analyticsPage('users')"></section>
     </template>
 
     <!-- Cluster -->
     <template x-if="route === 'cluster'">
-      <section x-data="clusterPage">
-        <div class="page-head"><h1>Cluster</h1><p>Every server reports the config version it has applied. A server that falls behind shows in amber and heals itself.</p></div>
-        <div class="d-flex align-items-baseline gap-3 mb-3"><div class="bigver" x-text="data ? data.dbConfigVersion : '–'"></div><div class="muted">current config version<br><span class="small">refreshes every 5 seconds</span></div></div>
-        <div class="panel">
-          <div class="empty" x-show="data && !data.nodes.length">No servers have reported in yet.</div>
-          <template x-for="n in (data ? data.nodes : [])" :key="n.id">
-            <div class="node">
-              <div><div><span class="dot" :class="n.status"></span><strong x-text="n.host"></strong> <span class="tag" x-show="n.self">this server</span></div>
-                <div class="muted small mono" x-text="n.role + ' · pid ' + n.pid + ' · v' + n.version"></div></div>
-              <div><div class="rail" :class="{drift: n.drift}"><div class="fill" :style="'width:' + railPct(n) + '%'"></div><div class="tick" title="Current version"></div></div>
-                <div class="rail-label"><span :class="n.drift ? 'text-warning fw-medium' : ''" x-text="n.drift ? 'config v' + n.configVersion + ' — ' + (data.dbConfigVersion - n.configVersion) + ' behind' : 'config v' + n.configVersion + ' — up to date'"></span></div></div>
-              <div class="text-end small muted"><span x-text="n.status"></span><br><span x-text="'up ' + since(n.startedAt)"></span></div>
-            </div>
-          </template>
-        </div>
-        <div class="panel mt-3 p-3 small" x-show="data">
-          <div class="fw-semibold mb-1">This server</div>
-          <div class="muted">Applied <span class="mono" x-text="data?.thisNode.settingsStats.busApplied"></span> change(s) from the bus, <span class="mono" x-text="data?.thisNode.settingsStats.pollHeals"></span> healed by polling, <span class="mono" x-text="data?.thisNode.settingsStats.fullReloads"></span> full reload(s).</div>
-        </div>
-      </section>
+      <section x-data="clusterPage"></section>
     </template>
 
 
     <!-- Updates -->
     <template x-if="route === 'updates'">
-      <section x-data="updatesPage">
-        <div class="page-head"><h1>Updates</h1><p>Pull the latest code from git and restart servers. Every server keeps its own copy of the code, so update them one at a time and the load balancer keeps the others serving.</p></div>
-
-        <div class="small muted mb-3" x-show="data">
-          <span x-show="data?.restartMode === 'supervisor'">Restart makes the process exit, so it must run under systemd, PM2 or Docker with a restart policy, or it stays down.</span>
-          <span x-show="data?.restartMode === 'self'">Restart starts a new copy of the process by itself. Under a supervisor, set the restart method in <a href="#/settings/updates">Settings</a>.</span>
-        </div>
-
-        <div class="panel mb-3">
-          <div class="panel-h">Servers <label class="form-check mb-0 fw-normal small" x-show="can('system.restart')"><input class="form-check-input" type="checkbox" id="restart-after" x-model="restartAfter"> <span class="form-check-label" for="restart-after">Restart a server after updating it</span></label></div>
-          <div class="empty" x-show="!data">Loading…</div>
-          <div class="empty" x-show="data && !data.nodes.length">No servers have reported in yet.</div>
-          <template x-for="n in (data ? data.nodes : [])" :key="n.id">
-            <div class="upd">
-              <div class="upd-main">
-                <div><span class="dot" :class="n.status"></span><strong x-text="n.host"></strong> <span class="tag" x-show="n.self">this server</span><span class="tag" :class="state(n).tone" x-text="state(n).label"></span></div>
-                <div class="muted small mono" x-text="running(n)"></div>
-                <div class="small mt-1" :class="n.update?.status === 'failed' ? 'text-danger' : 'muted'" x-show="message(n)" x-text="message(n)" role="status"></div>
-                <ul class="upd-log" x-show="incoming(n).length"><template x-for="c in incoming(n)" :key="c.sha"><li><span class="mono" x-text="c.sha"></span> <span x-text="c.subject"></span> <span class="muted" x-text="'· ' + c.author + ' · ' + ago(c.at)"></span></li></template></ul>
-                <div class="small text-warning mt-1" x-show="notes(n)" x-text="notes(n)"></div>
-                <div class="small muted mt-1" x-show="checkedAt(n)" x-text="checkedAt(n)"></div>
-              </div>
-              <div class="upd-actions">
-                <button class="btn btn-sm btn-outline-secondary" :disabled="!actionable(n)" @click="check(n)">Check for updates</button>
-                <button class="btn btn-sm btn-primary" :disabled="!actionable(n)" @click="update(n)">Update</button>
-                <button class="btn btn-sm btn-outline-danger" x-show="can('system.restart')" :disabled="!actionable(n)" @click="restart(n)">Restart</button>
-              </div>
-            </div>
-          </template>
-        </div>
-
-        <div class="panel">
-          <div class="panel-h">Recent activity</div>
-          <div class="empty" x-show="!history.length">Nothing yet. Checks, updates and restarts show up here.</div>
-          <table class="table" x-show="history.length"><tbody><template x-for="e in history" :key="e.id">
-            <tr><td x-text="describe(e)"></td><td x-text="e.actor"></td><td class="muted text-end text-nowrap" x-text="ago(e.at)"></td></tr></template></tbody></table>
-        </div>
-      </section>
+      <section x-data="updatesPage"></section>
     </template>
 
     <!-- Automation: Events -->
     <template x-if="route === 'events'">
-      <section x-data="eventsPage">
-        <div class="page-head d-flex justify-content-between align-items-end flex-wrap gap-2">
-          <div><h1>Events</h1><p>Everything the platform (or a script Service) has emitted. A Webhook subscribes to one of these by name or pattern.</p></div>
-        </div>
-        <div class="btn-group mb-3" role="group" aria-label="Events view">
-          <button type="button" class="btn btn-outline-secondary" :class="{active: tab === 'log'}" @click="tab = 'log'">Log</button>
-          <button type="button" class="btn btn-outline-secondary" :class="{active: tab === 'fire'}" x-show="can('events.write')" @click="tab = 'fire'">Fire test event</button>
-        </div>
-        <template x-if="tab === 'log'">
-          <div>
-            <div class="d-flex gap-2 mb-2">
-              <input class="form-control" style="max-width:20rem" placeholder="Filter by name prefix&hellip;" x-model="filterName" @keydown.enter="load()">
-              <button type="button" class="btn btn-outline-secondary" @click="load()">Filter</button>
-            </div>
-            <div class="panel">
-              <div class="empty" x-show="loaded && !events.length">Nothing logged yet.</div>
-              <table class="table" x-show="events.length"><thead><tr><th>Name</th><th>Payload</th><th></th></tr></thead><tbody>
-                <template x-for="e in events" :key="e.id"><tr>
-                  <td class="mono small" x-text="e.name"></td>
-                  <td class="muted small mono" x-text="JSON.stringify(e.payload)"></td>
-                  <td class="muted small text-end" x-text="ago(e.at)"></td>
-                </tr></template>
-              </tbody></table>
-            </div>
-          </div>
-        </template>
-        <template x-if="tab === 'fire' && can('events.write')">
-          <div class="panel p-3" style="max-width:40rem">
-            <label class="form-label" for="ev-name">Event name</label>
-            <input id="ev-name" class="form-control mono" placeholder="orders.created" x-model="fireName">
-            <label class="form-label mt-2" for="ev-payload">Payload (JSON)</label>
-            <textarea id="ev-payload" class="form-control mono" rows="6" spellcheck="false" x-codejar="{ mode: 'application/json', get: firePayload, set: (v) => (firePayload = v) }"></textarea>
-            <div class="alert alert-danger mt-2" role="alert" x-show="fireError" x-text="fireError"></div>
-            <button type="button" class="btn btn-primary mt-2" :disabled="fireBusy || !fireName.trim()" @click="fire()">Fire</button>
-          </div>
-        </template>
-      </section>
+      <section x-data="eventsPage"></section>
     </template>
 
     <!-- Automation: Webhooks -->
@@ -669,95 +272,11 @@
         <template x-for="v in webhooksViews" :key="v.key"><div>
 
           <template x-if="v.kind === 'list'">
-            <section x-data="webhooksList">
-              <div class="page-head d-flex justify-content-between align-items-end flex-wrap gap-2">
-                <div><h1>Webhooks</h1><p>HTTP callbacks that fire automatically when a matching event happens.</p></div>
-                <a class="btn btn-primary" x-show="can('webhooks.write')" href="#/webhooks/new">New webhook</a>
-              </div>
-              <div class="panel">
-                <div class="empty" x-show="loaded && !webhooks.length">No webhooks yet.</div>
-                <table class="table" x-show="webhooks.length"><thead><tr><th>Name</th><th>Event</th><th></th><th></th></tr></thead><tbody>
-                  <template x-for="w in webhooks" :key="w.id"><tr>
-                    <td x-text="w.name"></td>
-                    <td class="mono small" x-text="w.event"></td>
-                    <td><span class="tag" :class="w.enabled ? 'ok' : 'warn'" x-text="w.enabled ? 'Enabled' : 'Disabled'"></span></td>
-                    <td class="text-end text-nowrap">
-                      <a class="btn btn-sm btn-outline-secondary" :href="'#/webhooks/' + w.id">Edit</a>
-                      <button class="btn btn-sm btn-outline-danger" type="button" x-show="can('webhooks.write')" @click="remove(w)">Delete</button>
-                    </td>
-                  </tr></template>
-                </tbody></table>
-              </div>
-            </section>
+            <section x-data="webhooksList"></section>
           </template>
 
           <template x-if="v.kind === 'edit'">
-            <section x-data="webhooksEditor(v.id)">
-              <div class="page-head d-flex justify-content-between align-items-end flex-wrap gap-2">
-                <div><h1 x-text="isNew ? 'New webhook' : name"></h1></div>
-                <a href="#/webhooks" class="btn btn-outline-secondary">Back to webhooks</a>
-              </div>
-              <div class="alert alert-danger" role="alert" x-show="error" x-text="error"></div>
-              <div class="row g-3" x-show="loaded">
-                <div class="col-lg-7">
-                  <div class="panel p-3 mb-3">
-                    <div class="row g-2">
-                      <div class="col-md-6"><label class="form-label" for="wh-name">Name</label><input id="wh-name" class="form-control" maxlength="200" x-model="name"></div>
-                      <div class="col-md-6"><label class="form-label" for="wh-event">Event pattern</label><input id="wh-event" class="form-control mono" placeholder="content.published or orders.*" x-model="event"></div>
-                    </div>
-                    <label class="form-label mt-2" for="wh-url">URL</label>
-                    <input id="wh-url" class="form-control mono" placeholder="https://&hellip;" x-model="url">
-                    <div class="help small muted mt-1">This URL is called exactly as given, with no restriction &mdash; the same trust level as a script Service.</div>
-                    <div class="form-check mt-2"><input id="wh-enabled" class="form-check-input" type="checkbox" x-model="enabled"><label class="form-check-label small" for="wh-enabled">Enabled</label></div>
-                  </div>
-
-                  <div class="panel p-3 mb-3">
-                    <label class="form-label" for="wh-secret">Signing secret</label>
-                    <input id="wh-secret" type="password" class="form-control mono" autocomplete="new-password" x-model="secret" :placeholder="hasSecret ? 'Set — leave blank to keep it' : 'Optional — signs deliveries with X-CMS-Signature'">
-                    <div class="help small muted mt-1" x-show="hasSecret">A secret is set. It is never shown again &mdash; type a new one to replace it.</div>
-                  </div>
-
-                  <div class="panel p-3 mb-3">
-                    <div class="panel-h">Custom headers</div>
-                    <template x-for="(h, i) in headers" :key="i">
-                      <div class="row g-2 mb-2 align-items-center">
-                        <div class="col-5"><input class="form-control form-control-sm mono" aria-label="Header name" placeholder="X-Example" x-model="h.name"></div>
-                        <div class="col-6"><input class="form-control form-control-sm" aria-label="Header value" placeholder="value" x-model="h.value"></div>
-                        <div class="col-1 text-end"><button type="button" class="btn btn-sm btn-outline-danger" @click="removeHeader(i)" aria-label="Remove header">&times;</button></div>
-                      </div>
-                    </template>
-                    <button type="button" class="btn btn-sm btn-outline-secondary" @click="addHeader()">Add header</button>
-                  </div>
-
-                  <div class="panel p-3 mb-3">
-                    <div class="panel-h">Payload</div>
-                    <div class="help small muted mb-2">Sent as the delivery's <code>payload</code>, merged under the real event's own data (the event's fields win). Also what "Send test" sends when set.</div>
-                    <textarea class="form-control mono" rows="6" spellcheck="false" x-codejar="{ mode: 'application/json', get: payloadText, set: (v) => (payloadText = v) }"></textarea>
-                  </div>
-
-                  <div class="panel p-3 mb-3" x-show="!isNew">
-                    <div class="d-flex justify-content-between align-items-center mb-2">
-                      <div class="panel-h mb-0">Recent deliveries</div>
-                      <button type="button" class="btn btn-sm btn-outline-secondary" :disabled="testBusy" @click="sendTest()">Send test</button>
-                    </div>
-                    <div class="empty small" x-show="!deliveries.length">No deliveries yet.</div>
-                    <table class="table" x-show="deliveries.length"><thead><tr><th>Event</th><th>Status</th><th>Response</th><th></th></tr></thead><tbody>
-                      <template x-for="d in deliveries" :key="d.id"><tr>
-                        <td class="mono small" x-text="d.event"></td>
-                        <td><span class="tag" :class="d.status === 'success' ? 'ok' : 'warn'" x-text="d.status"></span></td>
-                        <td class="muted small" x-text="d.responseCode ?? d.error ?? ''"></td>
-                        <td class="muted small text-end" x-text="ago(d.at)"></td>
-                      </tr></template>
-                    </tbody></table>
-                  </div>
-                </div>
-              </div>
-
-              <div class="savebar" x-show="loaded">
-                <span class="ms-auto"></span>
-                <button class="btn btn-primary" type="button" :disabled="busy" @click="save()" x-text="isNew ? 'Create webhook' : 'Save webhook'"></button>
-              </div>
-            </section>
+            <section x-data="webhooksEditor(v.id)"></section>
           </template>
 
         </div></template>
@@ -770,117 +289,11 @@
         <template x-for="v in schedulerViews" :key="v.key"><div>
 
           <template x-if="v.kind === 'list'">
-            <section x-data="schedulerList">
-              <div class="page-head d-flex justify-content-between align-items-end flex-wrap gap-2">
-                <div><h1>Scheduler</h1><p>Run a saved Service or fire a Webhook automatically, on an interval or a cron schedule.</p></div>
-                <a class="btn btn-primary" x-show="can('scheduler.write')" href="#/scheduler/new">New task</a>
-              </div>
-              <div class="panel">
-                <div class="empty" x-show="loaded && !tasks.length">No scheduled tasks yet.</div>
-                <table class="table" x-show="tasks.length"><thead><tr><th>Name</th><th>Runs</th><th>Schedule</th><th>Last run</th><th></th><th></th></tr></thead><tbody>
-                  <template x-for="t in tasks" :key="t.id"><tr>
-                    <td x-text="t.name"></td>
-                    <td class="muted small" x-text="(t.kind === 'service' ? 'Service: ' : 'Webhook: ') + t.target"></td>
-                    <td class="mono small" x-text="describe(t)"></td>
-                    <td class="muted small">
-                      <span x-show="!t.lastRunAt">Never</span>
-                      <span x-show="t.lastRunAt"><span class="tag" :class="t.lastStatus === 'ok' ? 'ok' : 'warn'" x-text="t.lastStatus"></span> <span x-text="ago(t.lastRunAt)"></span></span>
-                    </td>
-                    <td><span class="tag" :class="t.enabled ? 'ok' : 'warn'" x-text="t.enabled ? 'Enabled' : 'Disabled'"></span></td>
-                    <td class="text-end text-nowrap">
-                      <button class="btn btn-sm btn-outline-secondary" type="button" x-show="can('scheduler.write')" @click="runNow(t)">Run now</button>
-                      <a class="btn btn-sm btn-outline-secondary" :href="'#/scheduler/' + t.id">Edit</a>
-                      <button class="btn btn-sm btn-outline-danger" type="button" x-show="can('scheduler.write')" @click="remove(t)">Delete</button>
-                    </td>
-                  </tr></template>
-                </tbody></table>
-              </div>
-            </section>
+            <section x-data="schedulerList"></section>
           </template>
 
           <template x-if="v.kind === 'edit'">
-            <section x-data="schedulerEditor(v.id)">
-              <div class="page-head d-flex justify-content-between align-items-end flex-wrap gap-2">
-                <div><h1 x-text="isNew ? 'New scheduled task' : name"></h1></div>
-                <a href="#/scheduler" class="btn btn-outline-secondary">Back to Scheduler</a>
-              </div>
-              <div class="alert alert-danger" role="alert" x-show="error" x-text="error"></div>
-              <div class="row g-3" x-show="loaded">
-                <div class="col-lg-7">
-                  <div class="panel p-3 mb-3">
-                    <div class="row g-2">
-                      <div class="col-md-6"><label class="form-label" for="sc-name">Name</label><input id="sc-name" class="form-control" maxlength="200" x-model="name"></div>
-                      <div class="col-md-6"><div class="form-check mt-4"><input id="sc-enabled" class="form-check-input" type="checkbox" x-model="enabled"><label class="form-check-label small" for="sc-enabled">Enabled</label></div></div>
-                    </div>
-                    <div class="row g-2 mt-1">
-                      <div class="col-md-4"><label class="form-label" for="sc-kind">What to run</label>
-                        <select id="sc-kind" class="form-select" x-model="kind" @change="target = ''"><option value="service">A Service</option><option value="webhook">A Webhook</option></select>
-                      </div>
-                      <div class="col-md-8">
-                        <label class="form-label" for="sc-target">Target</label>
-                        <template x-if="kind === 'service'">
-                          <select id="sc-target" class="form-select" x-model="target"><option value="">Choose a Service&hellip;</option><template x-for="s in services" :key="s.slug"><option :value="s.slug" x-text="s.name + ' (' + s.slug + ')'"></option></template></select>
-                        </template>
-                        <template x-if="kind === 'webhook'">
-                          <select id="sc-target" class="form-select" x-model="target"><option value="">Choose a webhook&hellip;</option><template x-for="w in webhooks" :key="w.id"><option :value="String(w.id)" x-text="w.name"></option></template></select>
-                        </template>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div class="panel p-3 mb-3">
-                    <div class="panel-h">Schedule</div>
-                    <div class="btn-group d-flex mb-3" role="group" aria-label="Schedule type">
-                      <input type="radio" class="btn-check" id="sc-type-interval" value="interval" x-model="scheduleType" autocomplete="off">
-                      <label class="btn btn-outline-secondary" for="sc-type-interval">Interval</label>
-                      <input type="radio" class="btn-check" id="sc-type-cron" value="cron" x-model="scheduleType" autocomplete="off">
-                      <label class="btn btn-outline-secondary" for="sc-type-cron">Cron expression</label>
-                    </div>
-                    <template x-if="scheduleType === 'interval'">
-                      <div class="row g-2 align-items-end">
-                        <div class="col-4"><label class="form-label" for="sc-every-value">Every</label><input id="sc-every-value" type="number" min="1" class="form-control" x-model.number="everyValue"></div>
-                        <div class="col-4"><select class="form-select" aria-label="Unit" x-model="everyUnit"><option value="minutes">Minutes</option><option value="hours">Hours</option><option value="days">Days</option></select></div>
-                      </div>
-                      <div class="help small muted mt-1">At least a minute &mdash; this runs real work, not a cheap check.</div>
-                    </template>
-                    <template x-if="scheduleType === 'cron'">
-                      <div>
-                        <label class="form-label" for="sc-cron">Cron expression</label>
-                        <input id="sc-cron" class="form-control mono" placeholder="0 * * * *" x-model="cronExpr" @input="updateCronPreview()">
-                        <div class="alert alert-danger mt-2 py-2" role="alert" x-show="cronError" x-text="cronError"></div>
-                        <div class="help small muted mt-1" x-show="cronPreview.length">
-                          Next runs: <template x-for="(t, i) in cronPreview" :key="i"><span x-text="new Date(t).toLocaleString() + (i < cronPreview.length - 1 ? '; ' : '')"></span></template>
-                        </div>
-                      </div>
-                    </template>
-                  </div>
-
-                  <div class="panel p-3 mb-3">
-                    <div class="panel-h">Parameters</div>
-                    <div class="help small muted mb-2">For a Service: its query parameters. For a Webhook: merged into the delivery's payload. A JSON object; leave as <code>{}</code> for none.</div>
-                    <textarea class="form-control mono" rows="5" spellcheck="false" x-codejar="{ mode: 'application/json', get: paramsText, set: (v) => (paramsText = v) }"></textarea>
-                  </div>
-
-                  <div class="panel p-3 mb-3" x-show="!isNew">
-                    <div class="d-flex justify-content-between align-items-center mb-2">
-                      <div class="panel-h mb-0">Last run</div>
-                      <button type="button" class="btn btn-sm btn-outline-secondary" :disabled="runBusy" @click="runNow()">Run now</button>
-                    </div>
-                    <div class="empty small" x-show="!lastRunAt">Never run yet.</div>
-                    <div x-show="lastRunAt">
-                      <span class="tag" :class="lastStatus === 'ok' ? 'ok' : 'warn'" x-text="lastStatus"></span>
-                      <span class="muted small" x-text="lastRunAt ? ago(lastRunAt) : ''"></span>
-                      <div class="alert alert-danger mt-2 py-2" role="alert" x-show="lastError" x-text="lastError"></div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <div class="savebar" x-show="loaded">
-                <span class="ms-auto"></span>
-                <button class="btn btn-primary" type="button" :disabled="busy" @click="save()" x-text="isNew ? 'Create task' : 'Save task'"></button>
-              </div>
-            </section>
+            <section x-data="schedulerEditor(v.id)"></section>
           </template>
 
         </div></template>
@@ -893,145 +306,11 @@
         <template x-for="v in contentViews" :key="v.key"><div>
 
           <template x-if="v.kind === 'list'">
-            <section x-data="contentList(v.type)">
-              <div class="page-head d-flex justify-content-between align-items-end flex-wrap gap-2"><div><h1 x-text="type.plural"></h1><p x-text="'Every ' + type.label.toLowerCase() + ', newest changes first.'"></p></div>
-                <a class="btn btn-primary" x-show="type.can.write" :href="'#/content/' + typeId + '/new'" x-text="'New ' + type.label.toLowerCase()"></a></div>
-              <div class="d-flex gap-2 mb-3 flex-wrap">
-                <input class="form-control" style="max-width:18rem" placeholder="Search titles" aria-label="Search titles" x-model="q" @input.debounce.300ms="load(true)">
-                <select class="form-select" style="max-width:12rem" aria-label="Filter by status" x-model="status" @change="load(true)"><option value="">All statuses</option><option value="draft">Draft</option><option value="scheduled">Scheduled</option><option value="published">Published</option><option value="archived">Archived</option></select>
-              </div>
-              <div class="alert alert-danger" role="alert" x-show="error" x-text="error"></div>
-              <div class="panel">
-                <div class="empty" x-show="loaded && !entries.length">Nothing here yet.</div>
-                <table class="table" x-show="entries.length"><thead><tr><th>Title</th><th>Status</th><th>By</th><th>Changed</th></tr></thead><tbody>
-                  <template x-for="e in entries" :key="e.id"><tr>
-                    <td><a :href="'#/content/' + typeId + '/' + e.id" :style="'padding-left:' + (depth(e) * 1.25) + 'rem'" x-text="e.title"></a><div class="muted small mono" :style="'padding-left:' + (depth(e) * 1.25) + 'rem'" x-text="'/' + e.path"></div></td>
-                    <td><span class="tag" :class="e.status === 'published' ? 'ok' : (e.status === 'scheduled' ? 'warn' : '')" x-text="statusLabel(e)"></span></td>
-                    <td class="muted" x-text="e.author || '–'"></td>
-                    <td class="muted text-nowrap" x-text="ago(e.updatedAt)"></td>
-                  </tr></template></tbody></table>
-              </div>
-              <div class="d-flex justify-content-between align-items-center mt-3" x-show="total > limit">
-                <button class="btn btn-outline-secondary" :disabled="offset === 0" @click="prev()">Newer</button>
-                <span class="muted small" x-text="(offset + 1) + '–' + Math.min(offset + limit, total) + ' of ' + total"></span>
-                <button class="btn btn-outline-secondary" :disabled="offset + limit >= total" @click="next()">Older</button>
-              </div>
-            </section>
+            <section x-data="contentList(v.type)"></section>
           </template>
 
           <template x-if="v.kind === 'edit'">
-            <section x-data="contentEditor(v.type, v.id)">
-              <div class="page-head d-flex justify-content-between align-items-end flex-wrap gap-2"><div><h1 x-text="isNew ? 'New ' + type.label.toLowerCase() : (entry ? entry.title : 'Loading…')"></h1><p x-show="!isNew && entry" x-text="'Version ' + (entry ? entry.version : '') + ' · saved ' + (entry ? ago(entry.updatedAt) : '')"></p></div>
-                <a :href="'#/content/' + typeId" class="btn btn-outline-secondary">Back to the list</a></div>
-              <div class="alert alert-danger" role="alert" x-show="error" x-text="error"></div>
-              <div class="row g-3" x-show="!loading">
-                <div class="col-lg-8">
-                  <div class="panel p-3 mb-3">
-                    <label class="form-label" for="e-title">Title</label>
-                    <input id="e-title" class="form-control form-control-lg" maxlength="255" :class="{'is-invalid': errors.title}" x-model="form.title" @input="slugFromTitle($event.target.value)">
-                    <div class="invalid-feedback d-block" x-show="errors.title" x-text="errors.title"></div>
-                  </div>
-
-                  <template x-for="f in type.fields" :key="f.key">
-                    <div class="panel p-3 mb-3">
-                      <label class="form-label fw-semibold" :for="'f-' + f.key" x-text="f.label"></label>
-                      <div class="help small muted mb-1" x-show="f.help" x-text="f.help"></div>
-                      <template x-if="f.type === 'string'"><input :id="'f-' + f.key" class="form-control" :maxlength="f.max || 500" x-model="form.data[f.key]"></template>
-                      <template x-if="f.type === 'text'"><textarea :id="'f-' + f.key" rows="3" class="form-control" :maxlength="f.max || 20000" x-model="form.data[f.key]"></textarea></template>
-                      <template x-if="f.type === 'number'"><input :id="'f-' + f.key" type="number" class="form-control" style="max-width:10rem" x-model.number="form.data[f.key]"></template>
-                      <template x-if="f.type === 'boolean'"><div class="form-check form-switch"><input :id="'f-' + f.key" type="checkbox" class="form-check-input" role="switch" x-model="form.data[f.key]"><label class="form-check-label muted" :for="'f-' + f.key" x-text="form.data[f.key] ? 'Yes' : 'No'"></label></div></template>
-                      <template x-if="f.type === 'select'"><select :id="'f-' + f.key" class="form-select" x-model="form.data[f.key]"><template x-for="o in f.options" :key="o.value"><option :value="o.value" x-text="o.label"></option></template></select></template>
-                      <template x-if="f.type === 'list'"><textarea :id="'f-' + f.key" rows="3" class="form-control mono" placeholder="One per line" :value="listText(f)" @input="setList(f, $event.target.value)"></textarea></template>
-                      <template x-if="f.type === 'media'">
-                        <div class="d-flex align-items-center gap-3">
-                          <span class="ph thumb" x-show="form.data[f.key]"><img x-show="media[form.data[f.key]] && media[form.data[f.key]].kind === 'image'" :src="thumb(media[form.data[f.key]])" alt=""></span>
-                          <span class="muted small" x-show="form.data[f.key]" x-text="media[form.data[f.key]] ? media[form.data[f.key]].filename : ''"></span>
-                          <button type="button" class="btn btn-outline-secondary btn-sm" @click="pick(f)" x-text="form.data[f.key] ? 'Change' : 'Choose from the library'"></button>
-                          <button type="button" class="btn btn-link btn-sm" x-show="form.data[f.key]" @click="form.data[f.key] = null">Remove</button>
-                        </div>
-                      </template>
-                      <template x-if="f.type === 'blocks'">
-                        <div class="blocks">
-                          <template x-for="(b, i) in blocksOf(f)" :key="b._id">
-                            <div class="block">
-                              <div class="block-bar">
-                                <span class="tag" x-text="b.type"></span>
-                                <span class="ms-auto"></span>
-                                <button type="button" class="btn btn-sm btn-link" @click="moveBlock(f, i, -1)" aria-label="Move up" title="Move up"><i class="bi bi-arrow-up"></i></button>
-                                <button type="button" class="btn btn-sm btn-link" @click="moveBlock(f, i, 1)" aria-label="Move down" title="Move down"><i class="bi bi-arrow-down"></i></button>
-                                <button type="button" class="btn btn-sm btn-link text-danger" @click="removeBlock(f, i)" aria-label="Remove block" title="Remove"><i class="bi bi-x-lg"></i></button>
-                              </div>
-                              <template x-if="b.type === 'paragraph'">
-                                <div>
-                                  <div class="rich-tools"><button type="button" class="btn btn-sm btn-outline-secondary" @mousedown.prevent="format('bold')" aria-label="Bold"><i class="bi bi-type-bold"></i></button> <button type="button" class="btn btn-sm btn-outline-secondary" @mousedown.prevent="format('italic')" aria-label="Italic"><i class="bi bi-type-italic"></i></button> <button type="button" class="btn btn-sm btn-outline-secondary" @mousedown.prevent="link()" aria-label="Link"><i class="bi bi-link-45deg"></i></button></div>
-                                  <div class="rich form-control" contenteditable="true" role="textbox" aria-label="Paragraph text" x-init="initRich($el, b)" @input="syncRich($el, b)"></div>
-                                </div>
-                              </template>
-                              <template x-if="b.type === 'header'"><div class="d-flex gap-2"><input class="form-control" aria-label="Heading text" placeholder="Heading" maxlength="500" x-model="b.data.text"><select class="form-select" style="max-width:6rem" aria-label="Heading level" x-model.number="b.data.level"><option value="1">H1</option><option value="2">H2</option><option value="3">H3</option><option value="4">H4</option></select></div></template>
-                              <template x-if="b.type === 'list'"><div><select class="form-select mb-1" style="max-width:12rem" aria-label="List style" x-model="b.data.style"><option value="unordered">Bulleted</option><option value="ordered">Numbered</option></select><textarea class="form-control" rows="4" aria-label="List items" placeholder="One item per line" :value="blockLines(b)" @input="setBlockLines(b, $event.target.value)"></textarea></div></template>
-                              <template x-if="b.type === 'quote'"><div><textarea class="form-control mb-1" rows="3" aria-label="Quote" placeholder="Quote" x-model="b.data.text"></textarea><input class="form-control" aria-label="Who said it" placeholder="Who said it (optional)" x-model="b.data.caption"></div></template>
-                              <template x-if="b.type === 'code'"><textarea class="form-control mono" rows="6" aria-label="Code" x-codejar="{ get: b.data.code, set: (v) => (b.data.code = v) }"></textarea></template>
-                              <template x-if="b.type === 'delimiter'"><hr class="my-2"></template>
-                              <template x-if="b.type === 'image'">
-                                <div class="d-flex gap-3 flex-wrap">
-                                  <span class="ph thumb"><img x-show="b.data.mediaId && media[b.data.mediaId]" :src="thumb(media[b.data.mediaId])" alt=""></span>
-                                  <div class="flex-grow-1" style="min-width:14rem">
-                                    <button type="button" class="btn btn-outline-secondary btn-sm mb-2" @click="pickBlockImage(b)" x-text="b.data.mediaId ? 'Change image' : 'Choose an image'"></button>
-                                    <input class="form-control mb-1" aria-label="Image description for screen readers" placeholder="Describe the image (alt text)" maxlength="500" x-model="b.data.alt">
-                                    <input class="form-control" aria-label="Caption" placeholder="Caption (optional)" maxlength="500" x-model="b.data.caption">
-                                  </div>
-                                </div>
-                              </template>
-                            </div>
-                          </template>
-                          <div class="block-add"><span class="muted small me-1">Add:</span>
-                            <template x-for="t in ['paragraph','header','list','quote','image','code','delimiter']" :key="t"><button type="button" class="btn btn-sm btn-outline-secondary" @click="addBlock(f, t)" x-text="t"></button></template></div>
-                        </div>
-                      </template>
-                      <div class="invalid-feedback d-block" x-show="errors['data.' + f.key]" x-text="errors['data.' + f.key]"></div>
-                    </div>
-                  </template>
-                </div>
-
-                <div class="col-lg-4">
-                  <div class="panel p-3 mb-3 sticky-side">
-                    <div class="fw-semibold mb-2">Publishing</div>
-                    <label class="form-label" for="e-status">Status</label>
-                    <select id="e-status" class="form-select mb-2" :disabled="!canPublish" x-model="form.status"><template x-for="o in statuses" :key="o[0]"><option :value="o[0]" :selected="o[0] === form.status" x-text="o[1]"></option></template></select>
-                    <div class="small muted mb-2" x-show="!canPublish">You can save drafts. Someone with the Publish permission makes them live.</div>
-                    <div class="mb-2" x-show="form.status === 'scheduled'"><label class="form-label" for="e-when">Go live at</label><input id="e-when" type="datetime-local" class="form-control" :class="{'is-invalid': errors.publishAt}" x-model="form.publishAt"><div class="invalid-feedback d-block" x-show="errors.publishAt" x-text="errors.publishAt"></div></div>
-                    <label class="form-label" for="e-slug">Address</label>
-                    <input id="e-slug" class="form-control mono mb-1" :class="{'is-invalid': errors.slug}" x-model="form.slug" @input="slugTouched = true" placeholder="made from the title">
-                    <div class="invalid-feedback d-block" x-show="errors.slug" x-text="errors.slug"></div>
-                    <div class="small muted mono mb-2" x-text="addressPreview"></div>
-                    <div class="mb-2" x-show="type.hierarchical"><label class="form-label" for="e-parent">Parent page</label><select id="e-parent" class="form-select" x-model.number="form.parentId"><option :value="null">None (top level)</option><template x-for="p in parents" :key="p.id"><option :value="p.id" :selected="p.id === form.parentId" x-text="'/' + p.path"></option></template></select></div>
-                    <div class="d-flex gap-2 flex-wrap mt-3">
-                      <button type="button" class="btn btn-primary" :disabled="busy" @click="save()" x-text="busy ? 'Saving…' : 'Save'"></button>
-                      <button type="button" class="btn btn-outline-secondary" x-show="!isNew" @click="preview()">Preview</button>
-                    </div>
-                    <div class="small text-warning mt-2" x-show="dirty">You have unsaved changes.</div>
-                  </div>
-
-                  <template x-for="t in type.taxonomies" :key="t.id">
-                    <div class="panel p-3 mb-3">
-                      <div class="fw-semibold mb-2" x-text="t.plural"></div>
-                      <template x-for="term in (terms[t.id] || [])" :key="term.id"><div class="form-check"><input class="form-check-input" type="checkbox" :id="'t-' + term.id" :checked="hasTerm(term.id)" @change="toggleTerm(term.id, $event.target.checked)"><label class="form-check-label" :for="'t-' + term.id" x-text="term.name"></label></div></template>
-                      <div class="d-flex gap-1 mt-2" x-show="type.can.write"><input class="form-control form-control-sm" :aria-label="'New ' + t.label.toLowerCase()" :placeholder="'New ' + t.label.toLowerCase()" x-model="newTerm[t.id]" @keydown.enter.prevent="addTerm(t.id)"><button type="button" class="btn btn-sm btn-outline-secondary" @click="addTerm(t.id)">Add</button></div>
-                    </div>
-                  </template>
-
-                  <div class="panel p-3" x-show="!isNew">
-                    <button type="button" class="btn btn-link px-0" @click="loadRevisions()" x-text="showRevisions ? 'Hide history' : 'History'"></button>
-                    <div x-show="showRevisions">
-                      <template x-for="r in revisions" :key="r.id"><div class="d-flex justify-content-between align-items-center small py-1 border-top"><div><span x-text="'v' + r.version"></span> · <span class="muted" x-text="(r.by || 'system') + ', ' + ago(r.at)"></span><div class="muted" x-show="r.note" x-text="r.note"></div></div><button type="button" class="btn btn-sm btn-outline-secondary" @click="restore(r)">Restore</button></div></template>
-                    </div>
-                    <hr>
-                    <button type="button" class="btn btn-outline-danger btn-sm" x-show="type.can.delete" @click="remove()">Delete</button>
-                  </div>
-                </div>
-              </div>
-              <div class="muted" x-show="loading">Loading…</div>
-            </section>
+            <section x-data="contentEditor(v.type, v.id)"></section>
           </template>
 
         </div></template>
@@ -1040,82 +319,17 @@
 
     <!-- Categories and tags -->
     <template x-if="route === 'terms'">
-      <section x-data="termsPage">
-        <div class="page-head"><h1>Categories and tags</h1><p>Group posts so visitors can browse them. Deleting one never deletes a post.</p></div>
-        <div class="alert alert-danger" role="alert" x-show="error" x-text="error"></div>
-        <div class="row g-3">
-          <template x-for="t in taxonomies" :key="t.id">
-            <div class="col-md-6"><div class="panel">
-              <div class="panel-h" x-text="t.plural"></div>
-              <div class="empty" x-show="!(terms[t.id] || []).length" x-text="'No ' + t.plural.toLowerCase() + ' yet.'"></div>
-              <table class="table" x-show="(terms[t.id] || []).length"><tbody><template x-for="term in (terms[t.id] || [])" :key="term.id"><tr><td><span x-text="term.name"></span><div class="muted small mono" x-text="term.slug"></div></td><td class="muted" x-text="term.uses + (term.uses === 1 ? ' use' : ' uses')"></td><td class="text-end text-nowrap"><button class="btn btn-sm btn-outline-secondary" @click="rename(t, term)">Rename</button> <button class="btn btn-sm btn-outline-danger" @click="remove(t, term)">Delete</button></td></tr></template></tbody></table>
-              <form class="p-3 d-flex gap-2" @submit.prevent="add(t)"><input class="form-control" :aria-label="'New ' + t.label.toLowerCase()" :placeholder="'New ' + t.label.toLowerCase()" required x-model="names[t.id]"><button class="btn btn-primary">Add</button></form>
-            </div></div>
-          </template>
-        </div>
-      </section>
+      <section x-data="termsPage"></section>
     </template>
 
     <!-- Media -->
     <template x-if="route === 'media'">
-      <section x-data="mediaPage" @dragover.prevent="dragging = true" @dragleave="dragging = false" @drop.prevent="dragging = false; can('media.upload') && upload($event.dataTransfer.files)">
-        <div class="page-head d-flex justify-content-between align-items-end flex-wrap gap-2"><div><h1>Media</h1><p>Images and documents. Images get a private copy without camera data and smaller sizes for fast pages.</p></div>
-          <label class="btn btn-primary mb-0" x-show="can('media.upload')">Upload files <input type="file" hidden multiple accept="image/jpeg,image/png,image/gif,image/webp,image/avif,application/pdf" @change="upload($event.target.files); $event.target.value = ''"></label></div>
-        <div class="alert alert-warning" x-show="!available">Image processing isn't installed on this server, so images can't be uploaded. Run <span class="mono">npm install</span> without <span class="mono">--omit=optional</span>.</div>
-        <div class="alert alert-danger" role="alert" x-show="error" x-text="error"></div>
-        <div class="d-flex gap-2 mb-3 flex-wrap">
-          <input class="form-control" style="max-width:18rem" placeholder="Search files" aria-label="Search files" x-model="q" @input.debounce.300ms="load()">
-          <select class="form-select" style="max-width:10rem" aria-label="Type" x-model="kind" @change="load()"><option value="">All</option><option value="image">Images</option><option value="file">Documents</option></select>
-          <span class="muted align-self-center small" x-show="busy">Uploading…</span>
-        </div>
-        <div class="row g-3">
-          <div :class="current ? 'col-lg-8' : 'col-12'">
-            <div class="dropzone" :class="{on: dragging}">
-              <div class="empty" x-show="!items.length">No files yet. Upload some, or drop them here.</div>
-              <div class="media-grid">
-                <template x-for="m in items" :key="m.id"><button type="button" class="media-tile" :class="{sel: current && current.id === m.id}" @click="open(m)"><span class="ph"><img x-show="m.kind === 'image'" :src="thumb(m)" :alt="m.alt" loading="lazy"><i class="bi bi-file-earmark-pdf" x-show="m.kind !== 'image'"></i></span><span class="nm" x-text="m.filename"></span></button></template>
-              </div>
-            </div>
-          </div>
-          <template x-if="current"><div class="col-lg-4">
-            <div class="panel p-3">
-              <div class="ph big mb-2" x-show="current && current.kind === 'image'"><img :src="current ? '/media/' + current.id + '/' + current.originalFile : ''" :alt="current ? current.alt : ''"></div>
-              <div class="fw-semibold" x-text="current ? current.filename : ''"></div>
-              <div class="muted small mb-2" x-text="current ? (current.mime + ' · ' + bytes(current.size) + (current.width ? ' · ' + current.width + '×' + current.height : '')) : ''"></div>
-              <div class="small mono mb-2" x-text="current ? current.url : ''"></div>
-              <label class="form-label" for="m-alt">Description for screen readers (alt text)</label>
-              <input id="m-alt" class="form-control mb-2" maxlength="500" :disabled="!can('media.upload')" x-model="current.alt" x-show="current">
-              <div class="d-flex gap-2 flex-wrap"><button class="btn btn-primary btn-sm" x-show="can('media.upload')" @click="saveAlt()">Save description</button><button class="btn btn-outline-danger btn-sm" x-show="can('media.delete')" @click="remove()">Delete</button></div>
-              <div class="small muted mt-2" x-text="usage ? 'Used in ' + usage + (usage === 1 ? ' entry.' : ' entries.') : 'Not used anywhere yet.'"></div>
-            </div>
-          </div></template>
-        </div>
-      </section>
+      <section x-data="mediaPage" @dragover.prevent="dragging = true" @dragleave="dragging = false" @drop.prevent="dragging = false; can('media.upload') && upload($event.dataTransfer.files)"></section>
     </template>
 
     <!-- Content activity: create/edit/publish/delete across content, pages, components, translations, media, menus, redirects, SEO rules -->
     <template x-if="route === 'content-activity'">
-      <section x-data="contentActivityPage">
-        <div class="page-head d-flex justify-content-between align-items-end flex-wrap gap-2">
-          <div><h1>Activity</h1><p>Who created, edited, published, restored or deleted a page, entry or file. Security events (sign-ins, settings, webhooks) are in the Audit log.</p></div>
-          <a class="btn btn-outline-secondary" :href="exportUrl" download>Export CSV</a>
-        </div>
-        <div class="mb-3 d-flex flex-wrap gap-2 align-items-end">
-          <div><label class="form-label small" for="ca-actor">Actor email</label><input id="ca-actor" class="form-control" style="max-width:16rem" placeholder="e.g. you@example.com" x-model="actorEmail" @input.debounce.400ms="load(true)"></div>
-          <div><label class="form-label small" for="ca-from">From</label><input id="ca-from" type="date" class="form-control" x-model="from" @change="load(true)"></div>
-          <div><label class="form-label small" for="ca-to">To</label><input id="ca-to" type="date" class="form-control" x-model="to" @change="load(true)"></div>
-          <button type="button" class="btn btn-link" x-show="actorEmail || from || to" @click="clearFilters()">Clear filters</button>
-        </div>
-        <div class="panel">
-          <div class="empty" x-show="!entries.length">No content activity yet.</div>
-          <table class="table" x-show="entries.length"><thead><tr><th>What happened</th><th>By</th><th>When</th></tr></thead><tbody>
-            <template x-for="e in entries" :key="e.id"><tr>
-              <td class="small"><span x-html="detail(e)"></span></td>
-              <td x-text="e.actor"></td>
-              <td class="muted text-nowrap" x-text="ago(e.at)" :title="new Date(e.at).toLocaleString()"></td></tr></template></tbody></table>
-        </div>
-        <div class="text-center mt-3"><button class="btn btn-outline-secondary" x-show="more" @click="load(false)">Load older</button></div>
-      </section>
+      <section x-data="contentActivityPage"></section>
     </template>
 
     <!-- Pages: a list, or the builder for one page -->
@@ -1124,179 +338,11 @@
         <template x-for="v in pagesViews" :key="v.key"><div>
 
           <template x-if="v.kind === 'list'">
-            <section x-data="pagesList">
-              <div class="page-head d-flex justify-content-between align-items-end flex-wrap gap-2">
-                <div><h1>Pages</h1><p>Every address of your site. A page shows one or more components, in an order you choose, or a hand-written template for anything more custom.</p></div>
-                <div class="d-flex gap-2 flex-wrap">
-                  <a class="btn btn-outline-secondary" href="/api/admin/site/pages/export">Export .zip</a>
-                  <label class="btn btn-outline-secondary mb-0" x-show="can('pages.write')" :class="{disabled: importBusy}">Import .zip<input type="file" hidden accept=".zip,application/zip" @change="importZip($event.target.files[0]); $event.target.value = ''"></label>
-                  <a class="btn btn-primary" x-show="can('pages.write')" href="#/pages/new">New page</a>
-                </div>
-              </div>
-              <div class="form-check mb-2" x-show="can('pages.write')"><input id="p-prune" class="form-check-input" type="checkbox" x-model="prune"><label class="form-check-label small" for="p-prune">Importing replaces the whole tree (deletes pages the zip doesn't have) instead of adding to it</label></div>
-              <div class="alert alert-danger" role="alert" style="white-space:pre-wrap" x-show="importError" x-text="importError"></div>
-              <div class="panel">
-                <div class="empty" x-show="loaded && !pages.length">No pages yet.</div>
-                <table class="table" x-show="pages.length"><thead><tr><th>Address</th><th>Shows</th><th></th><th>Changed</th><th></th></tr></thead><tbody>
-                  <template x-for="p in pages" :key="p.path"><tr>
-                    <td class="mono small" x-text="addressOf(p)"></td>
-                    <td class="muted small" x-text="entryLabel(p)"></td>
-                    <td><span class="tag warn" x-show="p.front && p.front.noindex" title="Left out of search engines">noindex</span></td>
-                    <td class="muted text-nowrap" x-text="ago(p.updatedAt)"></td>
-                    <td class="text-end text-nowrap">
-                      <a class="btn btn-sm btn-outline-secondary" :href="'#/pages/' + encodeURIComponent(p.name)">Edit</a>
-                      <button class="btn btn-sm btn-outline-danger" type="button" x-show="can('pages.write')" @click="remove(p)">Delete</button>
-                    </td>
-                  </tr></template></tbody></table>
-              </div>
-            </section>
+            <section x-data="pagesList"></section>
           </template>
 
           <template x-if="v.kind === 'edit'">
-            <section x-data="pagesEditor(v.name)">
-              <div class="page-head d-flex justify-content-between align-items-end flex-wrap gap-2">
-                <div><h1 x-text="isNew ? 'New page' : (front.title || pageName)"></h1><p x-show="!isNew" class="mono" x-text="'/' + pageName"></p></div>
-                <a href="#/pages" class="btn btn-outline-secondary">Back to pages</a>
-              </div>
-              <div class="alert alert-danger" role="alert" x-show="error" x-text="error"></div>
-              <div class="row g-3" x-show="loaded">
-                <div class="col-lg-7">
-                  <div class="panel p-3 mb-3">
-                    <label class="form-label" for="p-name">Address</label>
-                    <div class="input-group">
-                      <span class="input-group-text mono">/</span>
-                      <input id="p-name" class="form-control mono" placeholder="blog/[slug]" x-model="pageName" @blur="pageName = cleanName">
-                    </div>
-                    <div class="help small muted mt-1">Use <code>[name]</code> for a part of the address that varies, or <code>[...name]</code> for the rest of it. End with <code>index</code> to answer the folder itself (so <code>blog/index</code> is just <code>/blog</code>).</div>
-                  </div>
-
-                  <div class="panel p-3 mb-3">
-                    <div class="row g-2">
-                      <div class="col-md-6"><label class="form-label" for="p-title">Title</label><input id="p-title" class="form-control" maxlength="200" x-model="front.title"></div>
-                      <div class="col-md-6"><label class="form-label" for="p-layout">Layout</label>
-                        <select id="p-layout" class="form-select" x-model="front.layout"><option value="">Theme default</option><template x-for="l in layouts" :key="l"><option :value="l" x-text="l"></option></template></select>
-                      </div>
-                    </div>
-                    <label class="form-label mt-2" for="p-desc">Description</label>
-                    <textarea id="p-desc" class="form-control" rows="2" maxlength="400" x-model="front.description"></textarea>
-                    <div class="row g-2 mt-1 align-items-center">
-                      <div class="col-6 col-md-3"><div class="form-check"><input id="p-noindex" class="form-check-input" type="checkbox" x-model="front.noindex"><label class="form-check-label small" for="p-noindex">Noindex</label></div></div>
-                      <div class="col-6 col-md-3"><div class="form-check"><input id="p-sitemap" class="form-check-input" type="checkbox" x-model="front.sitemap"><label class="form-check-label small" for="p-sitemap">In sitemap</label></div></div>
-                      <div class="col-6 col-md-3"><div class="form-check"><input id="p-cache" class="form-check-input" type="checkbox" x-model="front.cache"><label class="form-check-label small" for="p-cache">Cacheable</label></div></div>
-                      <div class="col-6 col-md-3"><select class="form-select form-select-sm" aria-label="Rate limit" x-model="front.limit"><option value="">No extra limit</option><option value="search">Search limit</option></select></div>
-                    </div>
-                  </div>
-
-                  <div class="panel p-3 mb-3">
-                    <div class="panel-h">SEO defaults for this page</div>
-                    <div class="help small muted mb-2">Applies to every address this page produces. A <a href="#/seo">SEO Manager</a> rule for one specific address overrides all of this.</div>
-                    <div class="row g-2">
-                      <div class="col-md-6"><label class="form-label" for="p-seo-type">Content type (og:type)</label>
-                        <select id="p-seo-type" class="form-select" x-model="front.seoType"><option value="">Automatic</option><option value="website">Website</option><option value="article">Article</option></select>
-                      </div>
-                      <div class="col-md-6"><label class="form-label" for="p-twitter-card">Twitter card</label>
-                        <select id="p-twitter-card" class="form-select" x-model="front.twitterCard"><option value="">Site default</option><option value="summary">Summary</option><option value="summary_large_image">Summary with large image</option></select>
-                      </div>
-                    </div>
-                    <label class="form-label mt-2">Default social image</label>
-                    <div class="d-flex align-items-center gap-3">
-                      <span class="ph thumb" x-show="front.seoImage"><img x-show="seoImageMeta && seoImageMeta.kind === 'image'" :src="seoImageMeta ? thumb(seoImageMeta) : ''" alt=""></span>
-                      <span class="muted small" x-show="front.seoImage" x-text="seoImageMeta ? seoImageMeta.filename : ''"></span>
-                      <button type="button" class="btn btn-outline-secondary btn-sm" @click="pickSeoImage()" x-text="front.seoImage ? 'Change' : 'Choose from the library'"></button>
-                      <button type="button" class="btn btn-link btn-sm" x-show="front.seoImage" @click="front.seoImage = null; seoImageMeta = null">Remove</button>
-                    </div>
-                    <div class="help small muted mt-1">Used when an entry has no featured image and no site-wide default social image is set.</div>
-                  </div>
-
-                  <div class="panel p-3 mb-3">
-                    <label class="form-label" for="p-shows">Shows</label>
-                    <select id="p-shows" class="form-select mb-2" x-model="shows">
-                      <option value="none">Nothing special — a custom page</option>
-                      <option value="type">Every entry of a content type</option>
-                      <option value="own">Any type with its own address</option>
-                      <option value="fixed">One specific entry</option>
-                      <option value="terms">Every entry with one taxonomy term</option>
-                    </select>
-                    <template x-if="shows === 'type' || shows === 'fixed'">
-                      <select class="form-select mb-2" aria-label="Content type" x-model="showsType"><option value="">Choose a type…</option><template x-for="t in entryTypes" :key="t.id"><option :value="t.id" x-text="t.label"></option></template></select>
-                    </template>
-                    <template x-if="shows === 'fixed'"><input class="form-control mono" aria-label="Entry path" placeholder="about/team" x-model="showsPath"></template>
-                    <template x-if="shows === 'terms'">
-                      <select class="form-select" aria-label="Taxonomy" x-model="showsTaxonomy"><option value="">Choose a taxonomy…</option><template x-for="t in taxonomies" :key="t.id"><option :value="t.id" x-text="t.label"></option></template></select>
-                    </template>
-                    <div class="help small muted mt-2" x-show="dynamicParams.length" x-text="'Address parts this file name gives: ' + dynamicParams.join(', ')"></div>
-                  </div>
-
-                  <div class="panel p-3 mb-3">
-                    <div class="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
-                      <label class="form-label mb-0">Content</label>
-                      <div class="d-flex gap-2 align-items-center">
-                        <label class="btn btn-sm btn-outline-secondary mb-0">Import HTML<input type="file" accept=".html,.htm" hidden @change="importFile($event.target.files[0]); $event.target.value = ''"></label>
-                        <button type="button" class="btn btn-sm btn-outline-secondary" @click="toggleCode()" x-text="mode === 'compose' ? 'Edit as code' : 'Edit as components'"></button>
-                      </div>
-                    </div>
-
-                    <template x-if="mode === 'compose'">
-                      <div>
-                        <div class="empty" x-show="!blocks.length">No components on this page yet. Add one below.</div>
-                        <template x-for="(b, i) in blocks" :key="b.uid">
-                          <div class="panel p-3 mb-2">
-                            <div class="d-flex justify-content-between align-items-center mb-2">
-                              <strong x-text="componentTitle(b.name)"></strong>
-                              <div class="btn-group">
-                                <button type="button" class="btn btn-sm btn-outline-secondary" :disabled="i === 0" @click="moveBlock(i, -1)" aria-label="Move up">↑</button>
-                                <button type="button" class="btn btn-sm btn-outline-secondary" :disabled="i === blocks.length - 1" @click="moveBlock(i, 1)" aria-label="Move down">↓</button>
-                                <button type="button" class="btn btn-sm btn-outline-danger" @click="removeBlock(i)">Remove</button>
-                              </div>
-                            </div>
-                            <div class="empty small" x-show="!propsOf(b.name).length">No properties.</div>
-                            <template x-for="p in propsOf(b.name)" :key="p.key">
-                              <div class="mb-2">
-                                <label class="form-label small" x-text="p.label || p.key"></label>
-                                <template x-if="p.type === 'boolean'"><div class="form-check"><input class="form-check-input" type="checkbox" x-model="b.args[p.key]"></div></template>
-                                <template x-if="p.type === 'text'"><textarea class="form-control form-control-sm" rows="2" x-model="b.args[p.key]"></textarea></template>
-                                <template x-if="p.type === 'number'"><input type="number" class="form-control form-control-sm" x-model.number="b.args[p.key]"></template>
-                                <template x-if="!p.type || p.type === 'string'"><input class="form-control form-control-sm" x-model="b.args[p.key]"></template>
-                              </div>
-                            </template>
-                          </div>
-                        </template>
-                        <div class="d-flex gap-2">
-                          <select class="form-select" aria-label="Add a component" x-model="newBlockName"><option value="">Add a component…</option><template x-for="c in components" :key="c.name"><option :value="c.name" x-text="c.meta?.title || c.name"></option></template></select>
-                          <button type="button" class="btn btn-outline-secondary text-nowrap" @click="addBlock()">Add</button>
-                        </div>
-                      </div>
-                    </template>
-                    <template x-if="mode === 'code'">
-                      <textarea class="form-control mono" rows="16" spellcheck="false" x-codejar="{ mode: 'htmlmixed', get: code, set: (v) => (code = v) }"></textarea>
-                    </template>
-                  </div>
-                </div>
-
-                <div class="col-lg-5">
-                  <div class="panel mb-3" style="position:sticky;top:1rem">
-                    <div class="panel-h d-flex justify-content-between align-items-center">
-                      <span>Preview</span>
-                      <span class="muted small" x-show="preview.busy">Rendering…</span>
-                    </div>
-                    <div class="p-2" x-show="dynamicParams.length">
-                      <template x-for="p in dynamicParams" :key="p">
-                        <input class="form-control form-control-sm mb-1" :aria-label="'Sample value for ' + p" :placeholder="p + ' (sample value)'" x-model="previewParams[p]">
-                      </template>
-                    </div>
-                    <div class="alert alert-danger m-2" role="alert" x-show="preview.error" x-text="preview.error"></div>
-                    <iframe title="Page preview" style="width:100%;height:70vh;border:0;border-top:1px solid var(--line)" sandbox="allow-same-origin" :srcdoc="preview.html"></iframe>
-                  </div>
-                </div>
-              </div>
-
-              <div class="savebar" x-show="loaded && (isNew || dirty)">
-                <span x-show="dirty && !isNew">Unsaved changes</span>
-                <span class="ms-auto"></span>
-                <button class="btn btn-outline-secondary" type="button" x-show="!isNew" @click="discard()">Discard</button>
-                <button class="btn btn-primary" type="button" :disabled="busy" @click="save()" x-text="isNew ? 'Create page' : 'Save page'"></button>
-              </div>
-            </section>
+            <section x-data="pagesEditor(v.name)"></section>
           </template>
 
         </div></template>
@@ -1309,115 +355,11 @@
         <template x-for="v in componentsViews" :key="v.key"><div>
 
           <template x-if="v.kind === 'list'">
-            <section x-data="componentsList">
-              <div class="page-head d-flex justify-content-between align-items-end flex-wrap gap-2">
-                <div><h1>Components</h1><p>Reusable building blocks: an HTML/Liquid template, scoped CSS, and the data it reads. Pages are built by arranging these.</p></div>
-                <div class="d-flex gap-2 flex-wrap">
-                  <a class="btn btn-outline-secondary" href="/api/admin/site/components/export">Export .zip</a>
-                  <label class="btn btn-outline-secondary mb-0" x-show="can('components.write')" :class="{disabled: importBusy}">Import .zip<input type="file" hidden accept=".zip,application/zip" @change="importZip($event.target.files[0]); $event.target.value = ''"></label>
-                  <a class="btn btn-primary" x-show="can('components.write')" href="#/components/new">New component</a>
-                </div>
-              </div>
-              <div class="form-check mb-2" x-show="can('components.write')"><input id="c-prune" class="form-check-input" type="checkbox" x-model="prune"><label class="form-check-label small" for="c-prune">Importing replaces the whole library (deletes components the zip doesn't have) instead of adding to it</label></div>
-              <div class="alert alert-danger" role="alert" style="white-space:pre-wrap" x-show="importError" x-text="importError"></div>
-              <div class="panel">
-                <div class="empty" x-show="loaded && !components.length">No components yet.</div>
-                <table class="table" x-show="components.length"><thead><tr><th>Name</th><th>Title</th><th>Properties</th><th>Data</th><th>Changed</th><th></th></tr></thead><tbody>
-                  <template x-for="c in components" :key="c.path"><tr>
-                    <td class="mono small" x-text="c.name"></td>
-                    <td x-text="c.meta?.title || '–'"></td>
-                    <td class="muted small" x-text="Object.keys(c.meta?.props || {}).length || '–'"></td>
-                    <td class="muted small" x-text="(c.meta?.api || []).length || '–'"></td>
-                    <td class="muted text-nowrap" x-text="ago(c.updatedAt)"></td>
-                    <td class="text-end text-nowrap">
-                      <a class="btn btn-sm btn-outline-secondary" :href="'#/components/' + encodeURIComponent(c.name)">Edit</a>
-                      <button class="btn btn-sm btn-outline-danger" type="button" x-show="can('components.write')" @click="remove(c)">Delete</button>
-                    </td>
-                  </tr></template></tbody></table>
-              </div>
-            </section>
+            <section x-data="componentsList"></section>
           </template>
 
           <template x-if="v.kind === 'edit'">
-            <section x-data="componentsEditor(v.name)">
-              <div class="page-head d-flex justify-content-between align-items-end flex-wrap gap-2">
-                <div><h1 x-text="isNew ? 'New component' : (metaTitle || name)"></h1><p x-show="!isNew" class="mono" x-text="name"></p></div>
-                <a href="#/components" class="btn btn-outline-secondary">Back to components</a>
-              </div>
-              <div class="alert alert-danger" role="alert" x-show="error" x-text="error"></div>
-              <div class="row g-3" x-show="loaded">
-                <div class="col-lg-7">
-                  <div class="panel p-3 mb-3">
-                    <label class="form-label" for="c-name">Name</label>
-                    <div class="input-group">
-                      <span class="input-group-text mono">components/</span>
-                      <input id="c-name" class="form-control mono" placeholder="hero" x-model="newName">
-                      <span class="input-group-text mono">.html</span>
-                    </div>
-                    <div class="row g-2 mt-1">
-                      <div class="col-md-6"><label class="form-label" for="c-title">Title</label><input id="c-title" class="form-control" maxlength="80" placeholder="Shown in the page builder" x-model="metaTitle"></div>
-                      <div class="col-md-6"><label class="form-label" for="c-desc">Description</label><input id="c-desc" class="form-control" maxlength="300" x-model="metaDescription"></div>
-                    </div>
-                  </div>
-
-                  <div class="panel p-3 mb-3">
-                    <div class="d-flex justify-content-between align-items-center mb-2"><label class="form-label mb-0">Properties</label><button type="button" class="btn btn-sm btn-outline-secondary" @click="addProp()">Add property</button></div>
-                    <div class="empty small" x-show="!props.length">No properties: this component always shows the same thing.</div>
-                    <template x-for="(p, i) in props" :key="i">
-                      <div class="row g-2 mb-2 align-items-center">
-                        <div class="col-3"><input class="form-control form-control-sm mono" aria-label="Property key" placeholder="heading" x-model="p.key"></div>
-                        <div class="col-3"><input class="form-control form-control-sm" aria-label="Label" placeholder="Label" x-model="p.label"></div>
-                        <div class="col-3"><select class="form-select form-select-sm" aria-label="Type" x-model="p.type"><option value="string">Short text</option><option value="text">Long text</option><option value="number">Number</option><option value="boolean">On/off</option></select></div>
-                        <div class="col-2"><input class="form-control form-control-sm" aria-label="Default value" placeholder="Default" x-model="p.default"></div>
-                        <div class="col-1 text-end"><button type="button" class="btn btn-sm btn-outline-danger" @click="removeProp(i)" aria-label="Remove property">×</button></div>
-                      </div>
-                    </template>
-                  </div>
-
-                  <div class="panel p-3 mb-3">
-                    <div class="d-flex justify-content-between align-items-center mb-2"><label class="form-label mb-0">Data this component reads</label><button type="button" class="btn btn-sm btn-outline-secondary" @click="addApi()">Add endpoint</button></div>
-                    <div class="empty small" x-show="!apis.length">No data: this component only uses its properties.</div>
-                    <template x-for="(a, i) in apis" :key="i">
-                      <div class="row g-2 mb-2 align-items-center">
-                        <div class="col-3"><input class="form-control form-control-sm mono" aria-label="Name (api.name in the template)" placeholder="post" x-model="a.name"></div>
-                        <div class="col-6"><input class="form-control form-control-sm mono" aria-label="Address" placeholder="/api/public/content/post/{{ slug }}" x-model="a.url"></div>
-                        <div class="col-2 form-check"><input class="form-check-input" type="checkbox" :id="'api-req-' + i" x-model="a.required"><label class="form-check-label small" :for="'api-req-' + i">Required</label></div>
-                        <div class="col-1 text-end"><button type="button" class="btn btn-sm btn-outline-danger" @click="removeApi(i)" aria-label="Remove endpoint">×</button></div>
-                      </div>
-                    </template>
-                  </div>
-
-                  <div class="panel p-3 mb-3">
-                    <label class="form-label" for="c-template">Template (HTML + Liquid)</label>
-                    <textarea id="c-template" class="form-control mono" rows="14" spellcheck="false" x-codejar="{ mode: 'htmlmixed', get: template, set: (v) => (template = v) }"></textarea>
-                    <div class="help small muted mt-1">A <span class="mono">&lt;script&gt;</span> tag is allowed here and runs on the live page (it is not sandboxed — the same trust level as a script Service); the live preview does not run it, since the preview frame never runs scripts.</div>
-                  </div>
-                  <div class="panel p-3 mb-3">
-                    <label class="form-label" for="c-css">Scoped CSS</label>
-                    <textarea id="c-css" class="form-control mono" rows="8" spellcheck="false" x-codejar="{ mode: 'css', get: css, set: (v) => (css = v) }"></textarea>
-                  </div>
-                </div>
-
-                <div class="col-lg-5">
-                  <div class="panel mb-3" style="position:sticky;top:1rem">
-                    <div class="panel-h d-flex justify-content-between align-items-center">
-                      <span>Preview</span>
-                      <span class="muted small" x-show="preview.busy">Rendering…</span>
-                    </div>
-                    <div class="help small muted p-2" x-show="props.length">Shown with each property at its default value above.</div>
-                    <div class="alert alert-danger m-2" role="alert" x-show="preview.error" x-text="preview.error"></div>
-                    <iframe title="Component preview" style="width:100%;height:60vh;border:0;border-top:1px solid var(--line)" sandbox="allow-same-origin" :srcdoc="preview.html"></iframe>
-                  </div>
-                </div>
-              </div>
-
-              <div class="savebar" x-show="loaded && (isNew || dirty)">
-                <span x-show="dirty && !isNew">Unsaved changes</span>
-                <span class="ms-auto"></span>
-                <button class="btn btn-outline-secondary" type="button" x-show="!isNew" @click="discard()">Discard</button>
-                <button class="btn btn-primary" type="button" :disabled="busy" @click="save()" x-text="isNew ? 'Create component' : 'Save component'"></button>
-              </div>
-            </section>
+            <section x-data="componentsEditor(v.name)"></section>
           </template>
 
         </div></template>
@@ -1430,213 +372,11 @@
         <template x-for="v in servicesViews" :key="v.key"><div>
 
           <template x-if="v.kind === 'list'">
-            <section x-data="servicesList">
-              <div class="page-head d-flex justify-content-between align-items-end flex-wrap gap-2">
-                <div><h1>Services</h1><p>Custom API endpoints components — and, through the public content API, other callers — can read data from.</p></div>
-                <div class="d-flex gap-2 flex-wrap">
-                  <a class="btn btn-outline-secondary" href="/api/admin/services/export">Export .zip</a>
-                  <label class="btn btn-outline-secondary mb-0" x-show="can('services.write')" :class="{disabled: importBusy}">Import .zip<input type="file" hidden accept=".zip,application/zip" @change="importZip($event.target.files[0]); $event.target.value = ''"></label>
-                  <a class="btn btn-primary" x-show="can('services.write')" href="#/services/new">New service</a>
-                </div>
-              </div>
-              <div class="alert alert-danger" role="alert" style="white-space:pre-wrap" x-show="importError" x-text="importError"></div>
-              <div class="panel">
-                <div class="empty" x-show="loaded && !services.length">No services yet.</div>
-                <table class="table" x-show="services.length"><thead><tr><th>Slug</th><th>Name</th><th>Mode</th><th>Access</th><th></th><th></th></tr></thead><tbody>
-                  <template x-for="s in services" :key="s.slug"><tr>
-                    <td class="mono small" x-text="s.slug"></td>
-                    <td x-text="s.name"></td>
-                    <td class="muted small" x-text="s.mode === 'sql' ? 'Raw SQL' : s.mode === 'script' ? 'Script (Node.js)' : 'Query builder'"></td>
-                    <td class="muted small" x-text="s.access === 'customer' ? 'Signed-in customers' : 'Public'"></td>
-                    <td><span class="tag" :class="s.enabled ? 'ok' : 'warn'" x-text="s.enabled ? 'Enabled' : 'Disabled'"></span></td>
-                    <td class="text-end text-nowrap">
-                      <a class="btn btn-sm btn-outline-secondary" :href="'#/services/' + encodeURIComponent(s.slug)">Edit</a>
-                      <button class="btn btn-sm btn-outline-danger" type="button" x-show="can('services.write')" @click="remove(s)">Delete</button>
-                    </td>
-                  </tr></template></tbody></table>
-              </div>
-            </section>
+            <section x-data="servicesList"></section>
           </template>
 
           <template x-if="v.kind === 'edit'">
-            <section x-data="servicesEditor(v.slug)">
-              <div class="page-head d-flex justify-content-between align-items-end flex-wrap gap-2">
-                <div><h1 x-text="isNew ? 'New service' : (name || slug)"></h1><p x-show="!isNew" class="mono" x-text="slug"></p></div>
-                <a href="#/services" class="btn btn-outline-secondary">Back to services</a>
-              </div>
-              <div class="alert alert-danger" role="alert" x-show="error" x-text="error"></div>
-              <div class="row g-3" x-show="loaded">
-                <div class="col-lg-7">
-                  <div class="panel p-3 mb-3">
-                    <div class="row g-2">
-                      <div class="col-md-6"><label class="form-label" for="s-name">Name</label><input id="s-name" class="form-control" maxlength="200" x-model="name"></div>
-                      <div class="col-md-6"><label class="form-label" for="s-slug">Slug</label>
-                        <div class="input-group"><span class="input-group-text mono">/services/</span><input id="s-slug" class="form-control mono" placeholder="recent-posts" x-model="newSlug"></div>
-                      </div>
-                    </div>
-                    <label class="form-label mt-2" for="s-desc">Description</label>
-                    <textarea id="s-desc" class="form-control" rows="2" maxlength="1000" x-model="description"></textarea>
-                    <div class="row g-2 mt-1 align-items-center">
-                      <div class="col-6 col-md-4"><div class="form-check"><input id="s-enabled" class="form-check-input" type="checkbox" x-model="enabled"><label class="form-check-label small" for="s-enabled">Enabled</label></div></div>
-                      <div class="col-6 col-md-4"><select class="form-select form-select-sm" aria-label="Who can call this" x-model="access"><option value="public">Public</option><option value="customer">Signed-in customers</option></select></div>
-                    </div>
-                    <div class="help small muted mt-1" x-show="access === 'customer'">Customer accounts aren't built yet — this will take effect once they are.</div>
-                  </div>
-
-                  <div class="panel p-3 mb-3">
-                    <label class="form-label">Mode</label>
-                    <div class="btn-group d-flex mb-3" role="group" aria-label="Service mode">
-                      <input type="radio" class="btn-check" id="mode-query" value="query" x-model="mode" autocomplete="off">
-                      <label class="btn btn-outline-secondary" for="mode-query">Query builder</label>
-                      <input type="radio" class="btn-check" id="mode-sql" value="sql" x-model="mode" autocomplete="off" x-show="can('services.sql')">
-                      <label class="btn btn-outline-secondary" for="mode-sql" x-show="can('services.sql')">Raw SQL</label>
-                      <input type="radio" class="btn-check" id="mode-script" value="script" x-model="mode" autocomplete="off" x-show="can('services.script')">
-                      <label class="btn btn-outline-secondary" for="mode-script" x-show="can('services.script')">Script (Node.js)</label>
-                    </div>
-
-                    <template x-if="mode === 'query'">
-                      <div>
-                        <div class="btn-group d-flex mb-3" role="group" aria-label="What this reads" x-show="can('services.sql')">
-                          <input type="radio" class="btn-check" id="src-type" value="type" x-model="qSource" autocomplete="off">
-                          <label class="btn btn-outline-secondary btn-sm" for="src-type">Content type</label>
-                          <input type="radio" class="btn-check" id="src-table" value="table" x-model="qSource" autocomplete="off">
-                          <label class="btn btn-outline-secondary btn-sm" for="src-table">Database table</label>
-                        </div>
-
-                        <template x-if="qSource === 'type'">
-                          <div>
-                            <div class="row g-2">
-                              <div class="col-md-6"><label class="form-label" for="s-type">Content type</label>
-                                <select id="s-type" class="form-select" x-model="qType"><option value="">Choose a type…</option><template x-for="t in entryTypes" :key="t.id"><option :value="t.id" x-text="t.label"></option></template></select>
-                              </div>
-                              <div class="col-md-6"><label class="form-label" for="s-sort">Sort</label>
-                                <select id="s-sort" class="form-select" x-model="qSort"><option value="newest">Newest first</option><option value="path">By address</option></select>
-                              </div>
-                            </div>
-                            <div class="row g-2 mt-1">
-                              <div class="col-md-4"><label class="form-label" for="s-perpage">Per page (default)</label><input id="s-perpage" type="number" min="1" max="200" class="form-control" x-model.number="qPerPageDefault"></div>
-                              <div class="col-md-4"><label class="form-label" for="s-permax">Per page (max)</label><input id="s-permax" type="number" min="1" max="200" class="form-control" x-model.number="qPerPageMax"></div>
-                              <div class="col-md-4"><label class="form-label" for="s-term">Taxonomy term id (optional)</label><input id="s-term" type="number" class="form-control" x-model="qTermId"></div>
-                            </div>
-                            <div class="mt-2" x-show="qType">
-                              <label class="form-label">Fields to include (none checked = all)</label>
-                              <div class="d-flex flex-wrap gap-3">
-                                <template x-for="f in fieldsOf(qType)" :key="f.key">
-                                  <div class="form-check"><input class="form-check-input" type="checkbox" :id="'f-' + f.key" :checked="qFields.includes(f.key)" @change="toggleField(f.key)"><label class="form-check-label small" :for="'f-' + f.key" x-text="f.label"></label></div>
-                                </template>
-                              </div>
-                            </div>
-                          </div>
-                        </template>
-
-                        <template x-if="qSource === 'table'">
-                          <div>
-                            <label class="form-label" for="t-table">Table or view</label>
-                            <select id="t-table" class="form-select" x-model="tTable" @change="onTableChange()">
-                              <option value="">Choose a table or view…</option>
-                              <template x-for="t in tables" :key="t.name"><option :value="t.name" x-text="t.name + (t.view ? ' (view)' : '')"></option></template>
-                            </select>
-                            <div class="help small muted mt-1">A fixed list of tables (users, sessions, settings, audit logs and a few others) can never be read here, whatever your permissions.</div>
-
-                            <div class="mt-2" x-show="tTable">
-                              <label class="form-label">Columns to return</label>
-                              <div class="empty small" x-show="!tAvailableColumns.length">Loading columns…</div>
-                              <div class="d-flex flex-wrap gap-3">
-                                <template x-for="c in tAvailableColumns" :key="c">
-                                  <div class="form-check"><input class="form-check-input" type="checkbox" :id="'tc-' + c" :checked="tColumns.includes(c)" @change="toggleColumn(c)"><label class="form-check-label small mono" :for="'tc-' + c" x-text="c"></label></div>
-                                </template>
-                              </div>
-                            </div>
-
-                            <div class="row g-2 mt-2" x-show="tTable">
-                              <div class="col-md-6"><label class="form-label" for="t-sort">Sort by</label>
-                                <select id="t-sort" class="form-select" x-model="tSortColumn"><option value="">Unsorted</option><template x-for="c in tAvailableColumns" :key="c"><option :value="c" x-text="c"></option></template></select>
-                              </div>
-                              <div class="col-md-6"><label class="form-label" for="t-dir">Direction</label>
-                                <select id="t-dir" class="form-select" x-model="tSortDir"><option value="asc">Ascending</option><option value="desc">Descending</option></select>
-                              </div>
-                            </div>
-                            <div class="row g-2 mt-1" x-show="tTable">
-                              <div class="col-md-6"><label class="form-label" for="t-perpage">Per page (default)</label><input id="t-perpage" type="number" min="1" max="200" class="form-control" x-model.number="tPerPageDefault"></div>
-                              <div class="col-md-6"><label class="form-label" for="t-permax">Per page (max)</label><input id="t-permax" type="number" min="1" max="200" class="form-control" x-model.number="tPerPageMax"></div>
-                            </div>
-
-                            <div class="d-flex justify-content-between align-items-center mt-3 mb-2" x-show="tTable"><label class="form-label mb-0">Parameters</label><button type="button" class="btn btn-sm btn-outline-secondary" @click="addTableParam()">Add parameter</button></div>
-                            <template x-for="(p, i) in tParams" :key="i">
-                              <div class="row g-2 mb-2 align-items-center">
-                                <div class="col-4"><input class="form-control form-control-sm mono" aria-label="Parameter name" placeholder="status" x-model="p.name"></div>
-                                <div class="col-3"><select class="form-select form-select-sm" aria-label="Parameter type" x-model="p.type"><option value="string">Text</option><option value="number">Number</option><option value="boolean">On/off</option></select></div>
-                                <div class="col-3 form-check"><input class="form-check-input" type="checkbox" :id="'treq-' + i" x-model="p.required"><label class="form-check-label small" :for="'treq-' + i">Required</label></div>
-                                <div class="col-2 text-end"><button type="button" class="btn btn-sm btn-outline-danger" @click="removeTableParam(i)" aria-label="Remove parameter">×</button></div>
-                              </div>
-                            </template>
-
-                            <div class="d-flex justify-content-between align-items-center mt-3 mb-2" x-show="tTable"><label class="form-label mb-0">Filter by column = parameter</label><button type="button" class="btn btn-sm btn-outline-secondary" @click="addWhere()">Add filter</button></div>
-                            <template x-for="(w, i) in tWhere" :key="i">
-                              <div class="row g-2 mb-2 align-items-center">
-                                <div class="col-5"><select class="form-select form-select-sm mono" aria-label="Column" x-model="w.column"><option value="">Column…</option><template x-for="c in tAvailableColumns" :key="c"><option :value="c" x-text="c"></option></template></select></div>
-                                <span class="col-auto">=</span>
-                                <div class="col-5"><select class="form-select form-select-sm mono" aria-label="Parameter" x-model="w.param"><option value="">Parameter…</option><template x-for="p in tParams" :key="p.name"><option :value="p.name" x-text="p.name"></option></template></select></div>
-                                <div class="col-1 text-end"><button type="button" class="btn btn-sm btn-outline-danger" @click="removeWhere(i)" aria-label="Remove filter">×</button></div>
-                              </div>
-                            </template>
-                          </div>
-                        </template>
-                      </div>
-                    </template>
-
-                    <template x-if="mode === 'script'">
-                      <div>
-                        <label class="form-label" for="sc-code">Script</label>
-                        <textarea id="sc-code" class="form-control mono" rows="14" spellcheck="false" x-codejar="{ mode: 'javascript', get: scCode, set: (v) => (scCode = v), placeholder: &quot;const rows = await ctx.db('entries').where({ type: 'post' }).limit(5);\nreturn { rows };&quot; }"></textarea>
-                        <div class="help small muted mt-1">Complete, <strong>unsandboxed</strong> Node.js — the same trust level as shell access to this server. The code becomes an <code>async (req, ctx) =&gt; { … }</code> function: <code>req.query</code> is the request's query string; <code>ctx</code> is the entire platform (database, settings — including secrets, email, everything). Whatever it <code>return</code>s is the response body. A timeout stops the site from WAITING on it, but cannot stop code that's already running.</div>
-                      </div>
-                    </template>
-
-                    <template x-if="mode === 'sql'">
-                      <div>
-                        <label class="form-label" for="s-sql">SQL (read-only SELECT, named :params)</label>
-                        <textarea id="s-sql" class="form-control mono" rows="8" spellcheck="false" x-codejar="{ mode: 'text/x-sql', get: sSql, set: (v) => (sSql = v), placeholder: 'select title, published_at from entries where type = :type order by published_at desc' }"></textarea>
-                        <div class="help small muted mt-1">This runs against your live database, in the dialect it is written for. Only a single SELECT/WITH statement, read-only. Write your own LIMIT — results are also capped by the setting below.</div>
-
-                        <div class="d-flex justify-content-between align-items-center mt-3 mb-2"><label class="form-label mb-0">Parameters</label><button type="button" class="btn btn-sm btn-outline-secondary" @click="addParam()">Add parameter</button></div>
-                        <div class="empty small" x-show="!sParams.length">No parameters.</div>
-                        <template x-for="(p, i) in sParams" :key="i">
-                          <div class="row g-2 mb-2 align-items-center">
-                            <div class="col-4"><input class="form-control form-control-sm mono" aria-label="Parameter name" placeholder="type" x-model="p.name"></div>
-                            <div class="col-3"><select class="form-select form-select-sm" aria-label="Parameter type" x-model="p.type"><option value="string">Text</option><option value="number">Number</option><option value="boolean">On/off</option></select></div>
-                            <div class="col-3 form-check"><input class="form-check-input" type="checkbox" :id="'req-' + i" x-model="p.required"><label class="form-check-label small" :for="'req-' + i">Required</label></div>
-                            <div class="col-2 text-end"><button type="button" class="btn btn-sm btn-outline-danger" @click="removeParam(i)" aria-label="Remove parameter">×</button></div>
-                          </div>
-                        </template>
-
-                        <label class="form-label mt-2" for="s-rowlimit">Row limit (blank = the site default)</label>
-                        <input id="s-rowlimit" type="number" min="1" max="10000" class="form-control" style="max-width:12rem" x-model="sRowLimit">
-                      </div>
-                    </template>
-                  </div>
-                </div>
-
-                <div class="col-lg-5">
-                  <div class="panel mb-3" style="position:sticky;top:1rem">
-                    <div class="panel-h d-flex justify-content-between align-items-center">
-                      <span>Preview</span>
-                      <span class="muted small" x-show="preview.busy">Running…</span>
-                    </div>
-                    <div class="empty small p-3" x-show="!canPreview">Choose a content type or table (or write a query or script) to see a preview.</div>
-                    <div class="alert alert-danger m-2" role="alert" x-show="preview.error" x-text="preview.error"></div>
-                    <pre class="p-3 mb-0 small" style="max-height:60vh;overflow:auto" x-show="preview.result" x-text="JSON.stringify(preview.result, null, 2)"></pre>
-                  </div>
-                </div>
-              </div>
-
-              <div class="savebar" x-show="loaded && (isNew || dirty)">
-                <span x-show="dirty && !isNew">Unsaved changes</span>
-                <span class="ms-auto"></span>
-                <button class="btn btn-outline-secondary" type="button" x-show="!isNew" @click="discard()">Discard</button>
-                <button class="btn btn-primary" type="button" :disabled="busy" @click="save()" x-text="isNew ? 'Create service' : 'Save service'"></button>
-              </div>
-            </section>
+            <section x-data="servicesEditor(v.slug)"></section>
           </template>
 
         </div></template>
@@ -1649,110 +389,11 @@
         <template x-for="v in seoViews" :key="v.key"><div>
 
           <template x-if="v.kind === 'list'">
-            <section x-data="seoList">
-              <div class="page-head d-flex justify-content-between align-items-end flex-wrap gap-2">
-                <div><h1>SEO Manager</h1><p>Override title, description, social tags and structured data for one specific address. A page’s own SEO section (Webmaster → Site pages) sets the default for everything else.</p></div>
-                <a class="btn btn-primary" x-show="can('seo.write')" href="#/seo/new">New rule</a>
-              </div>
-              <div class="panel">
-                <div class="empty" x-show="loaded && !rules.length">No rules yet — every page uses its own defaults.</div>
-                <table class="table" x-show="rules.length"><thead><tr><th>Address</th><th>Priority</th><th>Overrides</th><th></th><th></th></tr></thead><tbody>
-                  <template x-for="r in rules" :key="r.id"><tr>
-                    <td class="mono small" x-text="r.pattern"></td>
-                    <td class="muted small" x-text="r.priority"></td>
-                    <td class="muted small" x-text="r.title || r.description ? 'Title/description' : (r.metaTags.length || r.ldJson.length ? 'Tags only' : '—')"></td>
-                    <td><span class="tag" :class="r.enabled ? 'ok' : 'warn'" x-text="r.enabled ? 'Enabled' : 'Disabled'"></span></td>
-                    <td class="text-end text-nowrap">
-                      <a class="btn btn-sm btn-outline-secondary" :href="'#/seo/' + r.id">Edit</a>
-                      <button class="btn btn-sm btn-outline-danger" type="button" x-show="can('seo.write')" @click="remove(r)">Delete</button>
-                    </td>
-                  </tr></template></tbody></table>
-              </div>
-            </section>
+            <section x-data="seoList"></section>
           </template>
 
           <template x-if="v.kind === 'edit'">
-            <section x-data="seoRuleEditor(v.id)">
-              <div class="page-head d-flex justify-content-between align-items-end flex-wrap gap-2">
-                <div><h1 x-text="isNew ? 'New SEO rule' : pattern"></h1></div>
-                <a href="#/seo" class="btn btn-outline-secondary">Back to SEO Manager</a>
-              </div>
-              <div class="alert alert-danger" role="alert" x-show="error" x-text="error"></div>
-              <div class="row g-3" x-show="loaded">
-                <div class="col-lg-7">
-                  <div class="panel p-3 mb-3">
-                    <label class="form-label" for="seo-pattern">Address pattern</label>
-                    <input id="seo-pattern" class="form-control mono" placeholder="/about or /blog/* or /docs/**" x-model="pattern">
-                    <div class="help small muted mt-1">An exact address (<code>/about</code>) matches only that page. <code>*</code> matches within one part of the address (<code>/blog/*</code>); <code>**</code> matches any depth (<code>/docs/**</code>).</div>
-                    <div class="row g-2 mt-1 align-items-center">
-                      <div class="col-6 col-md-4"><label class="form-label small mb-0" for="seo-priority">Priority</label><input id="seo-priority" type="number" class="form-control form-control-sm" x-model.number="priority"></div>
-                      <div class="col-6 col-md-4"><div class="form-check"><input id="seo-enabled" class="form-check-input" type="checkbox" x-model="enabled"><label class="form-check-label small" for="seo-enabled">Enabled</label></div></div>
-                    </div>
-                    <div class="help small muted mt-1">When two wildcard patterns both match an address, the one with the longer fixed part wins; priority breaks a further tie.</div>
-                  </div>
-
-                  <div class="panel p-3 mb-3">
-                    <div class="panel-h">Overrides</div>
-                    <div class="help small muted mb-2">Leave a field blank to use what the page would otherwise show.</div>
-                    <label class="form-label" for="seo-title">Title</label>
-                    <input id="seo-title" class="form-control" maxlength="200" x-model="title">
-                    <label class="form-label mt-2" for="seo-desc">Description</label>
-                    <textarea id="seo-desc" class="form-control" rows="2" maxlength="400" x-model="description"></textarea>
-                    <label class="form-label mt-2">Image</label>
-                    <div class="d-flex align-items-center gap-3">
-                      <span class="ph thumb" x-show="image"><img x-show="imageMeta && imageMeta.kind === 'image'" :src="imageMeta ? thumb(imageMeta) : ''" alt=""></span>
-                      <span class="muted small" x-show="image" x-text="imageMeta ? imageMeta.filename : ''"></span>
-                      <button type="button" class="btn btn-outline-secondary btn-sm" @click="pickImage()" x-text="image ? 'Change' : 'Choose from the library'"></button>
-                      <button type="button" class="btn btn-link btn-sm" x-show="image" @click="image = null; imageMeta = null">Remove</button>
-                    </div>
-                    <div class="row g-2 mt-2">
-                      <div class="col-md-4"><label class="form-label" for="seo-type">Content type</label>
-                        <select id="seo-type" class="form-select" x-model="type"><option value="">Use the page’s default</option><option value="website">Website</option><option value="article">Article</option></select>
-                      </div>
-                      <div class="col-md-4"><label class="form-label" for="seo-twitter">Twitter card</label>
-                        <select id="seo-twitter" class="form-select" x-model="twitterCard"><option value="">Use the page’s default</option><option value="summary">Summary</option><option value="summary_large_image">Summary with large image</option></select>
-                      </div>
-                      <div class="col-md-4"><label class="form-label" for="seo-canonical">Canonical address</label>
-                        <input id="seo-canonical" class="form-control" x-model="canonical" placeholder="https://… or /path">
-                      </div>
-                    </div>
-                    <div class="row g-2 mt-1">
-                      <div class="col-md-6"><label class="form-label small" for="seo-noindex">Search indexing</label>
-                        <select id="seo-noindex" class="form-select form-select-sm" x-model="noindexMode"><option value="inherit">Use the page’s default</option><option value="no">Allow indexing</option><option value="yes">Block indexing (noindex)</option></select>
-                      </div>
-                      <div class="col-md-6"><label class="form-label small" for="seo-nofollow">Link following</label>
-                        <select id="seo-nofollow" class="form-select form-select-sm" x-model="nofollowMode"><option value="inherit">Use the page’s default</option><option value="no">Follow links</option><option value="yes">Don’t follow links (nofollow)</option></select>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div class="panel p-3 mb-3">
-                    <div class="panel-h">Custom meta tags</div>
-                    <div class="help small muted mb-2">Anything not covered above — Facebook’s <code>fb:pages</code>, a verification tag, or whatever a platform asks for next.</div>
-                    <template x-for="(m, i) in metaTags" :key="i">
-                      <div class="row g-2 mb-2 align-items-center">
-                        <div class="col-3"><select class="form-select form-select-sm" aria-label="Tag kind" x-model="m.kind"><option value="name">name=</option><option value="property">property=</option></select></div>
-                        <div class="col-4"><input class="form-control form-control-sm mono" aria-label="Tag key" placeholder="e.g. fb:pages" x-model="m.key"></div>
-                        <div class="col-4"><input class="form-control form-control-sm" aria-label="Tag content" placeholder="content" x-model="m.content"></div>
-                        <div class="col-1 text-end"><button type="button" class="btn btn-sm btn-outline-danger" @click="removeMetaTag(i)" aria-label="Remove tag">×</button></div>
-                      </div>
-                    </template>
-                    <button type="button" class="btn btn-sm btn-outline-secondary" @click="addMetaTag()">Add tag</button>
-                  </div>
-
-                  <div class="panel p-3 mb-3">
-                    <div class="panel-h">Extra structured data (JSON-LD)</div>
-                    <div class="help small muted mb-2">Added alongside what the page already emits — a FAQPage or HowTo block for answer engines, a Product/Review schema, anything <a href="https://schema.org" target="_blank" rel="noopener">schema.org</a> defines. A JSON array of objects; leave as <code>[]</code> for none.</div>
-                    <textarea class="form-control mono" rows="8" spellcheck="false" x-codejar="{ mode: 'application/json', get: ldJsonText, set: (v) => (ldJsonText = v) }"></textarea>
-                  </div>
-                </div>
-              </div>
-
-              <div class="savebar" x-show="loaded">
-                <span class="ms-auto"></span>
-                <button class="btn btn-primary" type="button" :disabled="busy" @click="save()" x-text="isNew ? 'Create rule' : 'Save rule'"></button>
-              </div>
-            </section>
+            <section x-data="seoRuleEditor(v.id)"></section>
           </template>
 
         </div></template>
@@ -1761,672 +402,62 @@
 
     <!-- Themes -->
     <template x-if="route === 'themes'">
-      <section x-data="themesPage">
-        <div class="page-head"><h1>Themes</h1><p>A theme controls how the public site looks. Switching applies on every server within seconds.</p></div>
-        <div class="alert alert-danger" role="alert" x-show="error" x-text="error"></div>
-        <div class="panel">
-          <template x-for="t in themes" :key="t.id">
-            <div class="node" style="grid-template-columns: 1fr auto">
-              <div><strong x-text="t.name"></strong> <span class="tag" x-text="'v' + t.version"></span> <span class="tag ok" x-show="t.active">Live</span> <span class="tag" x-show="t.source === 'disk'">Built in</span>
-                <div class="muted small" x-text="t.description"></div><div class="muted small" x-show="t.author" x-text="'By ' + t.author"></div></div>
-              <div class="text-nowrap"><a class="btn btn-sm btn-outline-secondary" :href="'#/customize/' + t.id">Customize</a>
-                <a class="btn btn-sm btn-outline-secondary" :href="'#/theme-editor/' + t.id" x-text="t.source === 'db' && can('themes.edit') ? 'Edit files' : 'View files'"></a>
-                <button class="btn btn-sm btn-outline-secondary" x-show="can('themes.manage')" @click="duplicate(t)">Duplicate</button>
-                <a class="btn btn-sm btn-outline-secondary" :href="'/api/admin/themes/' + t.id + '/export'">Export .zip</a>
-                <button class="btn btn-sm btn-primary" x-show="!t.active && can('themes.manage')" @click="activate(t)">Make live</button>
-                <button class="btn btn-sm btn-outline-danger" x-show="!t.active && t.source === 'db' && can('themes.manage')" @click="remove(t)">Remove</button></div>
-            </div>
-          </template>
-        </div>
-        <div class="panel mt-3 p-3" x-show="can('themes.manage')">
-          <div class="fw-semibold mb-1">Install a theme</div>
-          <div class="muted small mb-2" x-text="'Upload a .zip (up to ' + maxZipMb + ' MB). It is checked before anything is saved: file types, paths, sizes and every template. ' + (allowJs ? 'Scripts are allowed.' : 'Themes with JavaScript are refused.')"></div>
-          <label class="btn btn-outline-secondary mb-0" :class="{disabled: busy}">Choose a .zip <input type="file" hidden accept=".zip,application/zip" @change="upload($event.target.files[0]); $event.target.value = ''"></label>
-          <span class="muted small ms-2" x-show="busy">Checking and installing…</span>
-        </div>
-      </section>
+      <section x-data="themesPage"></section>
     </template>
 
     <!-- Customize (Appearance → Customize): the theme's options and custom CSS, with a live preview -->
     <template x-if="route === 'customize'">
-      <section x-data="customizePage">
-        <div class="page-head d-flex justify-content-between align-items-end flex-wrap gap-2">
-          <div><h1>Customize</h1><p>Change the theme’s options and add your own CSS. The preview updates as you type; visitors see nothing until you save.</p></div>
-          <div class="d-flex gap-2 align-items-center">
-            <label class="small muted" for="cz-theme">Theme</label>
-            <select id="cz-theme" class="form-select" style="max-width:14rem" @change="open($event.target.value)"><template x-for="t in themes" :key="t.id"><option :value="t.id" :selected="t.id === id" x-text="t.name + (t.active ? ' (live)' : '')"></option></template></select>
-          </div>
-        </div>
-        <div class="alert alert-danger" role="alert" x-show="error" x-text="error"></div>
-        <div class="alert alert-info small" x-show="theme && !theme.active">This theme isn’t live. What you save here applies when it is made live under Appearance → Themes.</div>
-        <div class="row g-3" x-show="loaded">
-          <div class="col-lg-5">
-            <div class="panel">
-              <div class="panel-h">Options</div>
-              <div class="empty" x-show="!optionFields.length">This theme has no options of its own.</div>
-              <template x-for="f in optionFields" :key="f.key">
-                <div class="p-3 border-bottom">
-                  <label class="form-label fw-semibold mb-1" :for="'cz_' + f.key" x-text="f.label"></label>
-                  <template x-if="f.type === 'string'"><input :id="'cz_' + f.key" class="form-control" :class="{'is-invalid': errors[f.key]}" :value="values[f.key]" @input="set(f.key, $event.target.value)"></template>
-                  <template x-if="f.type === 'text'"><textarea :id="'cz_' + f.key" rows="3" class="form-control" :value="values[f.key]" @input="set(f.key, $event.target.value)"></textarea></template>
-                  <template x-if="f.type === 'number'"><input :id="'cz_' + f.key" type="number" class="form-control" style="max-width:10rem" :value="values[f.key]" :min="f.min" :max="f.max" @input="set(f.key, $event.target.value === '' ? '' : Number($event.target.value))"></template>
-                  <template x-if="f.type === 'boolean'"><div class="form-check form-switch"><input :id="'cz_' + f.key" type="checkbox" class="form-check-input" role="switch" :checked="values[f.key]" @change="set(f.key, $event.target.checked)"><label class="form-check-label muted" :for="'cz_' + f.key" x-text="values[f.key] ? 'On' : 'Off'"></label></div></template>
-                  <template x-if="f.type === 'select'"><select :id="'cz_' + f.key" class="form-select" @change="set(f.key, $event.target.value)"><template x-for="o in f.options" :key="o.value"><option :value="o.value" :selected="o.value === values[f.key]" x-text="o.label"></option></template></select></template>
-                  <div class="form-text" x-show="f.help" x-text="f.help"></div>
-                  <div class="invalid-feedback d-block" x-show="errors[f.key]" x-text="errors[f.key]"></div>
-                </div>
-              </template>
-            </div>
-            <div class="panel mt-3">
-              <div class="panel-h">Custom CSS <span class="muted small fw-normal">Added after the theme’s styles on every page</span></div>
-              <div class="p-3">
-                <textarea id="cz-css" class="form-control mono" rows="14" spellcheck="false" aria-label="Custom CSS" x-codejar="{ mode: 'css', get: values.custom_css, set: (v) => set('custom_css', v), placeholder: ':root { --accent: #c0392b; }\n.site-header { border-bottom: 3px solid var(--accent); }' }"></textarea>
-                <div class="invalid-feedback d-block" x-show="errors.custom_css" x-text="errors.custom_css"></div>
-                <div class="form-text">Tip: themes keep colours and spacing in CSS variables (<span class="mono">--accent</span>, <span class="mono">--ink</span>, <span class="mono">--bg</span>…), so changing one restyles the whole site. Fonts and icon sets: install them under System → Libraries.</div>
-              </div>
-            </div>
-            <div class="d-flex gap-2 mt-3 align-items-center" x-show="can('themes.customize')">
-              <button class="btn btn-primary" :disabled="saving || !dirty" @click="save()" x-text="saving ? 'Saving…' : 'Save changes'"></button>
-              <button class="btn btn-outline-secondary" :disabled="!dirty" @click="discard()">Discard</button>
-              <span class="muted small" x-show="dirty">Unsaved changes</span>
-            </div>
-          </div>
-          <div class="col-lg-7">
-            <div class="panel">
-              <div class="panel-h d-flex gap-2 align-items-center flex-wrap">
-                <span>Preview</span>
-                <input class="form-control form-control-sm mono" style="max-width:16rem" aria-label="Preview address" x-model="previewPath" @keydown.enter.prevent="refresh()">
-                <button type="button" class="btn btn-sm btn-outline-secondary" @click="refresh()">Show</button>
-                <span class="muted small" x-show="previewing">Rendering…</span>
-                <span class="text-danger small" x-show="previewError" x-text="previewError"></span>
-              </div>
-              <!-- allow-same-origin and nothing else: scripts, forms and popups stay off, but the frame keeps the site's origin, so
-                   theme/library/media files (served with Cross-Origin-Resource-Policy: same-origin) load. An empty sandbox gives
-                   the frame a "null" origin and the browser blocks every one of them, leaving the preview unstyled. -->
-              <iframe title="Theme preview" style="width:100%;height:75vh;border:0;border-top:1px solid var(--line)" sandbox="allow-same-origin" :srcdoc="previewHtml"></iframe>
-            </div>
-          </div>
-        </div>
-      </section>
+      <section x-data="customizePage"></section>
     </template>
 
     <!-- Theme editor (Appearance → Theme editor): the files of an installed theme; built-in themes are read-only -->
     <template x-if="route === 'theme-editor'">
-      <section x-data="themeEditorPage">
-        <div class="page-head d-flex justify-content-between align-items-end flex-wrap gap-2">
-          <div><h1>Theme editor</h1><p>Edit a theme’s layouts, components, styles and wording. Every save is checked like an upload, so a mistake is refused instead of reaching visitors.</p></div>
-          <div class="d-flex gap-2 align-items-center flex-wrap">
-            <label class="small muted" for="te-theme">Theme</label>
-            <select id="te-theme" class="form-select" style="max-width:14rem" @change="open($event.target.value)"><template x-for="t in themes" :key="t.id"><option :value="t.id" :selected="t.id === id" x-text="t.name + (t.source === 'disk' ? ' (built in)' : '')"></option></template></select>
-            <a class="btn btn-outline-secondary" :href="'/api/admin/themes/' + id + '/export'" x-show="id">Export .zip</a>
-          </div>
-        </div>
-        <div class="alert alert-danger" role="alert" x-show="error" x-text="error"></div>
-        <div class="alert alert-warning d-flex gap-2 align-items-center flex-wrap" x-show="loaded && !editable">
-          <span>Built-in themes ship read-only with the code, so an edit would be lost on the next update. Duplicate it to get a copy you can edit.</span>
-          <button class="btn btn-sm btn-primary ms-auto" x-show="can('themes.manage')" @click="duplicate()">Duplicate this theme</button>
-        </div>
-        <div class="row g-3" x-show="loaded">
-          <div class="col-lg-3">
-            <div class="panel">
-              <div class="panel-h">Files</div>
-              <div class="te-files">
-                <template x-for="f in files" :key="f.path">
-                  <button type="button" class="te-file" :class="{active: f.path === path}" @click="select(f.path)"><span class="mono small" x-text="f.path"></span><span class="muted small" x-text="bytes(f.size)"></span></button>
-                </template>
-              </div>
-              <div class="p-2 border-top" x-show="editable && can('themes.edit')">
-                <form class="d-flex gap-1" @submit.prevent="create()"><input class="form-control form-control-sm mono" aria-label="New file path" placeholder="components/banner.html" x-model="newPath"><button class="btn btn-sm btn-outline-secondary">Add</button></form>
-                <label class="btn btn-sm btn-outline-secondary w-100 mt-2 mb-0">Upload image or font to assets/<input type="file" hidden accept=".png,.jpg,.jpeg,.gif,.webp,.avif,.ico,.svg,.woff,.woff2,.ttf" @change="upload($event.target.files[0]); $event.target.value = ''"></label>
-              </div>
-            </div>
-          </div>
-          <div class="col-lg-9">
-            <div class="panel" x-show="path">
-              <div class="panel-h d-flex gap-2 align-items-center flex-wrap"><span class="mono" x-text="path"></span><span class="tag warn" x-show="dirty">Unsaved</span>
-                <span class="ms-auto"></span>
-                <button class="btn btn-sm btn-outline-danger" x-show="editable && can('themes.edit') && !required" @click="del()">Delete file</button>
-                <button class="btn btn-sm btn-primary" x-show="editable && can('themes.edit') && file && file.text" :disabled="saving || !dirty" @click="save()" x-text="saving ? 'Checking and saving…' : 'Save file'"></button>
-              </div>
-              <template x-if="file && file.text"><textarea id="te-content" class="form-control mono border-0 rounded-0" rows="28" spellcheck="false" aria-label="File content" x-codejar="{ mode: /\.css$/.test(path) ? 'css' : /\.js$/.test(path) ? 'javascript' : /\.json$/.test(path) ? 'application/json' : 'htmlmixed', get: content, set: (v) => (content = v), readOnly: !editable || !can('themes.edit') }"></textarea></template>
-              <div class="p-3 muted" x-show="file && !file.text">A binary file (<span x-text="bytes(file?.size || 0)"></span>). Reach it from a template with <span class="mono" x-text="`{{ '${path.replace(/^assets\//, '')}' | asset_url }}`"></span>.</div>
-            </div>
-            <div class="panel p-4 muted" x-show="!path">Choose a file on the left.</div>
-          </div>
-        </div>
-      </section>
+      <section x-data="themeEditorPage"></section>
     </template>
 
     <!-- Menus -->
     <template x-if="route === 'menus'">
-      <section x-data="menusPage">
-        <div class="page-head"><h1>Menus</h1><p>Navigation your theme shows, like the main menu and the footer. Pages you link stay correct if you rename them.</p></div>
-        <div class="alert alert-danger" role="alert" x-show="error" x-text="error"></div>
-        <div class="d-flex gap-2 flex-wrap align-items-center mb-3">
-          <template x-for="m in menus" :key="m.name"><button type="button" class="btn btn-sm" :class="name === m.name ? 'btn-primary' : 'btn-outline-secondary'" @click="select(m.name)" x-text="m.title || m.name"></button></template>
-          <form class="d-flex gap-1" @submit.prevent="create()"><input class="form-control form-control-sm" style="width:9rem" placeholder="New menu name" aria-label="New menu name" x-model="newName"><button class="btn btn-sm btn-outline-secondary">Add menu</button></form>
-        </div>
-        <div class="panel" x-show="name">
-          <div class="panel-h">Items in “<span x-text="name"></span>” <span class="muted small fw-normal">Themes reach it as <span class="mono" x-text="'menus.' + name"></span></span></div>
-          <div class="empty" x-show="!items.length">No items yet.</div>
-          <template x-for="row in flat" :key="row.item._id">
-            <div class="frow" :style="'padding-left:' + (1.25 + row.depth * 1.5) + 'rem'" style="grid-template-columns: 1fr">
-              <div class="d-flex gap-2 flex-wrap align-items-center">
-                <select class="form-select" style="width:8rem" aria-label="Link to" x-model="row.item.kind"><option value="entry" x-show="pages.length">A page</option><option value="url">An address</option></select>
-                <select class="form-select" style="max-width:16rem" aria-label="Page" x-show="row.item.kind === 'entry'" x-model.number="row.item.entryId"><template x-for="p in pages" :key="p.id"><option :value="p.id" :selected="p.id === row.item.entryId" x-text="'/' + p.path"></option></template></select>
-                <input class="form-control" style="max-width:16rem" aria-label="Address" placeholder="/about or https://…" x-show="row.item.kind === 'url'" x-model="row.item.url">
-                <input class="form-control" style="max-width:14rem" aria-label="Label" placeholder="Label" x-model="row.item.label">
-                <button type="button" class="btn btn-sm btn-link" @click="move(row, -1)" aria-label="Move up"><i class="bi bi-arrow-up"></i></button>
-                <button type="button" class="btn btn-sm btn-link" @click="move(row, 1)" aria-label="Move down"><i class="bi bi-arrow-down"></i></button>
-                <button type="button" class="btn btn-sm btn-link" x-show="row.depth < 2" @click="add(row.item.children)">Add sub-item</button>
-                <button type="button" class="btn btn-sm btn-link text-danger" @click="remove(row)" aria-label="Remove item"><i class="bi bi-x-lg"></i></button>
-              </div>
-            </div>
-          </template>
-          <div class="p-3 d-flex gap-2"><button type="button" class="btn btn-outline-secondary" @click="add()">Add item</button><span class="ms-auto"></span><button type="button" class="btn btn-outline-danger" @click="del()">Delete menu</button><button type="button" class="btn btn-primary" :disabled="busy" @click="save()" x-text="busy ? 'Saving…' : 'Save menu'"></button></div>
-        </div>
-      </section>
+      <section x-data="menusPage"></section>
     </template>
 
     <!-- Translations -->
     <template x-if="route === 'locales'">
-      <section x-data="localesPage">
-        <div class="page-head d-flex justify-content-between align-items-end flex-wrap gap-2">
-          <div><h1>Translations</h1><p>The words your site and its theme show to visitors, in each language. What you type here is your own wording: it wins over the theme, and switching themes keeps it.</p></div>
-          <div class="d-flex gap-2 flex-wrap">
-            <a class="btn btn-outline-secondary" href="/api/admin/site/locales/export">Export .zip</a>
-            <label class="btn btn-outline-secondary mb-0" x-show="can('locales.write')" :class="{disabled: busy}">Import .zip<input type="file" hidden accept=".zip,application/zip" @change="importZip($event.target.files[0]); $event.target.value = ''"></label>
-          </div>
-        </div>
-        <div class="panel p-3 mb-3 d-flex gap-2 flex-wrap align-items-center">
-          <label class="me-1" for="lang">Language</label>
-          <select id="lang" class="form-select" style="max-width:16rem" :value="code" @change="open($event.target.value)"><template x-for="l in languages" :key="l.code"><option :value="l.code" :selected="l.code === code" x-text="l.name + ' (' + l.code + ')'"></option></template></select>
-          <span class="mx-2 muted">or</span>
-          <input class="form-control" style="max-width:8rem" aria-label="New language code" placeholder="fr" x-model="newCode" @keydown.enter.prevent="addLanguage()">
-          <button class="btn btn-outline-secondary" type="button" @click="addLanguage()">Add language</button>
-          <div class="text-danger small w-100" role="alert" x-show="error" x-text="error"></div>
-        </div>
-        <div class="panel">
-          <div class="panel-h d-flex gap-3 align-items-center flex-wrap">
-            <span x-text="name || 'Translations'"></span>
-            <input class="form-control form-control-sm" style="max-width:14rem" aria-label="Filter" placeholder="Filter" x-model="filter">
-            <div class="form-check mb-0"><input id="only-missing" class="form-check-input" type="checkbox" x-model="onlyMissing"><label class="form-check-label small" for="only-missing">Only missing (<span x-text="missing"></span>)</label></div>
-          </div>
-          <div class="empty" x-show="loaded && !entries.length">This site has no translatable text yet.</div>
-          <table class="table" x-show="entries.length"><thead><tr><th>Text</th><th>Default language</th><th>Theme</th><th>Site default</th><th>Your wording</th></tr></thead><tbody>
-            <template x-for="e in shown" :key="e.key"><tr>
-              <td class="mono small" x-text="e.key"></td>
-              <td class="muted" x-text="e.reference ?? '–'"></td>
-              <td class="muted" x-text="e.theme ?? '–'"></td>
-              <td class="muted" x-text="e.shipped ?? '–'"></td>
-              <td><input class="form-control form-control-sm" :aria-label="'Your wording for ' + e.key" :placeholder="e.shipped ?? e.theme ?? e.reference ?? ''" x-model="e.edit"></td>
-            </tr></template></tbody></table>
-          <div class="p-3 d-flex gap-2 align-items-center" x-show="can('locales.write')">
-            <button class="btn btn-primary" :disabled="busy || !dirty" @click="save()">Save translations</button>
-            <span class="muted small" x-show="dirty" x-text="dirty + ' changed'"></span>
-          </div>
-        </div>
-      </section>
+      <section x-data="localesPage"></section>
     </template>
 
     <!-- Redirects -->
     <template x-if="route === 'redirects'">
-      <section x-data="redirectsPage">
-        <div class="page-head"><h1>Redirects</h1><p>Send visitors from an old address to a new one. Use a permanent (301) redirect when a page has moved for good.</p></div>
-        <form class="panel p-3 mb-3 d-flex gap-2 flex-wrap align-items-start" @submit.prevent="add()">
-          <input class="form-control" style="max-width:16rem" aria-label="Old address" placeholder="/old-page" required x-model="form.from">
-          <span class="align-self-center">→</span>
-          <input class="form-control" style="max-width:20rem" aria-label="New address" placeholder="/new-page or https://…" required x-model="form.to">
-          <select class="form-select" style="max-width:12rem" aria-label="Type" x-model="form.status"><option value="301">Permanent (301)</option><option value="302">Temporary (302)</option><option value="308">Permanent, keep method (308)</option><option value="307">Temporary, keep method (307)</option></select>
-          <button class="btn btn-primary">Add redirect</button>
-          <div class="text-danger small w-100" role="alert" x-show="error" x-text="error"></div>
-        </form>
-        <div class="panel">
-          <div class="empty" x-show="!redirects.length">No redirects yet.</div>
-          <table class="table" x-show="redirects.length"><thead><tr><th>From</th><th>To</th><th>Type</th><th></th></tr></thead><tbody>
-            <template x-for="r in redirects" :key="r.id"><tr><td class="mono" x-text="r.from"></td><td class="mono" x-text="r.to"></td><td x-text="r.status"></td><td class="text-end"><button class="btn btn-sm btn-outline-danger" @click="remove(r)">Remove</button></td></tr></template></tbody></table>
-        </div>
-      </section>
+      <section x-data="redirectsPage"></section>
     </template>
 
     <!-- Contact messages -->
     <template x-if="route === 'messages'">
-      <section x-data="messagesPage">
-        <div class="page-head"><h1>Messages</h1><p>Sent through the contact form on your site. They are also emailed when email is set up.</p></div>
-        <div class="panel">
-          <div class="empty" x-show="loaded && !messages.length">No messages yet.</div>
-          <template x-for="m in messages" :key="m.id">
-            <div class="frow" style="grid-template-columns: 1fr auto">
-              <div><strong x-text="m.name"></strong> <a :href="'mailto:' + m.email" x-text="m.email"></a> <span class="muted small" x-text="ago(m.at)"></span> <span class="tag" x-show="!m.emailed">Not emailed</span>
-                <div class="pre" x-text="m.message"></div><div class="muted small" x-show="m.page" x-text="'From ' + m.page"></div></div>
-              <div><button class="btn btn-sm btn-outline-danger" @click="remove(m)">Delete</button></div>
-            </div>
-          </template>
-        </div>
-      </section>
+      <section x-data="messagesPage"></section>
     </template>
 
     <!-- Database (System → Database, D-047) -->
     <template x-if="route === 'dbms'">
-      <section x-data="dbmsPage">
-        <div class="page-head"><h1>Database</h1><p>Browse and edit tables directly. The SQL console can run anything the database allows — no undo.</p></div>
-        <div class="alert alert-danger" role="alert" x-show="error" x-text="error"></div>
-
-        <div class="btn-group mb-3" role="group" aria-label="Database view">
-          <button type="button" class="btn btn-outline-secondary" :class="{active: tab === 'tables'}" @click="tab = 'tables'">Tables</button>
-          <button type="button" class="btn btn-outline-secondary" :class="{active: tab === 'table'}" x-show="selectedTable" @click="tab = 'table'" x-text="selectedTable"></button>
-          <button type="button" class="btn btn-outline-secondary" :class="{active: tab === 'console'}" x-show="can('dbms.query')" @click="openConsole()">SQL console</button>
-        </div>
-
-        <template x-if="tab === 'tables'">
-          <div>
-            <div class="d-flex justify-content-end mb-2" x-show="can('dbms.write')">
-              <button type="button" class="btn btn-outline-secondary btn-sm" @click="showCreateForm = !showCreateForm" x-text="showCreateForm ? 'Cancel' : 'New table'"></button>
-            </div>
-            <div class="panel p-3 mb-3" x-show="showCreateForm">
-              <div class="row g-2">
-                <div class="col-md-6"><label class="form-label" for="nt-name">Table name</label><input id="nt-name" class="form-control mono" x-model="newTable.name"></div>
-              </div>
-              <div class="d-flex justify-content-between align-items-center mt-3 mb-2"><label class="form-label mb-0">Columns</label><button type="button" class="btn btn-sm btn-outline-secondary" @click="addColumn()">Add column</button></div>
-              <template x-for="(c, i) in newTable.columns" :key="i">
-                <div class="row g-2 mb-2 align-items-center">
-                  <div class="col-3"><input class="form-control form-control-sm mono" aria-label="Column name" placeholder="name" x-model="c.name"></div>
-                  <div class="col-2"><select class="form-select form-select-sm" aria-label="Column type" x-model="c.type"><option value="string">Short text</option><option value="text">Long text</option><option value="integer">Whole number</option><option value="bigInteger">Big whole number</option><option value="boolean">On/off</option><option value="float">Decimal</option><option value="json">JSON (text)</option></select></div>
-                  <div class="col-2 form-check"><input class="form-check-input" type="checkbox" :id="'pk-' + i" x-model="c.primaryKey"><label class="form-check-label small" :for="'pk-' + i">Primary key</label></div>
-                  <div class="col-2 form-check" x-show="c.primaryKey"><input class="form-check-input" type="checkbox" :id="'ai-' + i" x-model="c.autoIncrement"><label class="form-check-label small" :for="'ai-' + i">Auto-increment</label></div>
-                  <div class="col-2"><input class="form-control form-control-sm" aria-label="Default value" placeholder="Default" x-model="c.default" x-show="!(c.primaryKey && c.autoIncrement)"></div>
-                  <div class="col-1 text-end"><button type="button" class="btn btn-sm btn-outline-danger" @click="removeColumn(i)" aria-label="Remove column">×</button></div>
-                </div>
-              </template>
-              <div class="help small muted mt-1">No date/time type on purpose — this platform stores every timestamp as milliseconds in a big whole number.</div>
-              <button type="button" class="btn btn-primary mt-2" :disabled="busy || !newTable.name || !newTable.columns.length" @click="createTable()">Create table</button>
-            </div>
-
-            <div class="panel">
-              <div class="empty" x-show="loaded && !tables.length">No tables.</div>
-              <table class="table" x-show="tables.length"><thead><tr><th>Name</th><th></th><th></th></tr></thead><tbody>
-                <template x-for="t in tables" :key="t.name"><tr>
-                  <td class="mono"><a href="#" @click.prevent="openTable(t.name)" x-text="t.name"></a></td>
-                  <td class="muted small" x-text="t.view ? 'View' : ''"></td>
-                  <td class="text-end"><button class="btn btn-sm btn-outline-danger" type="button" x-show="can('dbms.write') && !t.view" @click="dropTable(t.name)">Drop</button></td>
-                </tr></template>
-              </tbody></table>
-            </div>
-          </div>
-        </template>
-
-        <template x-if="tab === 'table' && tableInfo">
-          <div>
-            <div class="panel mb-3">
-              <div class="panel-h">Structure</div>
-              <table class="table mb-0"><thead><tr><th>Column</th><th>Type</th><th>Nullable</th><th>Default</th><th></th></tr></thead><tbody>
-                <template x-for="c in tableInfo.columns" :key="c.name"><tr>
-                  <td class="mono small" x-text="c.name"></td>
-                  <td class="muted small" x-text="c.type"></td>
-                  <td class="muted small" x-text="c.nullable ? 'Yes' : 'No'"></td>
-                  <td class="muted small" x-text="c.default ?? '–'"></td>
-                  <td><span class="tag ok" x-show="c.primaryKey">Primary key</span> <span class="tag" x-show="c.autoIncrement">Auto-increment</span></td>
-                </tr></template>
-              </tbody></table>
-              <div class="p-2 small muted" x-show="tableInfo.indexes.length">Indexes: <template x-for="idx in tableInfo.indexes" :key="idx.name"><span class="mono me-3" x-text="idx.name + ' (' + idx.columns.join(', ') + (idx.unique ? ', unique' : '') + ')'"></span></template></div>
-            </div>
-
-            <div class="d-flex justify-content-between align-items-center mb-2">
-              <span class="muted small" x-text="rowsTotal + ' record' + (rowsTotal === 1 ? '' : 's')"></span>
-              <button class="btn btn-sm btn-primary" type="button" x-show="can('dbms.write') && !tableInfo.sensitive" @click="startNewRow()">Add record</button>
-            </div>
-            <div class="alert alert-warning" role="alert" x-show="tableInfo.sensitive">This table is only editable through the SQL console.</div>
-
-            <div class="panel p-3 mb-3" x-show="editingRow">
-              <div class="panel-h" x-text="editingRow === 'new' ? 'New record' : 'Edit record'"></div>
-              <template x-for="c in (tableInfo?.columns || [])" :key="c.name">
-                <div class="mb-2" x-show="!(editingRow !== 'new' && c.primaryKey)">
-                  <label class="form-label small" x-text="c.name"></label>
-                  <template x-if="/bool/i.test(c.type)"><div class="form-check"><input class="form-check-input" type="checkbox" x-model="editForm[c.name]"></div></template>
-                  <template x-if="!/bool/i.test(c.type)"><input class="form-control form-control-sm" x-model="editForm[c.name]"></template>
-                </div>
-              </template>
-              <div class="d-flex gap-2 mt-2">
-                <button class="btn btn-primary btn-sm" type="button" :disabled="busy" @click="saveRow()">Save</button>
-                <button class="btn btn-outline-secondary btn-sm" type="button" @click="cancelEdit()">Cancel</button>
-              </div>
-            </div>
-
-            <div class="panel">
-              <div class="empty" x-show="!rows.length">No records.</div>
-              <div class="table-responsive" x-show="rows.length">
-                <table class="table mb-0"><thead><tr>
-                  <template x-for="c in tableInfo.columns" :key="c.name"><th><a href="#" @click.prevent="sortBy(c.name)" x-text="c.name + (sortCol === c.name ? (sortDir === 'asc' ? ' ↑' : ' ↓') : '')"></a></th></template>
-                  <th></th>
-                </tr></thead><tbody>
-                  <template x-for="(row, i) in rows" :key="i"><tr>
-                    <template x-for="c in tableInfo.columns" :key="c.name"><td class="small" x-text="show(row[c.name])"></td></template>
-                    <td class="text-end text-nowrap">
-                      <button class="btn btn-sm btn-outline-secondary" type="button" x-show="can('dbms.write') && !tableInfo.sensitive" @click="startEditRow(row)">Edit</button>
-                      <button class="btn btn-sm btn-outline-danger" type="button" x-show="can('dbms.write') && !tableInfo.sensitive" @click="deleteRow(row)">Delete</button>
-                    </td>
-                  </tr></template>
-                </tbody></table>
-              </div>
-              <div class="d-flex justify-content-between align-items-center p-2" x-show="rowsPages > 1">
-                <button class="btn btn-sm btn-outline-secondary" type="button" :disabled="rowsPage <= 1" @click="changePage(rowsPage - 1)">Newer</button>
-                <span class="muted small" x-text="'Page ' + rowsPage + ' of ' + rowsPages"></span>
-                <button class="btn btn-sm btn-outline-secondary" type="button" :disabled="rowsPage >= rowsPages" @click="changePage(rowsPage + 1)">Older</button>
-              </div>
-            </div>
-          </div>
-        </template>
-
-        <template x-if="tab === 'console'">
-          <div class="row g-3">
-            <div class="col-lg-8">
-              <label class="form-label" for="dbms-sql">SQL</label>
-              <textarea id="dbms-sql" class="form-control mono" rows="8" spellcheck="false" x-codejar="{ mode: 'text/x-sql', get: sql, set: (v) => (sql = v) }"></textarea>
-              <div class="d-flex gap-2 align-items-center mt-2">
-                <button class="btn btn-primary" type="button" :disabled="consoleBusy || !sql.trim()" @click="runQuery()">Run</button>
-                <input class="form-control form-control-sm" style="max-width:16rem" aria-label="Name this query to save it" placeholder="Save as…" x-model="newQueryName" @keydown.enter.prevent="saveCurrentQuery()">
-                <button class="btn btn-outline-secondary btn-sm" type="button" @click="saveCurrentQuery()">Save query</button>
-              </div>
-              <div class="alert alert-danger mt-2" role="alert" x-show="consoleError" x-text="consoleError"></div>
-              <template x-if="consoleResult">
-                <div class="panel mt-3">
-                  <div class="panel-h" x-text="consoleResult.rows.length ? consoleResult.rowCount + ' row(s)' : consoleResult.rowCount + ' row(s) affected'"></div>
-                  <div class="table-responsive" x-show="consoleResult.rows.length">
-                    <table class="table mb-0"><thead><tr><template x-for="k in Object.keys(consoleResult.rows[0] || {})" :key="k"><th x-text="k"></th></template></tr></thead><tbody>
-                      <template x-for="(row, i) in consoleResult.rows" :key="i"><tr><template x-for="k in Object.keys(consoleResult.rows[0] || {})" :key="k"><td class="small" x-text="show(row[k])"></td></template></tr></template>
-                    </tbody></table>
-                  </div>
-                </div>
-              </template>
-            </div>
-            <div class="col-lg-4">
-              <div class="panel">
-                <div class="panel-h">Saved queries</div>
-                <div class="empty small" x-show="!savedQueries.length">None yet.</div>
-                <template x-for="q in savedQueries" :key="q.id">
-                  <div class="frow" style="grid-template-columns: 1fr auto">
-                    <div><a href="#" @click.prevent="loadSavedQuery(q)" x-text="q.name"></a></div>
-                    <div><button class="btn btn-sm btn-outline-danger" type="button" @click="deleteSavedQuery(q)" aria-label="Delete saved query">×</button></div>
-                  </div>
-                </template>
-              </div>
-            </div>
-          </div>
-        </template>
-      </section>
+      <section x-data="dbmsPage"></section>
     </template>
 
     <!-- Sitemap (System → Sitemap, D-053) -->
     <template x-if="route === 'sitemap'">
-      <section x-data="sitemapPage">
-        <div class="page-head d-flex justify-content-between align-items-end flex-wrap gap-2">
-          <div><h1>Sitemap</h1><p>The list of addresses search engines read at /sitemap.xml. It is built from your site and content, and rebuilt whenever they change.</p></div>
-          <div class="d-flex gap-2 flex-wrap">
-            <a class="btn btn-outline-secondary" :href="sum.publicUrl" target="_blank" rel="noopener" x-show="sum.enabled">Open sitemap.xml</a>
-            <a class="btn btn-outline-secondary" href="/api/admin/sitemap/download">Download</a>
-            <button class="btn btn-outline-secondary" x-show="can('sitemap.manage')" :disabled="busy" @click="rebuild()">Rebuild now</button>
-          </div>
-        </div>
-        <div class="alert alert-danger" role="alert" x-show="error" x-text="error"></div>
-        <div class="alert alert-warning" x-show="sum.noindex">This site asks search engines not to index it (Settings → Website), so /sitemap.xml isn’t published.</div>
-        <div class="row g-3 mb-3" x-show="loaded">
-          <div class="col-6 col-md-3"><div class="panel p-3"><div class="muted small">Addresses</div><div class="fs-3 fw-semibold" id="sm-total" x-text="sum.total"></div></div></div>
-          <div class="col-6 col-md-3"><div class="panel p-3"><div class="muted small">Files</div><div class="fs-3 fw-semibold" x-text="sum.files"></div><div class="muted small" x-text="sum.files > 1 ? 'An index of ' + sum.files + ' parts' : 'One file'"></div></div></div>
-          <div class="col-6 col-md-3"><div class="panel p-3"><div class="muted small">With images</div><div class="fs-3 fw-semibold" x-text="sum.withImages"></div></div></div>
-          <div class="col-6 col-md-3"><div class="panel p-3"><div class="muted small">Built</div><div class="fs-5 fw-semibold" x-text="sum.generatedAt ? ago(sum.generatedAt) : '–'"></div><div class="muted small" x-show="sum.skipped" x-text="sum.skipped + ' left out by rules'"></div></div></div>
-        </div>
-        <div class="row g-3" x-show="loaded">
-          <div class="col-lg-5">
-            <div class="panel">
-              <div class="panel-h">What it lists</div>
-              <div class="p-3">
-                <div class="form-check form-switch mb-2"><input id="sm-enabled" class="form-check-input" type="checkbox" role="switch" x-model="enabled" :disabled="!can('sitemap.manage')"><label class="form-check-label fw-semibold" for="sm-enabled">Publish sitemap.xml</label></div>
-                <template x-for="o in toggles" :key="o.key">
-                  <div class="form-check mb-1"><input :id="'sm-' + o.key" class="form-check-input" type="checkbox" x-model="v[o.key]" :disabled="!can('sitemap.manage')"><label class="form-check-label" :for="'sm-' + o.key" x-text="o.label"></label></div>
-                </template>
-                <div class="mt-3" x-show="types.length">
-                  <div class="small fw-semibold mb-1">Content types to list</div>
-                  <template x-for="t in types" :key="t.id">
-                    <div class="form-check form-check-inline"><input :id="'sm-type-' + t.id" class="form-check-input" type="checkbox" :checked="!v.exclude_types.includes(t.id)" :disabled="!can('sitemap.manage')" @change="toggleType(t.id, $event.target.checked)"><label class="form-check-label" :for="'sm-type-' + t.id" x-text="t.plural || t.label || t.id"></label></div>
-                  </template>
-                </div>
-                <div class="row g-2 mt-2">
-                  <div class="col-6"><label class="form-label small" for="sm-freq">How often pages change</label><select id="sm-freq" class="form-select" x-model="v.default_changefreq" :disabled="!can('sitemap.manage')"><option value="">Don’t say</option><template x-for="f in freqs" :key="f"><option :value="f" x-text="f"></option></template></select></div>
-                  <div class="col-6"><label class="form-label small" for="sm-prio">Priority</label><select id="sm-prio" class="form-select" x-model="v.default_priority" :disabled="!can('sitemap.manage')"><option value="">Don’t say</option><template x-for="p in prios" :key="p"><option :value="p" x-text="p"></option></template></select></div>
-                  <div class="col-6"><label class="form-label small" for="sm-per">Addresses per file</label><input id="sm-per" type="number" min="100" max="50000" class="form-control" x-model.number="v.per_file" :disabled="!can('sitemap.manage')"></div>
-                </div>
-                <div class="form-text">Google ignores “how often” and “priority”; other search engines may read them.</div>
-              </div>
-            </div>
-            <div class="panel mt-3">
-              <div class="panel-h">Rules <span class="muted small fw-normal">The first rule that matches an address wins. * matches one part of the address, ** any number.</span></div>
-              <div class="empty" x-show="!v.rules.length">No rules: every address is listed with the defaults.</div>
-              <template x-for="(r, i) in v.rules" :key="i">
-                <div class="p-2 border-bottom d-flex gap-1 flex-wrap align-items-center">
-                  <input class="form-control form-control-sm mono" style="max-width:11rem" aria-label="Address pattern" placeholder="/blog/**" x-model="r.pattern" :disabled="!can('sitemap.manage')">
-                  <select class="form-select form-select-sm" style="max-width:7.5rem" aria-label="What to do" :value="r.exclude ? 'exclude' : 'list'" @change="r.exclude = $event.target.value === 'exclude'" :disabled="!can('sitemap.manage')"><option value="list">List</option><option value="exclude">Leave out</option></select>
-                  <select class="form-select form-select-sm" style="max-width:7.5rem" aria-label="How often it changes" x-show="!r.exclude" x-model="r.changefreq" :disabled="!can('sitemap.manage')"><option value="">Default</option><template x-for="f in freqs" :key="f"><option :value="f" x-text="f"></option></template></select>
-                  <select class="form-select form-select-sm" style="max-width:6rem" aria-label="Priority" x-show="!r.exclude" x-model="r.priority" :disabled="!can('sitemap.manage')"><option value="">Default</option><template x-for="p in prios" :key="p"><option :value="p" x-text="p"></option></template></select>
-                  <button type="button" class="btn btn-sm btn-link text-danger" x-show="can('sitemap.manage')" @click="v.rules.splice(i, 1)" aria-label="Remove rule"><i class="bi bi-x-lg"></i></button>
-                </div>
-              </template>
-              <div class="p-2" x-show="can('sitemap.manage')"><button type="button" class="btn btn-sm btn-outline-secondary" @click="v.rules.push({pattern: '', exclude: false, changefreq: '', priority: ''})">Add rule</button></div>
-            </div>
-            <div class="panel mt-3">
-              <div class="panel-h">Extra addresses</div>
-              <div class="p-3"><textarea id="sm-extra" rows="3" class="form-control mono" placeholder="/landing/spring&#10;/downloads" aria-label="Extra addresses, one per line" :value="v.extra_urls.join('\n')" @input="v.extra_urls = $event.target.value.split('\n').map((x) => x.trim()).filter(Boolean)" :disabled="!can('sitemap.manage')"></textarea><div class="form-text">Addresses on this site that the sitemap wouldn’t find on its own, one per line.</div></div>
-            </div>
-            <div class="d-flex gap-2 mt-3 align-items-center" x-show="can('sitemap.manage')">
-              <button class="btn btn-primary" :disabled="busy" @click="save()" x-text="busy ? 'Saving…' : 'Save changes'"></button>
-            </div>
-          </div>
-          <div class="col-lg-7">
-            <div class="panel">
-              <div class="panel-h d-flex gap-2 align-items-center flex-wrap"><span>Addresses</span>
-                <template x-for="(n, src) in sum.bySource" :key="src"><span class="tag" x-text="label(src) + ': ' + n"></span></template>
-                <input class="form-control form-control-sm ms-auto" style="max-width:12rem" aria-label="Filter addresses" placeholder="Filter" x-model="q" @input.debounce.300ms="load(0)">
-              </div>
-              <div class="empty" x-show="!sum.urls?.length">Nothing listed<span x-show="q"> matches that filter</span>.</div>
-              <table class="table table-sm" x-show="sum.urls?.length"><thead><tr><th>Address</th><th>From</th><th>Changed</th><th>Hints</th></tr></thead><tbody>
-                <template x-for="u in sum.urls" :key="u.path"><tr>
-                  <td class="mono small"><a :href="u.loc" target="_blank" rel="noopener" x-text="u.path"></a> <i class="bi bi-image muted" x-show="u.image" title="Has an image"></i></td>
-                  <td class="small muted" x-text="label(u.source)"></td>
-                  <td class="small muted" x-text="u.lastmod ? new Date(u.lastmod).toLocaleDateString() : '–'"></td>
-                  <td class="small muted" x-text="[u.changefreq, u.priority !== null ? u.priority.toFixed(1) : ''].filter(Boolean).join(' · ') || '–'"></td>
-                </tr></template></tbody></table>
-              <div class="p-2 d-flex gap-2 align-items-center" x-show="sum.matching > 100">
-                <button class="btn btn-sm btn-outline-secondary" :disabled="offset === 0" @click="load(Math.max(0, offset - 100))">Previous</button>
-                <span class="muted small" x-text="(offset + 1) + '–' + Math.min(offset + 100, sum.matching) + ' of ' + sum.matching"></span>
-                <button class="btn btn-sm btn-outline-secondary" :disabled="offset + 100 >= sum.matching" @click="load(offset + 100)">Next</button>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
+      <section x-data="sitemapPage"></section>
     </template>
 
     <!-- Libraries (System → Libraries, D-054) -->
     <template x-if="route === 'libraries'">
-      <section x-data="librariesPage">
-        <div class="page-head d-flex justify-content-between align-items-end flex-wrap gap-2">
-          <div><h1>Libraries</h1><p>Add npm packages to your site — icon sets, fonts, CSS frameworks. Each server keeps its own copy, checked against the package’s published hash.</p></div>
-          <div class="d-flex gap-2 flex-wrap">
-            <a class="btn btn-outline-secondary" href="/api/admin/libraries/export">Export list</a>
-            <label class="btn btn-outline-secondary mb-0" x-show="can('libraries.manage')" :class="{disabled: busy}">Import list<input type="file" hidden accept=".json,application/json" @change="importList($event.target.files[0]); $event.target.value = ''"></label>
-          </div>
-        </div>
-        <div class="alert alert-danger" role="alert" x-show="error" x-text="error"></div>
-        <div class="alert alert-info small" x-show="loaded && !allowScripts">Library JavaScript is off, so only stylesheets, fonts and images are served. To use a package’s scripts, turn on “Let libraries add JavaScript” under Settings → Libraries.</div>
-        <div class="alert alert-success small" x-show="report" x-text="report"></div>
-        <div class="panel mb-3 p-3" x-show="can('libraries.manage')">
-          <div class="fw-semibold mb-2">Add a package</div>
-          <form class="d-flex gap-2 flex-wrap align-items-center" @submit.prevent="search()">
-            <input id="lib-q" class="form-control" style="max-width:18rem" aria-label="Search packages" placeholder="Search npm, e.g. font awesome" x-model="q">
-            <button class="btn btn-outline-secondary" :disabled="busy">Search</button>
-            <span class="mx-1 muted">or</span>
-            <input id="lib-name" class="form-control mono" style="max-width:16rem" aria-label="Package name" placeholder="@fortawesome/fontawesome-free" x-model="name">
-            <input id="lib-version" class="form-control mono" style="max-width:7rem" aria-label="Version" placeholder="latest" x-model="version">
-            <button type="button" class="btn btn-primary" :disabled="busy || !name" @click="install(name, version || 'latest')" x-text="busy ? 'Installing…' : 'Install'"></button>
-            <div class="form-check ms-2"><input id="lib-autoload" class="form-check-input" type="checkbox" x-model="autoload"><label class="form-check-label" for="lib-autoload">Load on every page</label></div>
-          </form>
-          <table class="table table-sm mt-3 mb-0" x-show="results.length"><tbody>
-            <template x-for="p in results" :key="p.name"><tr>
-              <td><span class="mono fw-semibold" x-text="p.name"></span> <span class="muted small" x-text="p.version"></span><div class="muted small" x-text="p.description"></div></td>
-              <td class="text-end text-nowrap"><span class="tag ok" x-show="p.installed" x-text="'Installed ' + p.installed"></span> <button class="btn btn-sm btn-outline-primary" :disabled="busy" @click="install(p.name, 'latest')" x-text="p.installed ? 'Install latest' : 'Install'"></button></td>
-            </tr></template></tbody></table>
-        </div>
-        <div class="panel">
-          <div class="panel-h">Installed</div>
-          <div class="empty" x-show="loaded && !libraries.length">No libraries yet.</div>
-          <table class="table" x-show="libraries.length"><thead><tr><th>Package</th><th>Loads on every page</th><th>Size</th><th></th></tr></thead><tbody>
-            <template x-for="l in libraries" :key="l.name"><tr>
-              <td><span class="mono fw-semibold" x-text="l.name"></span> <span class="tag" x-text="l.version"></span> <span class="muted small" x-show="l.license" x-text="l.license"></span>
-                <div class="muted small" x-text="l.description"></div></td>
-              <td><div class="form-check form-switch mb-0"><input class="form-check-input" type="checkbox" role="switch" :aria-label="'Load ' + l.name + ' on every page'" :checked="l.autoload" :disabled="!can('libraries.manage')" @change="setAutoload(l, $event.target.checked)"></div>
-                <div class="muted small mono" x-text="l.include.join(', ') || 'No files chosen'"></div></td>
-              <td class="muted small text-nowrap" x-text="bytes(l.unpackedSize) + ' · ' + l.fileCount + ' files'"></td>
-              <td class="text-end text-nowrap">
-                <button class="btn btn-sm btn-outline-secondary" @click="configure(l)">Files</button>
-                <button class="btn btn-sm btn-outline-secondary" x-show="can('libraries.manage')" :disabled="busy" @click="install(l.name, 'latest')">Update</button>
-                <button class="btn btn-sm btn-outline-danger" x-show="can('libraries.manage')" @click="remove(l)">Remove</button>
-              </td>
-            </tr></template></tbody></table>
-        </div>
-        <div class="panel mt-3" x-show="current">
-          <div class="panel-h d-flex gap-2 align-items-center flex-wrap"><span>Files of <span class="mono" x-text="current?.name"></span></span>
-            <input class="form-control form-control-sm ms-auto" style="max-width:14rem" aria-label="Filter files" placeholder="Filter, e.g. .min.css" x-model="fileFilter">
-            <button type="button" class="btn btn-sm btn-outline-secondary" @click="current = null">Close</button>
-          </div>
-          <div class="p-3 small">In a template: <span class="mono" x-text="snippet"></span></div>
-          <div class="lib-files">
-            <template x-for="f in shownFiles" :key="f.path">
-              <div class="d-flex gap-2 align-items-center px-3 py-1 border-top">
-                <input type="checkbox" class="form-check-input" :id="'lf-' + f.path" :checked="picked.includes(f.path)" :disabled="!can('libraries.manage') || !loadable(f.path)" @change="pick(f.path, $event.target.checked)">
-                <label class="mono small flex-grow-1 mb-0" :for="'lf-' + f.path" x-text="f.path"></label>
-                <span class="muted small" x-text="bytes(f.size)"></span>
-              </div>
-            </template>
-          </div>
-          <div class="p-3 d-flex gap-2 align-items-center" x-show="can('libraries.manage')">
-            <button class="btn btn-primary" :disabled="busy" @click="saveFiles()">Save chosen files</button>
-            <span class="muted small">Ticked stylesheets and scripts load on every page, in this order, when the library is set to load.</span>
-          </div>
-        </div>
-      </section>
+      <section x-data="librariesPage"></section>
     </template>
 
     <!-- My account -->
     <template x-if="route === 'account'">
-      <section x-data="accountPage">
-        <div class="page-head"><h1>My account</h1><p>Your sign-in details, your password, and the devices you're signed in on.</p></div>
-
-        <div class="panel mb-3">
-          <div class="panel-h">Profile</div>
-          <form class="frow" id="profile-form" @submit.prevent="saveName()">
-            <div><label class="title" for="profile-name">Name</label></div>
-            <div class="ctl d-flex gap-2 flex-wrap"><input id="profile-name" class="form-control" style="max-width:20rem" maxlength="128" required :class="{'is-invalid': nameError}" x-model="profile.name" autocomplete="name">
-              <button class="btn btn-primary" :disabled="savingName || !nameDirty">Save name</button>
-              <div class="invalid-feedback d-block" x-show="nameError" x-text="nameError"></div></div>
-          </form>
-          <div class="frow"><div><span class="title">Email</span></div><div class="ctl" x-text="me.email"></div></div>
-          <div class="frow"><div><span class="title">Role</span></div><div class="ctl" x-text="me.role"></div></div>
-        </div>
-
-        <form class="panel mb-3" @submit.prevent="changePassword()" id="password-form">
-          <div class="panel-h">Change password</div>
-          <div class="frow">
-            <div><label class="title" for="pw-current">Current password</label></div>
-            <div class="ctl"><input id="pw-current" type="password" class="form-control" :class="{'is-invalid': errors.current}" autocomplete="current-password" required x-model="form.current"><div class="invalid-feedback d-block" x-show="errors.current" x-text="errors.current"></div></div>
-          </div>
-          <div class="frow">
-            <div><label class="title" for="pw-new">New password</label><div class="help" x-text="'At least ' + minLength + ' characters.'"></div></div>
-            <div class="ctl"><input id="pw-new" type="password" class="form-control" :class="{'is-invalid': errors.next}" autocomplete="new-password" required x-model="form.next"><div class="invalid-feedback d-block" x-show="errors.next" x-text="errors.next"></div></div>
-          </div>
-          <div class="frow">
-            <div><label class="title" for="pw-confirm">Repeat the new password</label></div>
-            <div class="ctl"><input id="pw-confirm" type="password" class="form-control" :class="{'is-invalid': errors.confirm}" autocomplete="new-password" required x-model="form.confirm"><div class="invalid-feedback d-block" x-show="errors.confirm" x-text="errors.confirm"></div></div>
-          </div>
-          <div class="frow">
-            <div class="help">Changing your password signs you out on every other device.</div>
-            <div class="ctl"><button class="btn btn-primary" :disabled="busy"><span x-text="busy ? 'Saving…' : 'Change password'"></span></button></div>
-          </div>
-        </form>
-
-        <div class="panel">
-          <div class="panel-h">Where you're signed in <button class="btn btn-sm btn-outline-secondary fw-normal" x-show="others > 0" @click="revokeOthers()">Sign out all other devices</button></div>
-          <div class="empty" x-show="loaded && !sessions.length">No active sessions.</div>
-          <table class="table" x-show="sessions.length"><thead><tr><th>Device</th><th>Address</th><th>Signed in</th><th>Last active</th><th></th></tr></thead><tbody>
-            <template x-for="s in sessions" :key="s.id"><tr>
-              <td><span x-text="s.device"></span> <span class="tag ok" x-show="s.current">This device</span></td>
-              <td class="mono" x-text="s.ip || '–'"></td>
-              <td class="muted" x-text="s.createdAt ? ago(s.createdAt) : '–'"></td>
-              <td class="muted" x-text="s.lastSeen ? ago(s.lastSeen) : '–'"></td>
-              <td class="text-end"><button class="btn btn-sm btn-outline-secondary" x-show="!s.current" @click="revoke(s)">Sign out</button></td>
-            </tr></template></tbody></table>
-        </div>
-      </section>
+      <section x-data="accountPage"></section>
     </template>
 
     <!-- System -->
     <template x-if="route === 'system'">
-      <section x-data="systemPage">
-        <div class="page-head"><h1>System</h1><p>Health of the pieces this site depends on, the cache, and background work. Shows the server that answered this page.</p></div>
-
-        <div class="panel mb-3">
-          <div class="panel-h">Components</div>
-          <div class="empty" x-show="!data">Loading…</div>
-          <table class="table" x-show="data"><tbody>
-            <tr><td>Database</td><td class="mono" x-text="data?.components.database.kind"></td>
-              <td><span class="tag" :class="data?.components.database.ok ? 'ok' : 'warn'" x-text="data?.components.database.ok ? 'Up · ' + data.components.database.ms + ' ms' : 'Down'"></span></td></tr>
-            <tr><td>Redis</td><td class="muted" x-text="data?.components.redis ? 'Cache, sessions, queue, rate limits' : 'Not configured'"></td>
-              <td><span class="tag" :class="data?.components.redis ? (data.components.redis.ok ? 'ok' : 'warn') : ''" x-text="data?.components.redis ? (data.components.redis.ok ? 'Up · ' + data.components.redis.ms + ' ms' : 'Down') : 'Off'"></span></td></tr>
-            <tr><td>Background queue</td><td class="mono" x-text="data?.components.queue.driver"></td>
-              <td><span class="tag" :class="data?.components.queue.ok ? 'ok' : 'warn'" x-text="data?.components.queue.ok ? 'Up' : 'Down'"></span></td></tr>
-            <tr><td>Email</td><td class="muted" x-text="data?.components.mail.enabled ? 'Sending through ' + data.components.mail.transport : 'Not sending. Password reset is hidden.'"></td>
-              <td><a href="#/settings/mail" class="small">Email settings</a></td></tr>
-            <tr><td>Metrics</td><td class="muted" x-text="data?.components.metrics.enabled ? 'Served at /metrics with a bearer token' : 'Off'"></td>
-              <td><a href="#/settings/system" class="small">System settings</a></td></tr>
-          </tbody></table>
-        </div>
-
-        <div class="panel mb-3">
-          <div class="panel-h">Cache <button class="btn btn-sm btn-outline-danger fw-normal" x-show="can('cache.flush')" @click="flush()">Flush cache</button></div>
-          <div class="p-3 row g-3" x-show="data">
-            <div class="col-6 col-md-3"><div class="muted small">Backend</div><div class="mono" x-text="data?.cache.backend"></div></div>
-            <div class="col-6 col-md-3"><div class="muted small">Hit rate on this server</div><div class="mono" x-text="hitRate"></div></div>
-            <div class="col-6 col-md-3"><div class="muted small">In memory</div><div class="mono" x-text="data?.cache.l1Entries + ' / ' + data?.cache.l1Max"></div></div>
-            <div class="col-6 col-md-3"><div class="muted small">Invalidations</div><div class="mono" x-text="data?.cache.invalidations"></div></div>
-            <div class="col-12 small warn" x-show="data && !data.cache.enabled"><span class="tag warn">Cache is turned off in settings</span></div>
-          </div>
-        </div>
-
-        <div class="panel mb-3">
-          <div class="panel-h">Background jobs</div>
-          <div class="p-3 row g-3" x-show="data">
-            <template x-for="k in ['waiting','active','delayed','completed','failed']" :key="k">
-              <div class="col-6 col-md"><div class="muted small" x-text="k"></div><div class="bigver" style="font-size:1.6rem" :class="k === 'failed' && data?.components.queue.counts?.failed ? 'text-danger' : ''" x-text="data?.components.queue.counts?.[k] ?? 0"></div></div>
-            </template>
-          </div>
-          <table class="table" x-show="data?.components.queue.scheduled?.length"><thead><tr><th>Scheduled job</th><th>Runs</th></tr></thead><tbody>
-            <template x-for="j in data?.components.queue.scheduled || []" :key="j.name"><tr><td class="mono" x-text="j.name"></td><td class="muted" x-text="every(j.everyMs)"></td></tr></template></tbody></table>
-        </div>
-
-        <div class="panel mb-3" x-show="failed.length">
-          <div class="panel-h">Failed jobs</div>
-          <table class="table"><thead><tr><th>Job</th><th>Reason</th><th>When</th><th></th></tr></thead><tbody>
-            <template x-for="j in failed" :key="j.id"><tr>
-              <td><span class="mono" x-text="j.name"></span><div class="muted small" x-text="j.attemptsMade + ' attempts'"></div></td>
-              <td class="small" x-text="j.failedReason"></td>
-              <td class="muted" x-text="j.at ? ago(j.at) : ''"></td>
-              <td class="text-end text-nowrap"><template x-if="can('jobs.manage')"><span><button class="btn btn-sm btn-outline-secondary" @click="retry(j)">Run again</button> <button class="btn btn-sm btn-outline-danger" @click="discard(j)">Discard</button></span></template></td>
-            </tr></template></tbody></table>
-        </div>
-
-        <div class="panel p-3 small" x-show="data">
-          <div class="fw-semibold mb-1">This server</div>
-          <div class="muted mono" x-text="'v' + data?.version + ' · ' + data?.role + ' · node ' + data?.process.node + ' · up ' + since(Date.now() - data?.uptimeSeconds * 1000) + ' · ' + data?.process.rssMb + ' MB memory'"></div>
-        </div>
-      </section>
+      <section x-data="systemPage"></section>
     </template>
 
   </main>

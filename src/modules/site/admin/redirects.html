@@ -1,0 +1,14 @@
+        <div class="page-head"><h1>Redirects</h1><p>Send visitors from an old address to a new one. Use a permanent (301) redirect when a page has moved for good.</p></div>
+        <form class="panel p-3 mb-3 d-flex gap-2 flex-wrap align-items-start" @submit.prevent="add()">
+          <input class="form-control" style="max-width:16rem" aria-label="Old address" placeholder="/old-page" required x-model="form.from">
+          <span class="align-self-center">→</span>
+          <input class="form-control" style="max-width:20rem" aria-label="New address" placeholder="/new-page or https://…" required x-model="form.to">
+          <select class="form-select" style="max-width:12rem" aria-label="Type" x-model="form.status"><option value="301">Permanent (301)</option><option value="302">Temporary (302)</option><option value="308">Permanent, keep method (308)</option><option value="307">Temporary, keep method (307)</option></select>
+          <button class="btn btn-primary">Add redirect</button>
+          <div class="text-danger small w-100" role="alert" x-show="error" x-text="error"></div>
+        </form>
+        <div class="panel">
+          <div class="empty" x-show="!redirects.length">No redirects yet.</div>
+          <table class="table" x-show="redirects.length"><thead><tr><th>From</th><th>To</th><th>Type</th><th></th></tr></thead><tbody>
+            <template x-for="r in redirects" :key="r.id"><tr><td class="mono" x-text="r.from"></td><td class="mono" x-text="r.to"></td><td x-text="r.status"></td><td class="text-end"><button class="btn btn-sm btn-outline-danger" @click="remove(r)">Remove</button></td></tr></template></tbody></table>
+        </div>

@@ -1,0 +1,83 @@
+        <div class="page-head d-flex justify-content-between align-items-end flex-wrap gap-2">
+          <div><h1>Sitemap</h1><p>The list of addresses search engines read at /sitemap.xml. It is built from your site and content, and rebuilt whenever they change.</p></div>
+          <div class="d-flex gap-2 flex-wrap">
+            <a class="btn btn-outline-secondary" :href="sum.publicUrl" target="_blank" rel="noopener" x-show="sum.enabled">Open sitemap.xml</a>
+            <a class="btn btn-outline-secondary" href="/api/admin/sitemap/download">Download</a>
+            <button class="btn btn-outline-secondary" x-show="can('sitemap.manage')" :disabled="busy" @click="rebuild()">Rebuild now</button>
+          </div>
+        </div>
+        <div class="alert alert-danger" role="alert" x-show="error" x-text="error"></div>
+        <div class="alert alert-warning" x-show="sum.noindex">This site asks search engines not to index it (Settings → Website), so /sitemap.xml isn’t published.</div>
+        <div class="row g-3 mb-3" x-show="loaded">
+          <div class="col-6 col-md-3"><div class="panel p-3"><div class="muted small">Addresses</div><div class="fs-3 fw-semibold" id="sm-total" x-text="sum.total"></div></div></div>
+          <div class="col-6 col-md-3"><div class="panel p-3"><div class="muted small">Files</div><div class="fs-3 fw-semibold" x-text="sum.files"></div><div class="muted small" x-text="sum.files > 1 ? 'An index of ' + sum.files + ' parts' : 'One file'"></div></div></div>
+          <div class="col-6 col-md-3"><div class="panel p-3"><div class="muted small">With images</div><div class="fs-3 fw-semibold" x-text="sum.withImages"></div></div></div>
+          <div class="col-6 col-md-3"><div class="panel p-3"><div class="muted small">Built</div><div class="fs-5 fw-semibold" x-text="sum.generatedAt ? ago(sum.generatedAt) : '–'"></div><div class="muted small" x-show="sum.skipped" x-text="sum.skipped + ' left out by rules'"></div></div></div>
+        </div>
+        <div class="row g-3" x-show="loaded">
+          <div class="col-lg-5">
+            <div class="panel">
+              <div class="panel-h">What it lists</div>
+              <div class="p-3">
+                <div class="form-check form-switch mb-2"><input id="sm-enabled" class="form-check-input" type="checkbox" role="switch" x-model="enabled" :disabled="!can('sitemap.manage')"><label class="form-check-label fw-semibold" for="sm-enabled">Publish sitemap.xml</label></div>
+                <template x-for="o in toggles" :key="o.key">
+                  <div class="form-check mb-1"><input :id="'sm-' + o.key" class="form-check-input" type="checkbox" x-model="v[o.key]" :disabled="!can('sitemap.manage')"><label class="form-check-label" :for="'sm-' + o.key" x-text="o.label"></label></div>
+                </template>
+                <div class="mt-3" x-show="types.length">
+                  <div class="small fw-semibold mb-1">Content types to list</div>
+                  <template x-for="t in types" :key="t.id">
+                    <div class="form-check form-check-inline"><input :id="'sm-type-' + t.id" class="form-check-input" type="checkbox" :checked="!v.exclude_types.includes(t.id)" :disabled="!can('sitemap.manage')" @change="toggleType(t.id, $event.target.checked)"><label class="form-check-label" :for="'sm-type-' + t.id" x-text="t.plural || t.label || t.id"></label></div>
+                  </template>
+                </div>
+                <div class="row g-2 mt-2">
+                  <div class="col-6"><label class="form-label small" for="sm-freq">How often pages change</label><select id="sm-freq" class="form-select" x-model="v.default_changefreq" :disabled="!can('sitemap.manage')"><option value="">Don’t say</option><template x-for="f in freqs" :key="f"><option :value="f" x-text="f"></option></template></select></div>
+                  <div class="col-6"><label class="form-label small" for="sm-prio">Priority</label><select id="sm-prio" class="form-select" x-model="v.default_priority" :disabled="!can('sitemap.manage')"><option value="">Don’t say</option><template x-for="p in prios" :key="p"><option :value="p" x-text="p"></option></template></select></div>
+                  <div class="col-6"><label class="form-label small" for="sm-per">Addresses per file</label><input id="sm-per" type="number" min="100" max="50000" class="form-control" x-model.number="v.per_file" :disabled="!can('sitemap.manage')"></div>
+                </div>
+                <div class="form-text">Google ignores “how often” and “priority”; other search engines may read them.</div>
+              </div>
+            </div>
+            <div class="panel mt-3">
+              <div class="panel-h">Rules <span class="muted small fw-normal">The first rule that matches an address wins. * matches one part of the address, ** any number.</span></div>
+              <div class="empty" x-show="!v.rules.length">No rules: every address is listed with the defaults.</div>
+              <template x-for="(r, i) in v.rules" :key="i">
+                <div class="p-2 border-bottom d-flex gap-1 flex-wrap align-items-center">
+                  <input class="form-control form-control-sm mono" style="max-width:11rem" aria-label="Address pattern" placeholder="/blog/**" x-model="r.pattern" :disabled="!can('sitemap.manage')">
+                  <select class="form-select form-select-sm" style="max-width:7.5rem" aria-label="What to do" :value="r.exclude ? 'exclude' : 'list'" @change="r.exclude = $event.target.value === 'exclude'" :disabled="!can('sitemap.manage')"><option value="list">List</option><option value="exclude">Leave out</option></select>
+                  <select class="form-select form-select-sm" style="max-width:7.5rem" aria-label="How often it changes" x-show="!r.exclude" x-model="r.changefreq" :disabled="!can('sitemap.manage')"><option value="">Default</option><template x-for="f in freqs" :key="f"><option :value="f" x-text="f"></option></template></select>
+                  <select class="form-select form-select-sm" style="max-width:6rem" aria-label="Priority" x-show="!r.exclude" x-model="r.priority" :disabled="!can('sitemap.manage')"><option value="">Default</option><template x-for="p in prios" :key="p"><option :value="p" x-text="p"></option></template></select>
+                  <button type="button" class="btn btn-sm btn-link text-danger" x-show="can('sitemap.manage')" @click="v.rules.splice(i, 1)" aria-label="Remove rule"><i class="bi bi-x-lg"></i></button>
+                </div>
+              </template>
+              <div class="p-2" x-show="can('sitemap.manage')"><button type="button" class="btn btn-sm btn-outline-secondary" @click="v.rules.push({pattern: '', exclude: false, changefreq: '', priority: ''})">Add rule</button></div>
+            </div>
+            <div class="panel mt-3">
+              <div class="panel-h">Extra addresses</div>
+              <div class="p-3"><textarea id="sm-extra" rows="3" class="form-control mono" placeholder="/landing/spring&#10;/downloads" aria-label="Extra addresses, one per line" :value="v.extra_urls.join('\n')" @input="v.extra_urls = $event.target.value.split('\n').map((x) => x.trim()).filter(Boolean)" :disabled="!can('sitemap.manage')"></textarea><div class="form-text">Addresses on this site that the sitemap wouldn’t find on its own, one per line.</div></div>
+            </div>
+            <div class="d-flex gap-2 mt-3 align-items-center" x-show="can('sitemap.manage')">
+              <button class="btn btn-primary" :disabled="busy" @click="save()" x-text="busy ? 'Saving…' : 'Save changes'"></button>
+            </div>
+          </div>
+          <div class="col-lg-7">
+            <div class="panel">
+              <div class="panel-h d-flex gap-2 align-items-center flex-wrap"><span>Addresses</span>
+                <template x-for="(n, src) in sum.bySource" :key="src"><span class="tag" x-text="label(src) + ': ' + n"></span></template>
+                <input class="form-control form-control-sm ms-auto" style="max-width:12rem" aria-label="Filter addresses" placeholder="Filter" x-model="q" @input.debounce.300ms="load(0)">
+              </div>
+              <div class="empty" x-show="!sum.urls?.length">Nothing listed<span x-show="q"> matches that filter</span>.</div>
+              <table class="table table-sm" x-show="sum.urls?.length"><thead><tr><th>Address</th><th>From</th><th>Changed</th><th>Hints</th></tr></thead><tbody>
+                <template x-for="u in sum.urls" :key="u.path"><tr>
+                  <td class="mono small"><a :href="u.loc" target="_blank" rel="noopener" x-text="u.path"></a> <i class="bi bi-image muted" x-show="u.image" title="Has an image"></i></td>
+                  <td class="small muted" x-text="label(u.source)"></td>
+                  <td class="small muted" x-text="u.lastmod ? new Date(u.lastmod).toLocaleDateString() : '–'"></td>
+                  <td class="small muted" x-text="[u.changefreq, u.priority !== null ? u.priority.toFixed(1) : ''].filter(Boolean).join(' · ') || '–'"></td>
+                </tr></template></tbody></table>
+              <div class="p-2 d-flex gap-2 align-items-center" x-show="sum.matching > 100">
+                <button class="btn btn-sm btn-outline-secondary" :disabled="offset === 0" @click="load(Math.max(0, offset - 100))">Previous</button>
+                <span class="muted small" x-text="(offset + 1) + '–' + Math.min(offset + 100, sum.matching) + ' of ' + sum.matching"></span>
+                <button class="btn btn-sm btn-outline-secondary" :disabled="offset + 100 >= sum.matching" @click="load(offset + 100)">Next</button>
+              </div>
+            </div>
+          </div>
+        </div>

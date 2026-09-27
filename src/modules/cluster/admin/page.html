@@ -1,0 +1,18 @@
+        <div class="page-head"><h1>Cluster</h1><p>Every server reports the config version it has applied. A server that falls behind shows in amber and heals itself.</p></div>
+        <div class="d-flex align-items-baseline gap-3 mb-3"><div class="bigver" x-text="data ? data.dbConfigVersion : '–'"></div><div class="muted">current config version<br><span class="small">refreshes every 5 seconds</span></div></div>
+        <div class="panel">
+          <div class="empty" x-show="data && !data.nodes.length">No servers have reported in yet.</div>
+          <template x-for="n in (data ? data.nodes : [])" :key="n.id">
+            <div class="node">
+              <div><div><span class="dot" :class="n.status"></span><strong x-text="n.host"></strong> <span class="tag" x-show="n.self">this server</span></div>
+                <div class="muted small mono" x-text="n.role + ' · pid ' + n.pid + ' · v' + n.version"></div></div>
+              <div><div class="rail" :class="{drift: n.drift}"><div class="fill" :style="'width:' + railPct(n) + '%'"></div><div class="tick" title="Current version"></div></div>
+                <div class="rail-label"><span :class="n.drift ? 'text-warning fw-medium' : ''" x-text="n.drift ? 'config v' + n.configVersion + ' — ' + (data.dbConfigVersion - n.configVersion) + ' behind' : 'config v' + n.configVersion + ' — up to date'"></span></div></div>
+              <div class="text-end small muted"><span x-text="n.status"></span><br><span x-text="'up ' + since(n.startedAt)"></span></div>
+            </div>
+          </template>
+        </div>
+        <div class="panel mt-3 p-3 small" x-show="data">
+          <div class="fw-semibold mb-1">This server</div>
+          <div class="muted">Applied <span class="mono" x-text="data?.thisNode.settingsStats.busApplied"></span> change(s) from the bus, <span class="mono" x-text="data?.thisNode.settingsStats.pollHeals"></span> healed by polling, <span class="mono" x-text="data?.thisNode.settingsStats.fullReloads"></span> full reload(s).</div>
+        </div>

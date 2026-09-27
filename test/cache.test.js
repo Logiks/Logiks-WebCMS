@@ -17,12 +17,17 @@ test('wrap computes once, then serves from memory; misses and hits are counted',
   withNode(async (cache) => {
     let calls = 0;
     const load = async () => ({ n: ++calls });
+    // Snapshot first: the seeded admin's user.created event dispatches a webhooks job in the
+    // background (D-050), which itself reads through this same node-wide cache — asserting on the
+    // delta, not an absolute count, keeps this robust to that unrelated activity landing mid-test
+    // (reproduces reliably against MySQL/PostgreSQL's slower boot, never against SQLite).
+    const before = cache.stats();
     assert.deepEqual(await cache.wrap('k', load), { n: 1 });
     assert.deepEqual(await cache.wrap('k', load), { n: 1 });
     assert.equal(calls, 1);
     const s = cache.stats();
-    assert.equal(s.l1Hits, 1);
-    assert.equal(s.misses, 1);
+    assert.equal(s.l1Hits - before.l1Hits, 1);
+    assert.equal(s.misses - before.misses, 1);
     assert.equal(s.backend, 'memory');
   }));
 

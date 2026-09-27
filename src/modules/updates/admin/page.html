@@ -1,0 +1,36 @@
+        <div class="page-head"><h1>Updates</h1><p>Pull the latest code from git and restart servers. Every server keeps its own copy of the code, so update them one at a time and the load balancer keeps the others serving.</p></div>
+
+        <div class="small muted mb-3" x-show="data">
+          <span x-show="data?.restartMode === 'supervisor'">Restart makes the process exit, so it must run under systemd, PM2 or Docker with a restart policy, or it stays down.</span>
+          <span x-show="data?.restartMode === 'self'">Restart starts a new copy of the process by itself. Under a supervisor, set the restart method in <a href="#/settings/updates">Settings</a>.</span>
+        </div>
+
+        <div class="panel mb-3">
+          <div class="panel-h">Servers <label class="form-check mb-0 fw-normal small" x-show="can('system.restart')"><input class="form-check-input" type="checkbox" id="restart-after" x-model="restartAfter"> <span class="form-check-label" for="restart-after">Restart a server after updating it</span></label></div>
+          <div class="empty" x-show="!data">Loading…</div>
+          <div class="empty" x-show="data && !data.nodes.length">No servers have reported in yet.</div>
+          <template x-for="n in (data ? data.nodes : [])" :key="n.id">
+            <div class="upd">
+              <div class="upd-main">
+                <div><span class="dot" :class="n.status"></span><strong x-text="n.host"></strong> <span class="tag" x-show="n.self">this server</span><span class="tag" :class="state(n).tone" x-text="state(n).label"></span></div>
+                <div class="muted small mono" x-text="running(n)"></div>
+                <div class="small mt-1" :class="n.update?.status === 'failed' ? 'text-danger' : 'muted'" x-show="message(n)" x-text="message(n)" role="status"></div>
+                <ul class="upd-log" x-show="incoming(n).length"><template x-for="c in incoming(n)" :key="c.sha"><li><span class="mono" x-text="c.sha"></span> <span x-text="c.subject"></span> <span class="muted" x-text="'· ' + c.author + ' · ' + ago(c.at)"></span></li></template></ul>
+                <div class="small text-warning mt-1" x-show="notes(n)" x-text="notes(n)"></div>
+                <div class="small muted mt-1" x-show="checkedAt(n)" x-text="checkedAt(n)"></div>
+              </div>
+              <div class="upd-actions">
+                <button class="btn btn-sm btn-outline-secondary" :disabled="!actionable(n)" @click="check(n)">Check for updates</button>
+                <button class="btn btn-sm btn-primary" :disabled="!actionable(n)" @click="update(n)">Update</button>
+                <button class="btn btn-sm btn-outline-danger" x-show="can('system.restart')" :disabled="!actionable(n)" @click="restart(n)">Restart</button>
+              </div>
+            </div>
+          </template>
+        </div>
+
+        <div class="panel">
+          <div class="panel-h">Recent activity</div>
+          <div class="empty" x-show="!history.length">Nothing yet. Checks, updates and restarts show up here.</div>
+          <table class="table" x-show="history.length"><tbody><template x-for="e in history" :key="e.id">
+            <tr><td x-text="describe(e)"></td><td x-text="e.actor"></td><td class="muted text-end text-nowrap" x-text="ago(e.at)"></td></tr></template></tbody></table>
+        </div>

@@ -48,7 +48,7 @@ const pageFor = (tab) => () => b.$(`section[x-data="analyticsPage('${tab}')"]`);
 test('Overview shows totals, a default 30-day range, and a chart per KPI group', async () => {
   b.go('#/analytics-overview');
   const page = pageFor('overview');
-  await wait(() => page() && /–/.test(page().textContent) === false);
+  await wait(() => page()?.querySelector('.panel') && /–/.test(page().textContent) === false);
   const tile = (label) =>
     [...page().querySelectorAll('.panel')].find((p) => p.textContent.includes(label));
   await wait(() => tile('Page views').querySelector('.bigver').textContent === '1');
