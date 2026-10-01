@@ -37,6 +37,9 @@ const schema = z.object({
   SITE_DIR: z.string().default('./public'),
   // Where each server unpacks the npm packages of System → Libraries. Also a derived copy (the tarballs are in the database).
   LIBRARY_DIR: z.string().default('./data/libraries'),
+  // Where every plugin's files live (docs/DECISIONS.md D-060): disk-sourced plugins are authored here directly;
+  // db-sourced ones (installed from a zip) are materialized here too, derived from the database like LIBRARY_DIR.
+  PLUGINS_DIR: z.string().default('./plugins'),
   ALLOW_SINGLE_NODE: bool,
 });
 
@@ -78,6 +81,10 @@ export function loadEnv(source = process.env) {
   }
   if (env.NODE_ENV === 'test' && !source.LIBRARY_DIR) {
     env.LIBRARY_DIR = path.join(os.tmpdir(), 'cms-test-libraries', String(process.pid));
+  }
+  if (env.NODE_ENV === 'test' && !source.PLUGINS_DIR) {
+    // Tests (and the processes they spawn) must never write into the repository's own plugins/ folder.
+    env.PLUGINS_DIR = path.join(os.tmpdir(), 'cms-test-plugins', String(process.pid));
   }
   if (env.NODE_ENV === 'test' && !env.APP_MASTER_KEY) {
     env.APP_MASTER_KEY = 'test-only-master-key-not-a-secret-000'; // fixed, so simulated nodes agree

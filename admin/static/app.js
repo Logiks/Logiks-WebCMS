@@ -107,11 +107,35 @@ const H = {
     for (const child of [...this.$el.children]) Alpine.initTree(child);
     return true;
   },
+  /** Like mountFragment, but for a plugin's own admin/index.html (src/modules/plugins/routes.js's dynamic
+   * fragment middleware): a plugin's server.js is full-trust Node.js (D-060), and its admin screen gets the
+   * same latitude — a <script> in its markup is re-created so it actually runs (innerHTML alone never executes
+   * an injected <script>), letting a plugin register its own Alpine.data() component before initTree() binds it.
+   * Core modules never need this (they use pre-registered Alpine.data() components), so mountFragment above is
+   * left untouched. */
+  async mountPluginFragment(slug) {
+    try {
+      this.$el.innerHTML = await loadFragment('plugin-' + slug, 'index');
+    } catch {
+      this.$el.innerHTML =
+        '<div class="alert alert-danger">Could not load this plugin’s admin screen.</div>';
+      return false;
+    }
+    for (const child of [...this.$el.children]) {
+      if (child.tagName === 'SCRIPT') {
+        const s = document.createElement('script');
+        for (const a of child.attributes) s.setAttribute(a.name, a.value);
+        s.textContent = child.textContent;
+        child.replaceWith(s);
+      } else Alpine.initTree(child);
+    }
+    return true;
+  },
 };
 
 const hashParts = () => location.hash.replace(/^#\/?/, '').split('/');
 // facts from /api/public/info that other components need
-const meta = { passwordMinLength: 10, passwordReset: false, contentTypes: [] };
+const meta = { passwordMinLength: 10, passwordReset: false, contentTypes: [], pluginNav: [] };
 const thumb = (m) => {
   if (!m) return '';
   if (m.kind !== 'image') return '';
@@ -442,6 +466,7 @@ document.addEventListener('alpine:init', () => {
     hash: location.hash,
     openGroups: [],
     contentTypes: [],
+    pluginNav: [],
     path: 'overview',
     picker: { open: false, items: [], busy: false, error: '', q: '', resolve: null },
     _seq: 0,
@@ -497,6 +522,21 @@ document.addEventListener('alpine:init', () => {
             })),
             { id: 'terms', label: 'Categories and tags', perm: 'content.terms.manage' },
             { id: 'media', label: 'Media', perm: 'media.read' },
+          ],
+        },
+        {
+          // Installed plugins (docs/DECISIONS.md D-060): the Plugin Manager itself, then one menu entry per
+          // enabled plugin the signed-in user may open (this.pluginNav, loaded from GET /admin/plugins/menu).
+          id: 'applications',
+          label: 'Applications',
+          icon: 'bi-grid-3x3-gap',
+          items: [
+            { id: 'plugins', label: 'Plugin Manager', perm: 'plugins.read' },
+            ...this.pluginNav.map((p) => ({
+              id: `plugin-${p.slug}`,
+              label: p.label,
+              perm: p.perm,
+            })),
           ],
         },
         {
@@ -676,6 +716,15 @@ document.addEventListener('alpine:init', () => {
       }
     },
 
+    /** Which enabled plugins this user may open, for the Applications nav group. */
+    async loadPlugins() {
+      try {
+        this.pluginNav = meta.pluginNav = (await api('GET', '/admin/plugins/menu')).items;
+      } catch {
+        this.pluginNav = meta.pluginNav = [];
+      }
+    },
+
     async init() {
       window.addEventListener('pick-media', (e) => this.openPicker(e.detail.resolve));
       window.addEventListener('hashchange', () => {
@@ -685,6 +734,8 @@ document.addEventListener('alpine:init', () => {
       });
       window.addEventListener('toast', (e) => this.pushToast(e.detail.msg, e.detail.type));
       window.addEventListener('signed-out', () => this.setUser(null));
+      // A plugin's own screen (or the Plugin Manager) enabling/disabling one changes the Applications group.
+      window.addEventListener('plugins-changed', () => this.loadPlugins());
       try {
         const info = await api('GET', '/public/info');
         this.siteName = info.siteName;
@@ -700,6 +751,7 @@ document.addEventListener('alpine:init', () => {
         auth.csrf = me.csrfToken;
         this.setUser(me.user);
         await this.loadTypes();
+        await this.loadPlugins();
       } catch {
         /* not signed in */
       }
@@ -799,6 +851,7 @@ document.addEventListener('alpine:init', () => {
         // anything that reads contentTypes/meta.contentTypes at mount (the nav's Content group, Overview's
         // content KPI). The session cookie from the login response above already authenticates this call.
         await this.loadTypes();
+        await this.loadPlugins();
         this.setUser(out.user);
         this.syncRoute();
       } catch (e) {
@@ -3494,6 +3547,83 @@ document.addEventListener('alpine:init', () => {
       } finally {
         this.testBusy = false;
       }
+    },
+  }));
+
+  // ───────── Applications → Plugin Manager (docs/DECISIONS.md D-060) ─────────
+  Alpine.data('pluginsPage', () => ({
+    ...H,
+    plugins: [],
+    loaded: false,
+    busy: false,
+    error: '',
+    async init() {
+      if (!(await this.mountFragment('plugins', 'list'))) return;
+      await this.load();
+    },
+    async load() {
+      this.plugins = (await api('GET', '/admin/plugins')).plugins;
+      this.loaded = true;
+    },
+    async upload(file) {
+      if (!file) return;
+      this.busy = true;
+      this.error = '';
+      try {
+        const { plugin } = await api('POST', '/admin/plugins', file);
+        toast(`Installed ${plugin.name} ${plugin.version}.`);
+        await this.load();
+      } catch (e) {
+        this.error = e.message;
+      } finally {
+        this.busy = false;
+      }
+    },
+    async rescan() {
+      this.busy = true;
+      this.error = '';
+      try {
+        await api('POST', '/admin/plugins/rescan');
+        await this.load();
+        toast('Looked again at plugins/.');
+      } catch (e) {
+        this.error = e.message;
+      } finally {
+        this.busy = false;
+      }
+    },
+    async toggle(p) {
+      this.error = '';
+      try {
+        await api('POST', `/admin/plugins/${p.slug}/${p.enabled ? 'disable' : 'enable'}`);
+        await this.load();
+        window.dispatchEvent(new CustomEvent('plugins-changed')); // its nav entry may have appeared/disappeared
+        toast(p.enabled ? `${p.name} disabled.` : `${p.name} enabled.`);
+      } catch (e) {
+        this.error = e.message;
+      }
+    },
+    async remove(p) {
+      if (!confirm(`Remove the plugin "${p.name}"? This can't be undone.`)) return;
+      try {
+        await api('DELETE', `/admin/plugins/${p.slug}`);
+        await this.load();
+        toast('Plugin removed.');
+      } catch (e) {
+        this.error = e.message;
+      }
+    },
+    exportUrl(p) {
+      return `/api/admin/plugins/${p.slug}/export`;
+    },
+  }));
+
+  // A plugin's own screen: just mounts its admin/index.html (full-trust markup, D-060 — see H.mountPluginFragment).
+  Alpine.data('pluginScreen', (slug) => ({
+    ...H,
+    slug,
+    async init() {
+      await this.mountPluginFragment(slug);
     },
   }));
 

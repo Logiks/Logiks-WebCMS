@@ -1,0 +1,27 @@
+              <div class="page-head d-flex justify-content-between align-items-end flex-wrap gap-2">
+                <div><h1>Plugin Manager</h1><p>Installed plugins. A plugin's server code runs with full access to this server — only install ones you trust.</p></div>
+                <div class="d-flex gap-2">
+                  <button class="btn btn-outline-secondary" type="button" x-show="can('plugins.manage')" :class="{disabled: busy}" @click="rescan()">Rescan plugins/</button>
+                  <label class="btn btn-primary mb-0" x-show="can('plugins.manage')" :class="{disabled: busy}">Install from .zip<input type="file" hidden accept=".zip,application/zip" @change="upload($event.target.files[0]); $event.target.value = ''"></label>
+                </div>
+              </div>
+              <div class="alert alert-danger" role="alert" x-show="error" x-text="error"></div>
+              <div class="panel">
+                <div class="empty" x-show="loaded && !plugins.length">No plugins installed yet.</div>
+                <table class="table" x-show="plugins.length"><thead><tr><th>Name</th><th>Version</th><th>Source</th><th>Status</th><th></th></tr></thead><tbody>
+                  <template x-for="p in plugins" :key="p.slug"><tr>
+                    <td><div x-text="p.name"></div><div class="small muted" x-text="p.description"></div></td>
+                    <td class="mono small" x-text="p.version"></td>
+                    <td><span class="tag" x-text="p.source === 'disk' ? 'plugins/' + p.slug : 'Uploaded'"></span></td>
+                    <td>
+                      <span class="tag" :class="p.enabled ? 'ok' : 'warn'" x-text="p.enabled ? 'Enabled' : 'Disabled'"></span>
+                      <span class="tag" x-show="p.enabled && !p.loaded" title="Enabled but not yet loaded on this server">Loading…</span>
+                    </td>
+                    <td class="text-end text-nowrap">
+                      <button class="btn btn-sm btn-outline-secondary" type="button" x-show="can('plugins.manage')" @click="toggle(p)" x-text="p.enabled ? 'Disable' : 'Enable'"></button>
+                      <a class="btn btn-sm btn-outline-secondary" x-show="can('plugins.read')" :href="exportUrl(p)">Export</a>
+                      <button class="btn btn-sm btn-outline-danger" type="button" x-show="can('plugins.manage') && p.source === 'db'" :disabled="p.enabled" :title="p.enabled ? 'Disable it first' : ''" @click="remove(p)">Remove</button>
+                    </td>
+                  </tr></template>
+                </tbody></table>
+              </div>

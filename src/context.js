@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
 import { createLogger } from './core/logger.js';
 import { createDb, dialect } from './core/db/index.js';
 import { createRedis } from './core/redis.js';
@@ -40,6 +41,7 @@ import { createI18n } from './modules/site/i18n.js';
 import { createSitemap, defineSitemapSettings } from './modules/sitemap/service.js';
 import { createLibraries, defineLibrariesSettings } from './modules/libraries/service.js';
 import { createAnalyticsService } from './modules/analytics/service.js';
+import { createPlugins } from './modules/plugins/service.js';
 
 const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
 
@@ -279,6 +281,11 @@ export async function createContext({ env, bus: busOverride, log: logOverride, a
   const ctx = {
     env,
     log,
+    // Bound to this file's own location, so a plugin's server.js can `ctx.require('express')` for an npm package
+    // the app already depends on, regardless of where plugins/<slug>/ physically lives on disk (it needn't sit
+    // inside the app's own node_modules resolution chain — a top-level `import 'express'` in a dynamically
+    // `import()`-ed plugin file would fail to resolve; `node:`-prefixed built-ins are unaffected and need no help).
+    require: createRequire(import.meta.url),
     db,
     dialect: dialect(db),
     redis,
@@ -318,6 +325,7 @@ export async function createContext({ env, bus: busOverride, log: logOverride, a
       updates.stop();
       themes.stop();
       libraries.stop();
+      ctx.plugins.stop();
       await siteFiles.stop();
       await nodes.stop();
       await jobs.close();
@@ -341,6 +349,10 @@ export async function createContext({ env, bus: busOverride, log: logOverride, a
   await ctx.scheduler.reloadAll();
   ctx.publicData = createPublicData(ctx);
   ctx.sitePages = createSitePages(ctx);
+  // Also needs the finished ctx: a plugin's server.js factory runs at load time (well after every other service is
+  // built) and gets the complete ctx, the same reasoning as ctx.services (D-046).
+  ctx.plugins = createPlugins(ctx, { pluginsDir: env.PLUGINS_DIR });
+  await ctx.plugins.start();
   ctx.sitemap = createSitemap({
     settings,
     content,

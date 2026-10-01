@@ -88,10 +88,12 @@ export const tmpDb = tmpDbUrl;
  */
 export async function startNode({ dbUrl, bus, env: extra = {}, seed = false, appRoot } = {}) {
   const tmp = dbUrl ? null : tmpDbUrl();
-  // Each simulated server has its own disk, so its own public/ mirror (they must never share one).
+  // Each simulated server has its own disk, so its own public/ mirror and plugins/ folder (they must never share one).
   const siteDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cms-site-'));
+  const pluginsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cms-plugins-'));
   const env = loadEnv({
     SITE_DIR: siteDir,
+    PLUGINS_DIR: pluginsDir,
     NODE_ENV: 'test',
     LOG_LEVEL: 'silent',
     APP_MASTER_KEY: MASTER_KEY,
@@ -124,6 +126,7 @@ export async function startNode({ dbUrl, bus, env: extra = {}, seed = false, app
       });
       await ctx.shutdown();
       fs.rmSync(siteDir, { recursive: true, force: true });
+      fs.rmSync(pluginsDir, { recursive: true, force: true });
       tmp?.cleanup();
     },
   };

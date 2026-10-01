@@ -37,6 +37,7 @@ import schedulerRoutes from './modules/scheduler/routes.js';
 import sitemapRoutes from './modules/sitemap/routes.js';
 import librariesRoutes, { libraryPublicRoute } from './modules/libraries/routes.js';
 import analyticsRoutes from './modules/analytics/routes.js';
+import pluginsRoutes, { pluginDispatcher, pluginAdminFragments } from './modules/plugins/routes.js';
 import publicSite from './modules/site/public.js';
 import publicContentApi from './modules/site/api.js';
 import { metricsRoute } from './core/http/metricsRoute.js';
@@ -131,6 +132,9 @@ export function createApp(ctx) {
     const dir = path.join(ROOT, 'src/modules', name, 'admin');
     if (fs.existsSync(dir)) app.use(`/admin/modules/${name}`, express.static(dir, cache));
   }
+  // A plugin's own admin/*.html, unlike the fixed loop above, can appear or disappear after boot (install/enable),
+  // so it's served by a small dynamic middleware (src/modules/plugins/routes.js) instead of a fixed static mount.
+  app.use(pluginAdminFragments(ctx));
   app.get(['/admin', '/admin/*splat'], (_req, res) => {
     res.setHeader('Cache-Control', 'no-cache');
     res.sendFile(path.join(ROOT, 'admin/static/index.html'));
@@ -232,8 +236,12 @@ export function createApp(ctx) {
     sitemapRoutes,
     librariesRoutes,
     analyticsRoutes,
+    pluginsRoutes,
   ])
     admin.use(mod(ctx));
+  // A plugin's own admin/backend routes (src/modules/plugins/routes.js) — dispatched dynamically since plugins
+  // can be installed/enabled after boot, unlike the fixed module list above.
+  admin.use(pluginDispatcher(ctx));
   api.use('/admin', admin);
   api.use(apiNotFound);
   app.use('/api', api);

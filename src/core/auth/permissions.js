@@ -114,6 +114,14 @@ export function defineCorePermissions(permissions) {
     // trust tier as services.script. Never grant this in a seed role other than the wildcard administrator (D-047).
     'dbms.query': 'Run raw SQL in the database console',
   });
+  permissions.define('Applications', {
+    'plugins.read': 'View installed plugins',
+    // A plugin's server.js is full, unsandboxed Node.js with complete access to the platform — the database,
+    // decrypted settings (including secrets), email, everything. Same trust level as shell access to the server.
+    // Never grant this in a seed role other than the wildcard administrator (D-060).
+    'plugins.manage':
+      'Install, enable, disable and remove plugins (full server access, no sandbox)',
+  });
   permissions.define('System', {
     'audit.read': 'View the audit log',
     'cluster.read': 'View cluster, queue and cache status',

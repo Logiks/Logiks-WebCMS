@@ -1,0 +1,251 @@
+import { test, before, after, describe } from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import AdmZip from 'adm-zip';
+import request from 'supertest';
+import { makeNode, signedIn, tmpDb, sharedBus, busFor, until } from './helpers.js';
+
+let node, admin;
+before(async () => {
+  node = await makeNode();
+  admin = await signedIn(node.app);
+});
+after(() => node.close());
+
+const MANIFEST = (o = {}) =>
+  JSON.stringify({
+    slug: 'hello',
+    name: 'Hello plugin',
+    version: '1.0.0',
+    author: 'Test author',
+    description: 'A tiny test plugin.',
+    menu: { label: 'Hello', icon: 'bi-puzzle' },
+    permissions: [],
+    ...o,
+  });
+/** A minimal but real plugin: a route, an admin fragment, a migration. */
+const BASE = (extra = {}) => ({
+  'plugin.json': MANIFEST(extra),
+  'server.js':
+    "export default function (ctx) {\n  const { Router } = ctx.require('express');\n  const r = Router();\n  r.get('/ping', (req, res) => res.json({ ok: true, dialect: ctx.dialect.kind }));\n  r.get('/rows', async (req, res) => res.json({ n: (await ctx.db('plugin_hello_pings').select('*')).length }));\n  return r;\n}\n",
+  'migrate.js':
+    "export default async function (db, dialect) {\n  await db.schema.createTable('plugin_hello_pings', (t) => { t.increments('id'); });\n}\n",
+  'admin/index.html':
+    '<div data-testid="hello-plugin-screen">Hello from the plugin admin screen</div>',
+});
+function zipOf(files) {
+  const z = new AdmZip();
+  for (const [name, content] of Object.entries(files)) z.addFile(name, Buffer.from(content));
+  return z.toBuffer();
+}
+const install = (agent, buf) =>
+  agent.post('/api/admin/plugins').set('Content-Type', 'application/octet-stream').send(buf);
+/** GET a route that answers with a zip body, as a Buffer. */
+const download = (agent, url) =>
+  agent
+    .get(url)
+    .buffer(true)
+    .parse((res, cb) => {
+      const chunks = [];
+      res.on('data', (c) => chunks.push(c));
+      res.on('end', () => cb(null, Buffer.concat(chunks)));
+    });
+
+describe('installing a plugin from a zip', () => {
+  test('rejects an empty zip, a missing manifest, a bad slug and path traversal', async () => {
+    assert.equal((await install(admin, zipOf({}))).status, 422);
+    assert.equal(
+      (await install(admin, zipOf({ 'server.js': 'export default () => {}' }))).status,
+      422,
+    );
+    assert.equal(
+      (await install(admin, zipOf({ 'plugin.json': MANIFEST({ slug: 'Not Valid!' }) }))).status,
+      422,
+    );
+    const z = new AdmZip();
+    z.addFile('plugin.json', Buffer.from(MANIFEST()));
+    z.addFile('placeholder.txt', Buffer.from('x'));
+    z.getEntries().find((e) => e.entryName === 'placeholder.txt').entryName = '../../../etc/passwd';
+    assert.equal((await install(admin, z.toBuffer())).status, 422);
+  });
+
+  test('rejects a symlink entry', async () => {
+    const z = new AdmZip();
+    z.addFile('plugin.json', Buffer.from(MANIFEST()));
+    z.addFile('server.js', Buffer.from('export default () => {}'));
+    const buf = z.toBuffer();
+    for (let i = 0; i + 46 < buf.length; i++) {
+      if (buf.readUInt32LE(i) !== 0x02014b50) continue;
+      const nameLen = buf.readUInt16LE(i + 28);
+      if (buf.subarray(i + 46, i + 46 + nameLen).toString() !== 'server.js') continue;
+      buf.writeUInt16LE(0x031e, i + 4); // made by: Unix
+      buf.writeUInt32LE((0o120777 << 16) >>> 0, i + 38); // external attributes: symlink, rwxrwxrwx
+    }
+    assert.equal((await install(admin, buf)).status, 422);
+  });
+
+  test('rejects a server.js whose default export is not a function', async () => {
+    const res = await install(
+      admin,
+      zipOf({ 'plugin.json': MANIFEST(), 'server.js': 'export default 42;' }),
+    );
+    assert.equal(res.status, 422);
+  });
+
+  test('a valid package installs disabled, then enabling loads its route and runs its migration', async () => {
+    const res = await install(admin, zipOf(BASE()));
+    assert.equal(res.status, 201);
+    assert.equal(res.body.plugin.enabled, false);
+    assert.equal(res.body.plugin.source, 'db');
+
+    // not reachable yet: disabled
+    assert.equal((await admin.get('/api/admin/apps/hello/ping')).status, 404);
+
+    const enabled = await admin.post('/api/admin/plugins/hello/enable').send({});
+    assert.equal(enabled.status, 200);
+    assert.equal(enabled.body.plugin.enabled, true);
+    assert.ok(fs.existsSync(path.join(node.env.PLUGINS_DIR, 'hello', 'server.js')));
+
+    const ping = await admin.get('/api/admin/apps/hello/ping');
+    assert.equal(ping.status, 200);
+    assert.deepEqual(ping.body, { ok: true, dialect: node.ctx.dialect.kind });
+
+    // the migration ran: the table exists and the route can query it
+    const rows = await admin.get('/api/admin/apps/hello/rows');
+    assert.equal(rows.status, 200);
+    assert.equal(rows.body.n, 0);
+
+    // disabling makes the route fall through to 404 again, without unloading the module
+    const disabled = await admin.post('/api/admin/plugins/hello/disable').send({});
+    assert.equal(disabled.body.plugin.enabled, false);
+    assert.equal((await admin.get('/api/admin/apps/hello/ping')).status, 404);
+    assert.equal(node.ctx.plugins.active().has('hello'), false);
+
+    // re-enabling without a version bump works again immediately (reuses the loaded module)
+    await admin.post('/api/admin/plugins/hello/enable').send({});
+    assert.equal((await admin.get('/api/admin/apps/hello/ping')).status, 200);
+
+    // re-enabling didn't re-run the migration (no duplicate-table error, and only one migration row)
+    const migrations = await node.ctx.db('plugin_migrations').where({ plugin_slug: 'hello' });
+    assert.equal(migrations.length, 1);
+  });
+
+  test('reinstalling the same slug is a version upsert, not a duplicate', async () => {
+    await install(admin, zipOf(BASE({ version: '1.0.1' })));
+    const list = (await admin.get('/api/admin/plugins')).body.plugins;
+    assert.equal(list.filter((p) => p.slug === 'hello').length, 1);
+    assert.equal(list.find((p) => p.slug === 'hello').version, '1.0.1');
+    // it was enabled before the reinstall; the version bump hot-loads the new code with no restart
+    assert.equal(list.find((p) => p.slug === 'hello').enabled, true);
+    await until(async () => (await admin.get('/api/admin/apps/hello/ping')).status === 200);
+  });
+
+  test('uninstall refuses while enabled, then succeeds once disabled', async () => {
+    assert.equal((await admin.delete('/api/admin/plugins/hello')).status, 409);
+    await admin.post('/api/admin/plugins/hello/disable').send({});
+    assert.equal((await admin.delete('/api/admin/plugins/hello')).status, 204);
+    assert.equal(
+      (await admin.get('/api/admin/plugins')).body.plugins.some((p) => p.slug === 'hello'),
+      false,
+    );
+  });
+
+  test('export → reinstall round-trips the same package', async () => {
+    await install(admin, zipOf(BASE({ slug: 'roundtrip' })));
+    const zip = await download(admin, '/api/admin/plugins/roundtrip/export');
+    assert.equal(zip.status, 200);
+    assert.equal(zip.headers['content-type'], 'application/zip');
+    await admin.post('/api/admin/plugins/roundtrip/disable').send({});
+    await admin.delete('/api/admin/plugins/roundtrip');
+    const reinstalled = await install(admin, zip.body);
+    assert.equal(reinstalled.status, 201);
+    assert.equal(reinstalled.body.plugin.slug, 'roundtrip');
+  });
+});
+
+describe('a disk-sourced plugin', () => {
+  test('is discovered by scanning plugins/, can be enabled, and cannot be uninstalled through the admin', async () => {
+    const dir = path.join(node.env.PLUGINS_DIR, 'diskplug');
+    fs.mkdirSync(path.join(dir, 'admin'), { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, 'plugin.json'),
+      MANIFEST({ slug: 'diskplug', name: 'Disk plugin' }),
+    );
+    fs.writeFileSync(
+      path.join(dir, 'server.js'),
+      "export default (ctx) => { const { Router } = ctx.require('express'); const r = Router(); r.get('/ping', (req, res) => res.json({ ok: true })); return r; };\n",
+    );
+    fs.writeFileSync(path.join(dir, 'admin/index.html'), '<div>disk plugin admin</div>');
+
+    const rescanned = await admin.post('/api/admin/plugins/rescan').send({});
+    assert.equal(rescanned.status, 200);
+    const row = rescanned.body.plugins.find((p) => p.slug === 'diskplug');
+    assert.ok(row, 'disk-sourced plugin should appear after a rescan');
+    assert.equal(row.source, 'disk');
+    assert.equal(row.enabled, false);
+
+    await admin.post('/api/admin/plugins/diskplug/enable').send({});
+    assert.equal((await admin.get('/api/admin/apps/diskplug/ping')).status, 200);
+
+    // it ships from disk, so the admin can only disable it, never uninstall it
+    assert.equal((await admin.delete('/api/admin/plugins/diskplug')).status, 422);
+    await admin.post('/api/admin/plugins/diskplug/disable').send({});
+  });
+});
+
+describe('permissions', () => {
+  test('plugins.read is required to list; plugins.manage is required to mutate', async () => {
+    const role = await node.ctx.users.createRole(
+      { name: 'PluginViewer', permissions: ['admin.access', 'plugins.read'] },
+      null,
+    );
+    const email = 'pluginviewer@example.com';
+    await node.ctx.users.createUser(
+      { email, name: 'Plugin Viewer', password: 'Correct-Horse-9', roleId: role.id },
+      null,
+    );
+    const viewer = await signedIn(node.app, { email, password: 'Correct-Horse-9' });
+    assert.equal((await viewer.get('/api/admin/plugins')).status, 200);
+    assert.equal((await install(viewer, zipOf(BASE({ slug: 'nope' })))).status, 403);
+
+    const noPerms = await node.ctx.users.createRole(
+      { name: 'NoPlugins', permissions: ['admin.access'] },
+      null,
+    );
+    const email2 = 'noplugins@example.com';
+    await node.ctx.users.createUser(
+      { email: email2, name: 'No Plugins', password: 'Correct-Horse-9', roleId: noPerms.id },
+      null,
+    );
+    const other = await signedIn(node.app, { email: email2, password: 'Correct-Horse-9' });
+    assert.equal((await other.get('/api/admin/plugins')).status, 403);
+  });
+});
+
+test('cluster: enabling a plugin on one server makes it reachable on another (bus), and a server that misses the message heals by polling', async () => {
+  const db = tmpDb();
+  const emitter = sharedBus();
+  const a = await makeNode({ dbUrl: db.url, bus: busFor(emitter) });
+  // its own bus: it never hears from A directly, so this also exercises the polling fallback
+  const b = await makeNode({
+    dbUrl: db.url,
+    bus: busFor(sharedBus()),
+    env: { CONFIG_POLL_SECONDS: '1' },
+  });
+  try {
+    const agentA = await signedIn(a.app);
+    await install(agentA, zipOf(BASE({ slug: 'clustered' })));
+    await agentA.post('/api/admin/plugins/clustered/enable').send({});
+
+    assert.equal(b.ctx.plugins.active().has('clustered'), false);
+    await until(() => b.ctx.plugins.active().has('clustered'), { timeout: 4000 });
+    assert.equal((await request(b.app).get('/api/admin/apps/clustered/ping')).status, 401); // no session on b's agent
+    const agentB = await signedIn(b.app);
+    assert.equal((await agentB.get('/api/admin/apps/clustered/ping')).status, 200);
+  } finally {
+    await a.close();
+    await b.close();
+    db.cleanup();
+  }
+});

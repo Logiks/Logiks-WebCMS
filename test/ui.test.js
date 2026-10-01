@@ -98,6 +98,7 @@ test('signing in shows the shell with navigation for an administrator', async ()
       'Overview',
       'Webmaster',
       'Content',
+      'Applications',
       'Analytics',
       'Logs',
       'Appearance',
@@ -107,7 +108,7 @@ test('signing in shows the shell with navigation for an administrator', async ()
       'Operations',
       'Automation',
     ],
-    'top level: two links and nine groups',
+    'top level: two links and ten groups',
   );
   assert.deepEqual(subLinks(), [], 'groups start collapsed on Overview');
 

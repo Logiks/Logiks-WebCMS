@@ -317,6 +317,14 @@
       </div>
     </template>
 
+    <!-- Applications → Plugin Manager, and each enabled plugin's own screen -->
+    <template x-if="route === 'plugins'">
+      <section x-data="pluginsPage"></section>
+    </template>
+    <template x-if="route.startsWith('plugin-')">
+      <section x-data="pluginScreen(route.slice(7))"></section>
+    </template>
+
     <!-- Categories and tags -->
     <template x-if="route === 'terms'">
       <section x-data="termsPage"></section>
