@@ -13,6 +13,49 @@ const LIMITS = {
   totalBytes: 20 * 1024 * 1024,
 };
 
+// A plugin's config field (plugin.json's `config: {...}`), the same subset of the settings-registry field shape
+// (src/core/settings/registry.js) that theme.json's `settings` block uses (themes/package.js's settingField) —
+// this is a manifest-shape GATE for untrusted JSON, not the registry's own validator-builder: once a field passes
+// this, it's handed straight to `ctx.settings.registry.define()`, which builds the real per-field validator itself.
+const configField = z.discriminatedUnion('type', [
+  z.object({
+    type: z.literal('string'),
+    label: z.string().max(80),
+    default: z.string().max(500).optional(),
+    help: z.string().max(300).optional(),
+  }),
+  z.object({
+    type: z.literal('text'),
+    label: z.string().max(80),
+    default: z.string().max(20000).optional(),
+    help: z.string().max(300).optional(),
+  }),
+  z.object({
+    type: z.literal('number'),
+    label: z.string().max(80),
+    default: z.number().optional(),
+    min: z.number().optional(),
+    max: z.number().optional(),
+    help: z.string().max(300).optional(),
+  }),
+  z.object({
+    type: z.literal('boolean'),
+    label: z.string().max(80),
+    default: z.boolean().optional(),
+    help: z.string().max(300).optional(),
+  }),
+  z.object({
+    type: z.literal('select'),
+    label: z.string().max(80),
+    default: z.string().optional(),
+    help: z.string().max(300).optional(),
+    options: z
+      .array(z.object({ value: z.string().max(80), label: z.string().max(80) }))
+      .min(1)
+      .max(30),
+  }),
+]);
+
 export const manifestSchema = z.object({
   slug: z
     .string()
@@ -33,6 +76,10 @@ export const manifestSchema = z.object({
     )
     .max(20)
     .default([]),
+  // Becomes a `plugin_<slug>` settings-registry namespace (docs/DECISIONS.md D-061), exactly how theme.json's
+  // `settings` becomes `theme_<id>` (D-031/D-052) — editable on the generic Settings screen with no new UI code,
+  // plus a curated GET/PUT /admin/plugins/:slug/config pair gated by plugins.manage.
+  config: z.record(z.string().regex(/^[a-z][a-z0-9_]*$/), configField).default({}),
   depends: z.array(z.string().regex(PLUGIN_SLUG)).max(20).default([]),
 });
 
@@ -61,12 +108,12 @@ export function checkPluginFile(name, size) {
   const text = TEXT_EXT.has(ext);
   if (!text && !BINARY_EXT.has(ext)) throw bad(`"${name}" is a file type plugins can't contain.`);
   if (
-    !/^admin\/|^plugin\.json$|^server\.js$|^migrate\.js$|^(README|LICENSE)(\.md|\.txt)?$/i.test(
+    !/^admin\/|^components\/|^plugin\.json$|^plugin\.js$|^migrate\.js$|^(README|LICENSE)(\.md|\.txt)?$/i.test(
       name,
     )
   )
     throw bad(
-      `"${name}" is outside the plugin's allowed files (admin/, plugin.json, server.js, migrate.js).`,
+      `"${name}" is outside the plugin's allowed files (admin/, components/, plugin.json, plugin.js, migrate.js).`,
     );
   if (size > LIMITS.fileBytes)
     throw bad(
@@ -156,19 +203,19 @@ export function readPluginZip(buffer) {
 }
 
 /**
- * There is no sandbox to run a plugin's server.js inside (unlike themes' LiquidJS sandbox, D-031) — a plugin is
+ * There is no sandbox to run a plugin's plugin.js inside (unlike themes' LiquidJS sandbox, D-031) — a plugin is
  * full, unsandboxed Node.js by design, same trust tier as services.script/dbms.query. This only confirms the
- * package structurally loads: `server.js`, if present, is a syntactically valid ES module whose default export is
+ * package structurally loads: `plugin.js`, if present, is a syntactically valid ES module whose default export is
  * a function. It is NOT a safety guarantee and must not be presented as one in the admin UI.
  * @param {Map<string, {encoding: string, content: string}>} files
  */
 export async function dryRun(files) {
-  const server = files.get('server.js');
-  if (!server) return;
-  const code = server.content;
+  const entry = files.get('plugin.js');
+  if (!entry) return;
+  const code = entry.content;
   const mod = await import(`data:text/javascript;base64,${Buffer.from(code).toString('base64')}`);
   if (typeof mod.default !== 'function')
-    throw bad('server.js must have a default export: (ctx) => an Express router.');
+    throw bad('plugin.js must have a default export: (ctx) => an Express router.');
 }
 
 /** One hash for the whole plugin package (the zip bytes themselves, not the extracted files — see service.js). */

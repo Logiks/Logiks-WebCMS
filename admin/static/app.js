@@ -121,14 +121,17 @@ const H = {
         '<div class="alert alert-danger">Could not load this plugin’s admin screen.</div>';
       return false;
     }
-    for (const child of [...this.$el.children]) {
-      if (child.tagName === 'SCRIPT') {
-        const s = document.createElement('script');
-        for (const a of child.attributes) s.setAttribute(a.name, a.value);
-        s.textContent = child.textContent;
-        child.replaceWith(s);
-      } else Alpine.initTree(child);
+    // Two passes, not one: a script registering `Alpine.data(...)` must run BEFORE initTree() walks markup that
+    // uses it via x-data, regardless of which order the plugin author wrote them in the fragment's HTML.
+    const children = [...this.$el.children];
+    for (const child of children) {
+      if (child.tagName !== 'SCRIPT') continue;
+      const s = document.createElement('script');
+      for (const a of child.attributes) s.setAttribute(a.name, a.value);
+      s.textContent = child.textContent;
+      child.replaceWith(s);
     }
+    for (const child of children) if (child.tagName !== 'SCRIPT') Alpine.initTree(child);
     return true;
   },
 };
@@ -3615,6 +3618,46 @@ document.addEventListener('alpine:init', () => {
     },
     exportUrl(p) {
       return `/api/admin/plugins/${p.slug}/export`;
+    },
+
+    // ───── config (D-061: plugin.json's `config` → a plugin_<slug> settings namespace) ─────
+    configSlug: null, // which row's config panel is open, or null
+    configFields: [],
+    configValues: {},
+    configBusy: false,
+    configError: '',
+    get configPlugin() {
+      return this.plugins.find((p) => p.slug === this.configSlug) ?? null;
+    },
+    async toggleConfig(p) {
+      if (this.configSlug === p.slug) {
+        this.configSlug = null;
+        return;
+      }
+      this.configError = '';
+      try {
+        const data = await api('GET', `/admin/plugins/${p.slug}/config`);
+        this.configFields = data.fields;
+        this.configValues = Object.fromEntries(
+          data.fields.map((f) => [f.key, data.state[f.key].value]),
+        );
+        this.configSlug = p.slug;
+      } catch (e) {
+        this.error = e.message;
+      }
+    },
+    async saveConfig(p) {
+      this.configBusy = true;
+      this.configError = '';
+      try {
+        await api('PUT', `/admin/plugins/${p.slug}/config`, { values: this.configValues });
+        toast(`${p.name}'s settings saved.`);
+        this.configSlug = null;
+      } catch (e) {
+        this.configError = e.message;
+      } finally {
+        this.configBusy = false;
+      }
     },
   }));
 

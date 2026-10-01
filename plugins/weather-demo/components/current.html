@@ -1,0 +1,24 @@
+<script type="application/json" data-cms="meta">
+{
+  "title": "Current weather (Weather Demo plugin)",
+  "description": "Shows the most recent weather lookup made in Applications → Weather Demo.",
+  "api": [{ "name": "weather", "url": "/api/public/services/weather-demo-latest" }]
+}
+</script>
+<style>
+  :host { display: block; }
+  .weather-widget { max-width: 20rem; padding: 1.25rem 1.5rem; border-radius: 12px; background: var(--card, #f3f6f5); }
+  .weather-widget h3 { margin: 0 0 0.35rem; font-size: 1rem; }
+  .weather-widget .temp { font-size: 2rem; font-weight: 700; }
+  .weather-widget .wind { color: var(--muted, #5d7076); font-size: 0.85rem; }
+  .weather-widget.empty { color: var(--muted, #5d7076); font-size: 0.9rem; }
+</style>
+{% if api.weather.available %}
+  <div class="weather-widget">
+    <h3>{{ api.weather.city }}{% if api.weather.country %}, {{ api.weather.country }}{% endif %}</h3>
+    <div class="temp">{{ api.weather.temperature }}{{ api.weather.unit }}</div>
+    <div class="wind">wind {{ api.weather.windspeedKmh }} km/h</div>
+  </div>
+{% else %}
+  <div class="weather-widget empty">No weather lookup yet — an admin needs to check a city under Applications → Weather Demo.</div>
+{% endif %}

@@ -1,8 +1,15 @@
 import express, { Router } from 'express';
 import path from 'node:path';
 import fs from 'node:fs/promises';
-import { HttpError } from '../../core/http/errors.js';
+import { z } from 'zod';
+import { HttpError, parse } from '../../core/http/errors.js';
 import { actorOf, requirePermission } from '../../core/http/middleware.js';
+
+const configWriteBody = z.object({
+  values: z.record(z.string(), z.any()).optional(),
+  versions: z.record(z.string(), z.number()).optional(),
+  reset: z.array(z.string()).optional(),
+});
 
 /** Applications → Plugin Manager (docs/DECISIONS.md D-060). Zip upload/export mirrors themes/routes.js exactly. */
 export default function pluginsRoutes(ctx) {
@@ -53,6 +60,22 @@ export default function pluginsRoutes(ctx) {
       'Content-Disposition': `attachment; filename="plugin-${req.params.slug}.zip"`,
     });
     res.send(zip);
+  });
+
+  // A plugin's own `config` (plugin.json → a `plugin_<slug>` settings-registry namespace, D-061): curated routes
+  // gated by plugins.manage rather than settings.read/write, calling the settings service directly — the same
+  // bypass-the-generic-endpoint pattern Appearance → Customize uses for a theme's own settings namespace
+  // (src/modules/themes/routes.js). The generic GET/PUT /admin/settings/:ns still also reaches this namespace for
+  // anyone holding settings.read/write, exactly as a theme's theme_<id> namespace is reachable both ways today.
+  r.get('/plugins/:slug/config', requirePermission('plugins.manage'), (req, res) => {
+    res.json(ctx.settings.describe(plugins.settingsNs(req.params.slug)));
+  });
+
+  r.put('/plugins/:slug/config', requirePermission('plugins.manage'), async (req, res) => {
+    const ns = plugins.settingsNs(req.params.slug);
+    const body = parse(configWriteBody, req.body);
+    const out = await ctx.settings.update(ns, body, actorOf(req));
+    res.json({ ...out, settings: ctx.settings.describe(ns) });
   });
 
   // Every signed-in admin user calls this (not gated by plugins.read, which is the Plugin Manager screen itself)

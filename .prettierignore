@@ -1,9 +1,11 @@
 admin/static/index.html
 src/modules/*/admin/*.html
+plugins/*/admin/*.html
 package-lock.json
 data/
 node_modules/
 # Liquid inside HTML: a formatter would rewrite tags it cannot parse
 site/defaults/**/*.html
 site/themes/**/*.html
+plugins/*/components/**/*.html
 public/

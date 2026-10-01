@@ -1,0 +1,92 @@
+<div class="page-head d-flex justify-content-between align-items-end flex-wrap gap-2">
+  <div><h1>Weather Demo</h1><p>A demo component, calling this plugin's own demo service, which calls the Open-Meteo weather API.</p></div>
+</div>
+<div x-data="weatherDemo">
+  <div class="panel mb-3">
+    <div class="d-flex gap-2">
+      <input class="form-control" style="max-width:20rem" placeholder="City, e.g. Mumbai" x-model="city" @keydown.enter="check()">
+      <button type="button" class="btn btn-primary" :disabled="busy || !city.trim()" @click="check()" x-text="busy ? 'Checking…' : 'Check weather'"></button>
+    </div>
+    <div class="alert alert-danger mt-3" role="alert" x-show="error" x-text="error"></div>
+    <template x-if="result">
+      <div class="mt-3">
+        <h3 x-text="result.city + (result.country ? ', ' + result.country : '')"></h3>
+        <p class="mb-0"><span class="fs-2" x-text="result.temperature + result.unit"></span> <span class="muted">wind <span x-text="result.windspeed_kmh"></span> km/h</span></p>
+      </div>
+    </template>
+  </div>
+  <div class="panel">
+    <div class="page-head d-flex justify-content-between align-items-end">
+      <h2 class="h5 mb-0">Recent lookups</h2>
+      <a href="#/plugins" class="small">Change default city/units in Plugin Manager →</a>
+    </div>
+    <div class="empty" x-show="loaded && !recent.length">No lookups yet — try a city above.</div>
+    <table class="table" x-show="recent.length"><thead><tr><th>City</th><th>Temp</th><th>Wind</th><th>By</th><th></th></tr></thead><tbody>
+      <template x-for="row in recent" :key="row.id"><tr>
+        <td x-text="row.city + (row.country ? ', ' + row.country : '')"></td>
+        <td x-text="row.temperature + row.unit"></td>
+        <td x-text="row.windspeed_kmh + ' km/h'"></td>
+        <td class="small muted" x-text="row.looked_up_by || '—'"></td>
+        <td class="small muted text-end" x-text="ago(row.looked_up_at)"></td>
+      </tr></template>
+    </tbody></table>
+  </div>
+</div>
+<script>
+  // Registered once this fragment is mounted (H.mountPluginFragment runs every <script> here before binding any
+  // x-data markup, so this is always in place first regardless of where the tag sits in the file). Plain `fetch`
+  // against this plugin's own dispatcher path — both calls are GET, so no CSRF token is needed (the admin's own
+  // `api()` helper only attaches one to non-GET requests).
+  Alpine.data('weatherDemo', () => ({
+    city: '',
+    busy: false,
+    error: '',
+    result: null,
+    recent: [],
+    loaded: false,
+    ago(ms) {
+      const s = Math.max(0, Math.round((Date.now() - ms) / 1000));
+      if (s < 90) return s + 's ago';
+      const m = Math.round(s / 60);
+      return m < 90 ? m + 'm ago' : Math.round(m / 60) + 'h ago';
+    },
+    async init() {
+      try {
+        const res = await fetch('/api/admin/apps/weather-demo/defaults', {
+          credentials: 'same-origin',
+        });
+        this.city = (await res.json()).default_city || '';
+      } catch {
+        /* the city box just starts empty */
+      }
+      await this.loadRecent();
+    },
+    async loadRecent() {
+      try {
+        const res = await fetch('/api/admin/apps/weather-demo/recent', { credentials: 'same-origin' });
+        const data = await res.json();
+        this.recent = data.recent || [];
+      } finally {
+        this.loaded = true;
+      }
+    },
+    async check() {
+      this.busy = true;
+      this.error = '';
+      try {
+        const res = await fetch(
+          '/api/admin/apps/weather-demo/weather?city=' + encodeURIComponent(this.city.trim()),
+          { credentials: 'same-origin' },
+        );
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error?.message || 'Request failed.');
+        this.result = data.result;
+        await this.loadRecent();
+      } catch (e) {
+        this.error = e.message;
+      } finally {
+        this.busy = false;
+      }
+    },
+  }));
+</script>

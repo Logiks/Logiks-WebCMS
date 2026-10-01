@@ -31,7 +31,7 @@ const exists = async (p) => {
  * Either way `enabled` is cluster-shared state, reloaded over the bus and healed by polling (as themes/libraries
  * are) — CLAUDE.md's cluster-safety rule.
  *
- * A plugin's server.js is full, unsandboxed Node.js — same trust tier as services.script/dbms.query (D-046/D-047),
+ * A plugin's plugin.js is full, unsandboxed Node.js — same trust tier as services.script/dbms.query (D-046/D-047),
  * extended for the first time to an installable package. There is no sandbox to dry-run it inside; the dry run
  * only confirms the package structurally loads (see package.js's dryRun). `plugins.manage` must never be granted
  * to a non-wildcard seed role.
@@ -42,13 +42,18 @@ const exists = async (p) => {
  * unmount an ES module) — it just becomes unreachable; re-enabling without a version bump reuses the already-
  * loaded instance, which is safe since nothing about it changed.
  *
+ * A plugin's optional `config` (plugin.json) becomes a `plugin_<slug>` settings-registry namespace (D-061) —
+ * exactly how an installed theme's `settings` becomes `theme_<id>` (D-031/D-052): registered for every KNOWN
+ * plugin regardless of `enabled`, so it can be configured before first use, auto-appearing on the generic
+ * Settings screen with no new UI code, plus a curated GET/PUT /admin/plugins/:slug/config pair (routes.js).
+ *
  * @param {any} ctx the whole platform context, passed whole (not destructured) for the same reason ctx.services
- *        is (src/context.js): a plugin's server.js factory runs at load time, well after every service is built,
+ *        is (src/context.js): a plugin's plugin.js factory runs at load time, well after every service is built,
  *        and needs the complete ctx, not just what this module happens to depend on at construction time.
  * @param {{pluginsDir: string}} opts
  */
 export function createPlugins(ctx, { pluginsDir }) {
-  const { db, bus, audit, permissions, log, env } = ctx;
+  const { db, bus, audit, permissions, settings, log, env } = ctx;
   /** @type {any[]} */
   let rows = [];
   let fingerprint = '';
@@ -57,6 +62,11 @@ export function createPlugins(ctx, { pluginsDir }) {
   const active = new Map();
   /** @type {Map<string, Promise<void>>} slug -> materializing */
   const materializing = new Map();
+  /** @type {Map<string, string>} slug -> JSON of the config fields last registered into the settings registry */
+  const registeredConfig = new Map();
+  // Namespace names are restricted to [a-z][a-z0-9_]* (src/core/settings/registry.js); plugin slugs allow hyphens
+  // but never underscores (PLUGIN_SLUG, package.js), so this substitution is lossless and collision-free.
+  const nsOf = (slug) => `plugin_${slug.replace(/-/g, '_')}`;
 
   const COLS = [
     'id',
@@ -104,6 +114,8 @@ export function createPlugins(ctx, { pluginsDir }) {
     size: p.size,
     enabled: p.enabled,
     loaded: active.has(p.slug),
+    hasConfig: Object.keys(p.manifest.config ?? {}).length > 0,
+    settingsNs: nsOf(p.slug),
     installedAt: p.installedAt,
     updatedAt: p.updatedAt,
   });
@@ -192,6 +204,41 @@ export function createPlugins(ctx, { pluginsDir }) {
   async function reload() {
     rows = (await db('plugins').select(COLS).orderBy('name')).map(fromRow);
     fingerprint = await dbFingerprint();
+    await refreshSettings();
+  }
+
+  /**
+   * Register/update/remove each plugin's `plugin_<slug>` settings namespace from its manifest's `config` block —
+   * mirrors themes/service.js's `refresh()` exactly: `registry.define` isn't idempotent (it throws if the
+   * namespace already exists), so a namespace whose config schema changed is `undefine`d first; anything no
+   * longer known is undefined too. Runs for every known plugin regardless of `enabled`, same as themes registering
+   * settings for an installed-but-inactive theme — configuring something is independent of switching it on.
+   */
+  async function refreshSettings() {
+    let anyChange = false;
+    const known = new Set();
+    for (const p of rows) {
+      known.add(p.slug);
+      const fields = p.manifest.config ?? {};
+      const hash = JSON.stringify(fields);
+      if (registeredConfig.get(p.slug) === hash) continue;
+      const ns = nsOf(p.slug);
+      if (settings.registry.has(ns)) settings.registry.undefine(ns);
+      if (Object.keys(fields).length)
+        settings.registry.define(ns, { title: `Plugin: ${p.name}`, order: 70, fields });
+      registeredConfig.set(p.slug, hash);
+      anyChange = true;
+    }
+    for (const slug of [...registeredConfig.keys()]) {
+      if (known.has(slug)) continue;
+      const ns = nsOf(slug);
+      if (settings.registry.has(ns)) {
+        settings.registry.undefine(ns);
+        anyChange = true;
+      }
+      registeredConfig.delete(slug);
+    }
+    if (anyChange) await settings.reloadDefinitions();
   }
 
   /** Load newly-enabled plugins, drop newly-disabled ones from the active set (never literally unloading code). */
@@ -278,15 +325,18 @@ export function createPlugins(ctx, { pluginsDir }) {
   async function load(p) {
     const dir = path.join(pluginsDir, p.slug);
     if (p.source === 'db') await materialize(p, dir);
-    const serverPath = path.join(dir, 'server.js');
+    const entryPath = path.join(dir, 'plugin.js');
     let router = null;
-    if (await exists(serverPath)) {
+    if (await exists(entryPath)) {
       const mod = await import(
-        `${pathToFileURL(serverPath).href}?v=${encodeURIComponent(p.version)}`
+        `${pathToFileURL(entryPath).href}?v=${encodeURIComponent(p.version)}`
       );
       if (typeof mod.default !== 'function')
-        throw new HttpError(500, 'invalid_plugin', `${p.slug}'s server.js has no default export.`);
-      router = mod.default(ctx);
+        throw new HttpError(500, 'invalid_plugin', `${p.slug}'s plugin.js has no default export.`);
+      // Awaited, not called bare: a plugin's factory may be async (e.g. to seed a Service or a site component it
+      // depends on before its router is considered ready, D-062) — a plain synchronous return still resolves
+      // immediately through await, so this is backward compatible with every existing plugin.js.
+      router = await mod.default(ctx);
     }
     for (const perm of p.manifest.permissions ?? [])
       permissions.define(`Plugin: ${p.name}`, { [perm.key]: perm.label });
@@ -375,6 +425,8 @@ export function createPlugins(ctx, { pluginsDir }) {
     /** Currently enabled+loaded plugins, keyed by slug — the dynamic request dispatcher and admin-fragment
      * middleware read this directly (src/app.js), never mutating Express's own route stack at runtime. */
     active: () => active,
+    /** The settings-registry namespace a plugin's `config` fields live under (routes.js's config endpoints). */
+    settingsNs: (slug) => nsOf(need(slug).slug),
 
     async install(buffer, actor = null) {
       const { manifest, files } = readPluginZip(buffer);

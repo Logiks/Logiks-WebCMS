@@ -38,9 +38,22 @@ const PLUGIN = zipOf({
     menu: { label: 'UI Plugin', icon: 'bi-puzzle' },
     permissions: [],
   }),
-  'server.js':
+  'plugin.js':
     "export default (ctx) => { const { Router } = ctx.require('express'); const r = Router(); r.get('/ping', (req, res) => res.json({ ok: true })); return r; };",
   'admin/index.html': '<div data-testid="uiplug-screen">Hello from the UI plugin</div>',
+});
+
+const CONFIGURED_PLUGIN = zipOf({
+  'plugin.json': JSON.stringify({
+    slug: 'configplug',
+    name: 'Config Plugin',
+    version: '1.0.0',
+    author: 'Test',
+    description: 'A UI test plugin with its own config.',
+    config: {
+      greeting: { type: 'string', label: 'Greeting', default: 'Hello' },
+    },
+  }),
 });
 
 const groupLinks = () =>
@@ -88,4 +101,39 @@ test('installing and enabling a plugin from the admin adds its own nav item and 
   b.click([...row().querySelectorAll('button')].find((x) => x.textContent === 'Disable'));
   await wait(() => /Enable/.test(row().textContent));
   await wait(() => !groupLinks().includes('UI Plugin'));
+});
+
+test('a plugin with a config block gets a "Configure" button that edits its plugin_<slug> settings', async () => {
+  b.go('#/plugins');
+  await wait(() => sec('pluginsPage'));
+  chooseFiles(sec('pluginsPage').querySelector('input[type="file"]'), [
+    file(CONFIGURED_PLUGIN, 'configplug.zip', 'application/zip'),
+  ]);
+  await wait(() => /Config Plugin/.test(sec('pluginsPage').textContent));
+
+  const row = () =>
+    [...sec('pluginsPage').querySelectorAll('tr')].find((r) => /Config Plugin/.test(r.textContent));
+  const configureBtn = () =>
+    [...row().querySelectorAll('button')].find((x) => x.textContent === 'Configure');
+  await wait(() => configureBtn());
+  b.click(configureBtn());
+
+  const panel = () => sec('pluginsPage').querySelector('#pc_greeting');
+  await wait(() => panel());
+  assert.equal(panel().value, 'Hello');
+
+  panel().value = 'Howdy';
+  panel().dispatchEvent(new b.win.Event('input', { bubbles: true }));
+  const saveBtn = () =>
+    [...sec('pluginsPage').querySelectorAll('button')].find(
+      (x) => x.textContent === 'Save settings',
+    );
+  b.click(saveBtn());
+  await wait(() => node.ctx.settings.get('plugin_configplug.greeting') === 'Howdy');
+
+  // the generic Settings screen reaches the same namespace too (zero new UI code for it, D-061)
+  b.go('#/settings');
+  await wait(() =>
+    /Plugin: Config Plugin/.test(b.$('section[x-data^="settingsPage"]')?.textContent ?? ''),
+  );
 });

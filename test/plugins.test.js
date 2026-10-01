@@ -27,7 +27,7 @@ const MANIFEST = (o = {}) =>
 /** A minimal but real plugin: a route, an admin fragment, a migration. */
 const BASE = (extra = {}) => ({
   'plugin.json': MANIFEST(extra),
-  'server.js':
+  'plugin.js':
     "export default function (ctx) {\n  const { Router } = ctx.require('express');\n  const r = Router();\n  r.get('/ping', (req, res) => res.json({ ok: true, dialect: ctx.dialect.kind }));\n  r.get('/rows', async (req, res) => res.json({ n: (await ctx.db('plugin_hello_pings').select('*')).length }));\n  return r;\n}\n",
   'migrate.js':
     "export default async function (db, dialect) {\n  await db.schema.createTable('plugin_hello_pings', (t) => { t.increments('id'); });\n}\n",
@@ -56,7 +56,7 @@ describe('installing a plugin from a zip', () => {
   test('rejects an empty zip, a missing manifest, a bad slug and path traversal', async () => {
     assert.equal((await install(admin, zipOf({}))).status, 422);
     assert.equal(
-      (await install(admin, zipOf({ 'server.js': 'export default () => {}' }))).status,
+      (await install(admin, zipOf({ 'plugin.js': 'export default () => {}' }))).status,
       422,
     );
     assert.equal(
@@ -73,22 +73,22 @@ describe('installing a plugin from a zip', () => {
   test('rejects a symlink entry', async () => {
     const z = new AdmZip();
     z.addFile('plugin.json', Buffer.from(MANIFEST()));
-    z.addFile('server.js', Buffer.from('export default () => {}'));
+    z.addFile('plugin.js', Buffer.from('export default () => {}'));
     const buf = z.toBuffer();
     for (let i = 0; i + 46 < buf.length; i++) {
       if (buf.readUInt32LE(i) !== 0x02014b50) continue;
       const nameLen = buf.readUInt16LE(i + 28);
-      if (buf.subarray(i + 46, i + 46 + nameLen).toString() !== 'server.js') continue;
+      if (buf.subarray(i + 46, i + 46 + nameLen).toString() !== 'plugin.js') continue;
       buf.writeUInt16LE(0x031e, i + 4); // made by: Unix
       buf.writeUInt32LE((0o120777 << 16) >>> 0, i + 38); // external attributes: symlink, rwxrwxrwx
     }
     assert.equal((await install(admin, buf)).status, 422);
   });
 
-  test('rejects a server.js whose default export is not a function', async () => {
+  test('rejects a plugin.js whose default export is not a function', async () => {
     const res = await install(
       admin,
-      zipOf({ 'plugin.json': MANIFEST(), 'server.js': 'export default 42;' }),
+      zipOf({ 'plugin.json': MANIFEST(), 'plugin.js': 'export default 42;' }),
     );
     assert.equal(res.status, 422);
   });
@@ -105,7 +105,7 @@ describe('installing a plugin from a zip', () => {
     const enabled = await admin.post('/api/admin/plugins/hello/enable').send({});
     assert.equal(enabled.status, 200);
     assert.equal(enabled.body.plugin.enabled, true);
-    assert.ok(fs.existsSync(path.join(node.env.PLUGINS_DIR, 'hello', 'server.js')));
+    assert.ok(fs.existsSync(path.join(node.env.PLUGINS_DIR, 'hello', 'plugin.js')));
 
     const ping = await admin.get('/api/admin/apps/hello/ping');
     assert.equal(ping.status, 200);
@@ -173,7 +173,7 @@ describe('a disk-sourced plugin', () => {
       MANIFEST({ slug: 'diskplug', name: 'Disk plugin' }),
     );
     fs.writeFileSync(
-      path.join(dir, 'server.js'),
+      path.join(dir, 'plugin.js'),
       "export default (ctx) => { const { Router } = ctx.require('express'); const r = Router(); r.get('/ping', (req, res) => res.json({ ok: true })); return r; };\n",
     );
     fs.writeFileSync(path.join(dir, 'admin/index.html'), '<div>disk plugin admin</div>');
@@ -220,6 +220,73 @@ describe('permissions', () => {
     );
     const other = await signedIn(node.app, { email: email2, password: 'Correct-Horse-9' });
     assert.equal((await other.get('/api/admin/plugins')).status, 403);
+  });
+});
+
+describe("plugin config (D-061: plugin.json's config → a plugin_<slug> settings namespace)", () => {
+  const WITH_CONFIG = (slug) => ({
+    'plugin.json': MANIFEST({
+      slug,
+      config: {
+        greeting: { type: 'string', label: 'Greeting', default: 'Hello' },
+        loud: { type: 'boolean', label: 'Shout it', default: false },
+      },
+    }),
+  });
+
+  test('declaring config registers a plugin_<slug> namespace (hyphens become underscores), visible generically and editable through the curated route', async () => {
+    await install(admin, zipOf(WITH_CONFIG('with-config')));
+    const list = (await admin.get('/api/admin/plugins')).body.plugins;
+    const row = list.find((p) => p.slug === 'with-config');
+    assert.equal(row.hasConfig, true);
+    assert.equal(row.settingsNs, 'plugin_with_config');
+
+    // generic Settings screen: the namespace appears with no plugin-specific UI code
+    const generic = await admin.get('/api/admin/settings');
+    assert.ok(generic.body.namespaces.some((n) => n.namespace === 'plugin_with_config'));
+
+    // curated route, gated by plugins.manage rather than settings.read/write
+    const got = await admin.get('/api/admin/plugins/with-config/config');
+    assert.equal(got.status, 200);
+    assert.ok(got.body.fields.some((f) => f.key === 'greeting'));
+    assert.equal(got.body.state.greeting.value, 'Hello');
+
+    const saved = await admin
+      .put('/api/admin/plugins/with-config/config')
+      .send({ values: { greeting: 'Howdy', loud: true } });
+    assert.equal(saved.status, 200);
+    assert.equal(saved.body.settings.state.greeting.value, 'Howdy');
+    assert.equal(node.ctx.settings.get('plugin_with_config.loud'), true);
+
+    // rejects a value that doesn't match the field's own type
+    const bad = await admin
+      .put('/api/admin/plugins/with-config/config')
+      .send({ values: { loud: 'not a boolean' } });
+    assert.equal(bad.status, 422);
+
+    await admin.delete('/api/admin/plugins/with-config').catch(() => {});
+  });
+
+  test('a plugin with no config block gets no namespace at all', async () => {
+    await install(admin, zipOf(BASE({ slug: 'no-config' })));
+    const row = (await admin.get('/api/admin/plugins')).body.plugins.find(
+      (p) => p.slug === 'no-config',
+    );
+    assert.equal(row.hasConfig, false);
+    assert.equal((await admin.get('/api/admin/plugins/no-config/config')).status, 404);
+    await admin.delete('/api/admin/plugins/no-config').catch(() => {});
+  });
+
+  test('uninstalling a configured plugin removes its namespace too', async () => {
+    await install(admin, zipOf(WITH_CONFIG('temp-config')));
+    assert.equal((await admin.get('/api/admin/plugins/temp-config/config')).status, 200);
+    await admin.delete('/api/admin/plugins/temp-config');
+    assert.equal(
+      (await admin.get('/api/admin/settings')).body.namespaces.some(
+        (n) => n.namespace === 'plugin_temp_config',
+      ),
+      false,
+    );
   });
 });
 
