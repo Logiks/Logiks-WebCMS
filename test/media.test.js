@@ -59,20 +59,13 @@ test('an uploaded photo is re-encoded without its metadata, rotated upright, and
   assert.equal(v.format, 'webp');
 });
 
-test('the real bytes decide the type: renamed files, SVG, scripts and empty uploads are refused', async () => {
+test('the real bytes decide the type: renamed files, scripts and empty uploads are refused', async () => {
   const notImage = await upload(
     admin,
     Buffer.from('<?php echo 1; ?> not an image at all, just text'),
     'shell.jpg',
   );
   assert.equal(notImage.status, 415);
-  const svg = await upload(
-    admin,
-    Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" onload="alert(1)"></svg>'),
-    'x.svg',
-  );
-  assert.equal(svg.status, 415);
-  assert.match(svg.body.error.message, /SVG/);
   const html = await upload(admin, Buffer.from('<html><script>alert(1)</script></html>'), 'x.png');
   assert.equal(html.status, 415);
   assert.equal((await upload(admin, Buffer.alloc(0), 'e.png')).status, 422);
@@ -89,6 +82,49 @@ test('the real bytes decide the type: renamed files, SVG, scripts and empty uplo
     415,
     'JSON is not a file',
   );
+});
+
+test('SVG (docs/DECISIONS.md D-065): accepted, never re-encoded, sanitized of everything it could attack with', async () => {
+  const clean = await upload(
+    admin,
+    Buffer.from(
+      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/></svg>',
+    ),
+    'icon.svg',
+  );
+  assert.equal(clean.status, 201, JSON.stringify(clean.body));
+  const cleanItem = clean.body.item;
+  assert.equal(cleanItem.mime, 'image/svg+xml');
+  assert.equal(cleanItem.width, 24);
+  assert.equal(cleanItem.height, 24);
+  const stored = fs.readFileSync(path.join(dir, 'm', String(cleanItem.id), 'original.svg'), 'utf8');
+  assert.match(stored, /<circle/);
+
+  const attacks = [
+    '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script><circle r="1"/></svg>',
+    '<svg xmlns="http://www.w3.org/2000/svg"><circle r="1" onload="alert(1)"/></svg>',
+    '<svg xmlns="http://www.w3.org/2000/svg"><style>@import url(evil.css);</style><circle r="1"/></svg>',
+    '<svg xmlns="http://www.w3.org/2000/svg"><foreignObject><body xmlns="http://www.w3.org/1999/xhtml">hi</body></foreignObject></svg>',
+    '<svg xmlns="http://www.w3.org/2000/svg"><image href="https://evil.example/x.png"/></svg>',
+    '<svg xmlns="http://www.w3.org/2000/svg"><a href="javascript:alert(1)"><circle r="1"/></a></svg>',
+    '<svg xmlns="http://www.w3.org/2000/svg"><use xlink:href="https://evil.example/x.svg#y"/></svg>',
+  ];
+  for (const markup of attacks) {
+    const res = await upload(admin, Buffer.from(markup), 'evil.svg');
+    // Either the dangerous part is stripped and a safe remainder is saved (201), or nothing safe survived (422) —
+    // never saved as-is.
+    assert.ok([201, 422].includes(res.status), `unexpected status ${res.status} for: ${markup}`);
+    if (res.status === 201) {
+      const stored2 = fs.readFileSync(
+        path.join(dir, 'm', String(res.body.item.id), 'original.svg'),
+        'utf8',
+      );
+      assert.doesNotMatch(
+        stored2,
+        /<script|on\w+\s*=|@import|<foreignObject|<image|javascript:|evil\.example/i,
+      );
+    }
+  }
 });
 
 test('the upload limit is a setting, and an oversized file says how to fix it', async () => {

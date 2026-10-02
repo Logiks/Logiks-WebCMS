@@ -342,6 +342,23 @@
       </div>
     </template>
 
+    <!-- Webmaster → AI Page Designer: the sessions list, or the chat screen for one session -->
+    <template x-if="route === 'pageDesigner'">
+      <div>
+        <template x-for="v in pageDesignerViews" :key="v.key"><div>
+
+          <template x-if="v.kind === 'list'">
+            <section x-data="pageDesignerList"></section>
+          </template>
+
+          <template x-if="v.kind === 'chat'">
+            <section x-data="pageDesignerChat(v.id)"></section>
+          </template>
+
+        </div></template>
+      </div>
+    </template>
+
     <!-- Categories and tags -->
     <template x-if="route === 'terms'">
       <section x-data="termsPage"></section>

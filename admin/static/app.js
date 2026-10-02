@@ -509,6 +509,7 @@ document.addEventListener('alpine:init', () => {
             // "Site pages", not "Pages": Content already has a content type called Pages, and the two are different things.
             { id: 'pages', label: 'Site pages', perm: 'pages.read' },
             { id: 'components', label: 'Components', perm: 'components.read' },
+            { id: 'pageDesigner', label: 'AI Page Designer', perm: 'pages.write' },
             { id: 'services', label: 'Services', perm: 'services.read' },
             { id: 'seo', label: 'SEO Manager', perm: 'seo.read' },
           ],
@@ -703,6 +704,13 @@ document.addEventListener('alpine:init', () => {
     get pluginEditorViews() {
       const [r, sub] = this.parts;
       if (r !== 'pluginEditor') return [];
+      if (!sub) return [{ key: 'list', kind: 'list' }];
+      return [{ key: `chat:${sub}`, kind: 'chat', id: sub }];
+    },
+    /** Webmaster → AI Page Designer: the sessions list, or the chat screen for one session (its id). */
+    get pageDesignerViews() {
+      const [r, sub] = this.parts;
+      if (r !== 'pageDesigner') return [];
       if (!sub) return [{ key: 'list', kind: 'list' }];
       return [{ key: `chat:${sub}`, kind: 'chat', id: sub }];
     },
@@ -3876,6 +3884,190 @@ document.addEventListener('alpine:init', () => {
     // shape) live in two separate stored rows — merge them into one renderable "turn" here instead of asking the
     // template to reach across messages itself. A user-authored message is always a plain string; a tool-result
     // message is always a content-block array, so that alone tells the two apart.
+    get turns() {
+      const out = [];
+      for (let i = 0; i < this.messages.length; i++) {
+        const m = this.messages[i];
+        if (m.role === 'user' && typeof m.content === 'string') {
+          out.push({ kind: 'user', text: m.content });
+          continue;
+        }
+        if (m.role === 'user') continue; // a tool-result message: already folded into the turn before it
+        const blocks = Array.isArray(m.content) ? m.content : [];
+        const text = blocks
+          .filter((b) => b.type === 'text')
+          .map((b) => b.text)
+          .join('\n');
+        const nextContent = this.messages[i + 1]?.content;
+        const results = Array.isArray(nextContent) ? nextContent : [];
+        const calls = blocks
+          .filter((b) => b.type === 'tool_use')
+          .map((c) => {
+            const r = results.find((x) => x.tool_use_id === c.id);
+            return {
+              name: c.name,
+              input: c.input,
+              ok: r ? !r.is_error : null,
+              resultText: r
+                ? typeof r.content === 'string'
+                  ? r.content
+                  : JSON.stringify(r.content)
+                : '',
+            };
+          });
+        if (text || calls.length) out.push({ kind: 'assistant', text, calls });
+      }
+      return out;
+    },
+  }));
+
+  // ───────── Webmaster → AI Page Designer (docs/DECISIONS.md D-065) ─────────
+  Alpine.data('pageDesignerList', () => ({
+    ...H,
+    sessions: [],
+    pages: [],
+    targetPath: '', // '' = a brand-new page; else edit this existing one
+    loaded: false,
+    busy: false,
+    error: '',
+    async init() {
+      if (!(await this.mountFragment('page-designer', 'list'))) return;
+      await this.load();
+      try {
+        this.pages = (await api('GET', '/admin/site/pages')).pages;
+      } catch {
+        /* the "edit an existing page" dropdown just stays empty */
+      }
+    },
+    async load() {
+      this.sessions = (await api('GET', '/admin/page-designer/sessions')).sessions;
+      this.loaded = true;
+    },
+    async start() {
+      this.busy = true;
+      this.error = '';
+      try {
+        const body = this.targetPath ? { path: this.targetPath } : {};
+        const { session } = await api('POST', '/admin/page-designer/sessions', body);
+        location.hash = '#/pageDesigner/' + session.id;
+      } catch (e) {
+        this.error = e.message;
+      } finally {
+        this.busy = false;
+      }
+    },
+  }));
+
+  Alpine.data('pageDesignerChat', (id) => ({
+    ...H,
+    id,
+    session: null,
+    messages: [],
+    proposals: [],
+    draft: '',
+    busy: false,
+    deciding: false,
+    saving: false,
+    saveMessage: '',
+    error: '',
+    loaded: false,
+    preview: { html: '', busy: false, error: '' },
+    async init() {
+      if (!(await this.mountFragment('page-designer', 'chat'))) return;
+      await this.load();
+      if (this.currentDraft) await this.refreshPreview();
+    },
+    async load() {
+      const data = await api('GET', `/admin/page-designer/sessions/${this.id}`);
+      this.session = data.session;
+      this.messages = data.messages;
+      this.proposals = data.proposals;
+      this.loaded = true;
+    },
+    get pendingProposals() {
+      return this.proposals.filter((p) => p.status === 'pending');
+    },
+    /** The most recent write_page_draft tool call across the whole conversation — mirrors service.js's own
+     * findLatestDraft() so the UI shows exactly what the model last staged, with no separate state to drift. */
+    get currentDraft() {
+      for (let i = this.messages.length - 1; i >= 0; i--) {
+        const blocks = Array.isArray(this.messages[i].content) ? this.messages[i].content : [];
+        const call = blocks.find((b) => b.type === 'tool_use' && b.name === 'write_page_draft');
+        if (call) return call.input;
+      }
+      return null;
+    },
+    async send() {
+      const text = this.draft.trim();
+      if (!text || this.busy) return;
+      this.draft = '';
+      this.error = '';
+      this.saveMessage = '';
+      this.busy = true;
+      try {
+        const out = await api('POST', `/admin/page-designer/sessions/${this.id}/messages`, {
+          text,
+        });
+        this.session = out.session;
+        this.messages = [...this.messages, ...out.messages];
+        await this.load(); // picks up any new proposals too
+        if (this.currentDraft) await this.refreshPreview();
+      } catch (e) {
+        this.error = e.message;
+        this.draft = text; // give it back so nothing typed is lost
+      } finally {
+        this.busy = false;
+      }
+    },
+    async decide(p, verb) {
+      this.deciding = true;
+      try {
+        await api(
+          'POST',
+          `/admin/page-designer/sessions/${this.id}/proposals/${p.id}/${verb === 'approve' ? 'approve' : 'reject'}`,
+        );
+        await this.load();
+        if (this.currentDraft) await this.refreshPreview(); // an approved component may now render differently
+      } catch (e) {
+        this.error = e.message;
+      } finally {
+        this.deciding = false;
+      }
+    },
+    async refreshPreview() {
+      this.preview.busy = true;
+      this.preview.error = '';
+      try {
+        const r = await api('POST', `/admin/page-designer/sessions/${this.id}/preview`);
+        this.preview.html = r.redirect
+          ? `<p style="font:14px system-ui;padding:1rem">Redirects to ${r.redirect.to}</p>`
+          : r.html;
+      } catch (e) {
+        this.preview.error = e.message;
+      } finally {
+        this.preview.busy = false;
+      }
+    },
+    async savePage() {
+      const d = this.currentDraft;
+      if (!d) return;
+      this.saving = true;
+      this.error = '';
+      this.saveMessage = '';
+      try {
+        await api('POST', `/admin/page-designer/sessions/${this.id}/save`, {
+          path: d.path,
+          frontMatter: d.front_matter || {},
+          body: d.body,
+        });
+        this.saveMessage = 'Saved — the page is live.';
+      } catch (e) {
+        this.error = e.message;
+      } finally {
+        this.saving = false;
+      }
+    },
+    // ───── turning the raw Anthropic message history into chat-friendly entries (same shape as Plugin Editor) ─────
     get turns() {
       const out = [];
       for (let i = 0; i < this.messages.length; i++) {

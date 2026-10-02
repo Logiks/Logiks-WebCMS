@@ -1,0 +1,80 @@
+              <div class="page-head d-flex justify-content-between align-items-end flex-wrap gap-2">
+                <div>
+                  <h1 x-text="session?.path ? 'Page: ' + session.path : 'New page'"></h1>
+                  <p>Chat with Claude to plan and build the page. New components or tables need your approval below; nothing is live until you click Save page.</p>
+                </div>
+                <a class="btn btn-outline-secondary" href="#/pageDesigner">← Sessions</a>
+              </div>
+              <div class="row g-3">
+                <div class="col-lg-7">
+                  <div class="panel chat-panel mb-3" style="max-height:55vh; overflow-y:auto;">
+                    <div class="empty" x-show="loaded && !turns.length">Describe the page, e.g. "A pricing page with three tiers and a FAQ section, matching the rest of the site."</div>
+                    <template x-for="(t, i) in turns" :key="i">
+                      <div class="mb-3">
+                        <template x-if="t.kind === 'user'">
+                          <div class="chat-bubble chat-user"><strong>You</strong><div x-text="t.text"></div></div>
+                        </template>
+                        <template x-if="t.kind === 'assistant'">
+                          <div class="chat-bubble chat-assistant">
+                            <strong>Claude</strong>
+                            <div x-show="t.text" x-text="t.text" style="white-space:pre-wrap"></div>
+                            <template x-for="c in t.calls" :key="c.name + JSON.stringify(c.input)">
+                              <div class="small mono mt-1">
+                                <span x-show="c.ok === true">✓</span><span x-show="c.ok === false" class="text-danger">✗</span><span x-show="c.ok === null">…</span>
+                                <span x-text="c.name"></span><span x-show="c.input?.path || c.input?.name" x-text="'(' + (c.input.path || c.input.name) + ')'"></span>
+                                <div x-show="c.ok === false" class="text-danger" x-text="c.resultText"></div>
+                              </div>
+                            </template>
+                          </div>
+                        </template>
+                      </div>
+                    </template>
+                    <div class="small muted" x-show="busy">Thinking…</div>
+                  </div>
+                  <div class="alert alert-danger" role="alert" x-show="error" x-text="error"></div>
+                  <form class="d-flex gap-2" @submit.prevent="send()">
+                    <textarea class="form-control" rows="2" placeholder="Describe what you want…" x-model="draft" :disabled="busy" @keydown.enter.meta.prevent="send()" @keydown.enter.ctrl.prevent="send()"></textarea>
+                    <button class="btn btn-primary" type="submit" :disabled="busy || !draft.trim()">Send</button>
+                  </form>
+                </div>
+                <div class="col-lg-5">
+                  <div class="panel mb-3" x-show="pendingProposals.length">
+                    <div class="page-head"><h2 class="h6 mb-0">Waiting for your approval</h2></div>
+                    <template x-for="p in pendingProposals" :key="p.id">
+                      <div class="border rounded p-2 mb-2">
+                        <template x-if="p.kind === 'component'">
+                          <div>
+                            <div><strong x-text="p.payload.label || p.payload.name"></strong> <span class="small muted">new component</span></div>
+                            <div class="small muted" x-text="p.payload.description || ''"></div>
+                            <div class="small mono" x-text="'props: ' + Object.keys(p.payload.props || {}).join(', ')"></div>
+                          </div>
+                        </template>
+                        <template x-if="p.kind === 'table_service'">
+                          <div>
+                            <div><strong x-text="p.payload.table.name"></strong> <span class="small muted">new table + Service</span></div>
+                            <div class="small mono" x-text="'columns: ' + p.payload.table.columns.map(c => c.name).join(', ')"></div>
+                          </div>
+                        </template>
+                        <div class="d-flex gap-2 mt-2">
+                          <button class="btn btn-sm btn-success" type="button" :disabled="deciding" @click="decide(p, 'approve')">Approve</button>
+                          <button class="btn btn-sm btn-outline-danger" type="button" :disabled="deciding" @click="decide(p, 'reject')">Reject</button>
+                        </div>
+                      </div>
+                    </template>
+                  </div>
+                  <div class="panel">
+                    <div class="page-head d-flex justify-content-between align-items-center">
+                      <h2 class="h6 mb-0">Preview</h2>
+                      <div class="d-flex gap-2">
+                        <button class="btn btn-sm btn-outline-secondary" type="button" :disabled="preview.busy || !currentDraft" @click="refreshPreview()">Refresh</button>
+                        <button class="btn btn-sm btn-primary" type="button" :disabled="!currentDraft || saving" @click="savePage()" x-text="saving ? 'Saving…' : 'Save page'"></button>
+                      </div>
+                    </div>
+                    <div class="empty" x-show="!currentDraft">No draft yet — ask Claude to build the page first.</div>
+                    <div class="small mono px-2" x-show="currentDraft" x-text="currentDraft?.path"></div>
+                    <div class="alert alert-danger small m-2" role="alert" x-show="preview.error" x-text="preview.error"></div>
+                    <div class="alert alert-success small m-2" role="status" x-show="saveMessage" x-text="saveMessage"></div>
+                    <iframe title="Page preview" style="width:100%;height:50vh;border:0;border-top:1px solid var(--line)" sandbox="allow-same-origin" :srcdoc="preview.html" x-show="currentDraft"></iframe>
+                  </div>
+                </div>
+              </div>

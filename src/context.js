@@ -47,6 +47,7 @@ import {
   createMediaGenerator,
   defineMediaGeneratorSettings,
 } from './modules/media-generator/service.js';
+import { createPageDesigner } from './modules/page-designer/service.js';
 
 const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
 
@@ -365,6 +366,10 @@ export async function createContext({ env, bus: busOverride, log: logOverride, a
   ctx.pluginEditor = createPluginEditor(ctx, { pluginsDir: env.PLUGINS_DIR });
   // Media Manager → Media Generator (D-064): needs settings (provider keys) and media.upload (the actual save).
   ctx.mediaGenerator = createMediaGenerator(ctx);
+  // Webmaster → AI Page Designer (D-065): needs the whole finished ctx — siteFiles/sitePages/themes/site (compose
+  // and preview a page), content (site_context), media/mediaGenerator (image tools), dbms/services (the
+  // table+Service proposal) and settings.ns('ai') (reuses Plugin Editor's Anthropic credentials, D-063).
+  ctx.pageDesigner = createPageDesigner(ctx);
   ctx.sitemap = createSitemap({
     settings,
     content,

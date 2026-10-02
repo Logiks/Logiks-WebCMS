@@ -1,0 +1,21 @@
+---
+title: "Under Construction"
+description: "This page is currently under construction — check back soon."
+layout: "default"
+---
+{% render "under_construction",
+  heading: "We're building something new",
+  text: "This page isn't quite ready yet. We're working hard behind the scenes to bring you something great — thanks for your patience!",
+  image_url: "/media/2/original.svg",
+  progress_percent: 65,
+  eta_label: "Estimated launch: coming soon"
+%}
+
+<div style="max-width: 36rem; margin: 0 auto; padding: 0 1.25rem 1rem; text-align: center;">
+  <h2 style="margin-bottom: 0.5rem;">Want to know when we launch?</h2>
+  <p style="color: var(--muted, #5d7076); margin-top: 0;">Leave us a message below and we'll let you know as soon as we're live.</p>
+</div>
+
+{% render "contact-form" %}
+
+{% render "cta", heading: "In the meantime, head back home", button_label: "Back to homepage", button_url: "/" %}

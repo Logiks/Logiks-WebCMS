@@ -1,12 +1,18 @@
 import { createHash } from 'node:crypto';
 import { now } from '../../core/db/index.js';
 import { HttpError, notFound } from '../../core/http/errors.js';
+import { sanitizeSvg, svgDimensions } from './svg.js';
 
 const MAX_PIXELS = 50_000_000; // decoding a 100000×100000 PNG would exhaust memory; refuse before decoding
+const MAX_SVG_HEAD = 1000; // how far into the buffer we look for the opening <svg — real files have it up front
+// Optional BOM/XML declaration/doctype/comments before the root element — same shape a browser's own sniffer uses.
+const SVG_HEAD = /^\s*(<\?xml[^>]*\?>\s*)?(<!--[\s\S]*?-->\s*)*(<!doctype[^>]*>\s*)?<svg[\s>]/i;
 
 /** Identify a file by its bytes. The name and the Content-Type the browser sent are never trusted. */
 export function sniff(b) {
   if (b.length < 12) return null;
+  if (SVG_HEAD.test(b.subarray(0, MAX_SVG_HEAD).toString('utf8')))
+    return { mime: 'image/svg+xml', ext: 'svg', kind: 'image' };
   if (b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff)
     return { mime: 'image/jpeg', ext: 'jpg', kind: 'image' };
   if (b.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])))
@@ -34,6 +40,7 @@ const MIME = {
   jpg: 'image/jpeg',
   png: 'image/png',
   gif: 'image/gif',
+  svg: 'image/svg+xml',
   pdf: 'application/pdf',
 };
 export const mimeOf = (file) => MIME[file.split('.').pop()] ?? 'application/octet-stream';
@@ -54,8 +61,11 @@ const cleanName = (n) =>
  * The media library: upload pipeline, catalogue, and lookups for rendering.
  *
  * Uploads are checked (size, real type), images are re-encoded without their metadata (this drops EXIF, GPS and
- * embedded profiles and applies the camera's rotation) and resized into responsive WebP/AVIF variants. SVG is refused
- * on purpose: it can carry script.
+ * embedded profiles and applies the camera's rotation) and resized into responsive WebP/AVIF variants. SVG is
+ * accepted too (docs/DECISIONS.md D-065), but never re-encoded with `sharp` (it's already resolution-independent)
+ * and never stored as uploaded: it's sanitized first (`./svg.js`, a strict allow-list over the existing
+ * `sanitize-html` dependency — no `<script>`, no external references, no `on*` handlers), since unlike a raster
+ * image an SVG's bytes ARE markup a browser will execute.
  */
 export function createMediaService({
   db,
@@ -147,7 +157,7 @@ export function createMediaService({
         throw new HttpError(
           415,
           'unsupported_type',
-          'Upload a JPEG, PNG, GIF, WebP or AVIF image, or a PDF. (SVG isn’t accepted because it can carry scripts.)',
+          'Upload a JPEG, PNG, GIF, WebP, AVIF or SVG image, or a PDF.',
         );
 
       let stored = buffer;
@@ -155,7 +165,13 @@ export function createMediaService({
       let height = null;
       const variants = [];
       let pending = [];
-      if (type.kind === 'image') {
+      if (type.ext === 'svg') {
+        // Vector, not raster: no sharp re-encode, no responsive variants (it's already resolution-independent).
+        // The sanitizer is the whole safety story here — unlike a JPEG's bytes, an SVG's bytes ARE markup.
+        const clean = sanitizeSvg(buffer.toString('utf8'));
+        stored = Buffer.from(clean, 'utf8');
+        ({ width, height } = svgDimensions(clean));
+      } else if (type.kind === 'image') {
         const sharp = await loadSharp();
         if (!sharp)
           throw new HttpError(

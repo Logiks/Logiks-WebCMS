@@ -1,0 +1,26 @@
+              <div class="page-head d-flex justify-content-between align-items-end flex-wrap gap-2">
+                <div><h1>AI Page Designer</h1><p>Describe a page and Claude plans it, picks or proposes components, generates images, and lays it out — you approve anything new before it's built, and nothing goes live until you click Save.</p></div>
+              </div>
+              <div class="alert alert-danger" role="alert" x-show="error" x-text="error"></div>
+              <div class="panel mb-3">
+                <div class="d-flex gap-2 align-items-end flex-wrap">
+                  <div>
+                    <label class="form-label mb-1" for="pd-target">Work on</label>
+                    <select id="pd-target" class="form-select" style="min-width:16rem" x-model="targetPath">
+                      <option value="">A brand-new page</option>
+                      <template x-for="p in pages" :key="p.path"><option :value="p.path" x-text="(p.front?.title || p.name) + ' (' + p.path + ')'"></option></template>
+                    </select>
+                  </div>
+                  <button class="btn btn-primary" type="button" :disabled="busy" @click="start()" x-text="busy ? 'Starting…' : 'Start session'"></button>
+                </div>
+              </div>
+              <div class="panel">
+                <div class="empty" x-show="loaded && !sessions.length">No sessions yet — start one above.</div>
+                <table class="table" x-show="sessions.length"><thead><tr><th>Session</th><th>Page</th><th></th></tr></thead><tbody>
+                  <template x-for="s in sessions" :key="s.id"><tr>
+                    <td x-text="s.title || '(untitled)'"></td>
+                    <td class="mono small" x-text="s.path || '—'"></td>
+                    <td class="text-end"><a class="btn btn-sm btn-outline-secondary" :href="'#/pageDesigner/' + s.id">Open</a></td>
+                  </tr></template>
+                </tbody></table>
+              </div>
