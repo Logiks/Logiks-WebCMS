@@ -140,6 +140,19 @@ describe('a chat session', () => {
     assert.deepEqual(resumed.messages, []);
   });
 
+  // Regression: a real bug reported live — "Edit with AI" for a plugin that already has a session (e.g. clicked a
+  // second time after navigating away and back) threw a raw "UNIQUE constraint failed: plugin_editor_sessions.slug"
+  // instead of reopening the existing chat.
+  test('creating a session for a plugin that already has one resumes it instead of throwing', async () => {
+    fs.mkdirSync(path.join(node.env.PLUGINS_DIR, 'edit-twice'), { recursive: true });
+    const editor = withClient([]);
+    const first = await editor.create({ slug: 'edit-twice' }, actor);
+    const second = await editor.create({ slug: 'edit-twice' }, actor);
+    assert.equal(second.id, first.id);
+    const rows = await node.ctx.db('plugin_editor_sessions').where({ slug: 'edit-twice' });
+    assert.equal(rows.length, 1);
+  });
+
   test('over HTTP: creating a session and fetching it works end to end (no AI call needed for these)', async () => {
     const created = await admin.post('/api/admin/plugin-editor/sessions').send({});
     assert.equal(created.status, 201);

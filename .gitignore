@@ -29,6 +29,7 @@ data/
 temp/
 zold/
 cache/
+plugins/*
 
 # Runtime data
 pids

@@ -22,5 +22,7 @@
  "components/term-posts.html": "d3ca1e236ac97baf1f717f9c17ed22fc4da2bf90ffa5b0a68dd339dd5030d038",
  "locales/en.json": "7c5a572d12de2e6bef6ec612d76c8592879aebfa67786aad28ba85ea451384ca",
  "components/weather-demo/current.html": "91436474b418ed1fe9b09ec1e84257455dcf28e137f829d1d74a768076a470e9",
- "pages/under-construction.html": "9180a02d400a3d0df7ff852467f077eec1151699d732e7a5f0b9ef4a2250d444"
+ "pages/under-construction.html": "9180a02d400a3d0df7ff852467f077eec1151699d732e7a5f0b9ef4a2250d444",
+ "components/ip-viewer/ip-detector.html": "fa876852087b9aa0e4dc5d728e25d1cd250e886e7e8c0bde0a8a421afb6dbc7c",
+ "components/under_construction.html": "06877e8626f4eb6c7eac9a75f77f5acdf7d8278d992067d1a3251c1bcafcb467"
 }

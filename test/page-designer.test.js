@@ -342,6 +342,88 @@ describe('saving a page', () => {
       /permission/i,
     );
   });
+
+  // Regression: a real bug found after shipping. preview_draft overlays an approved-but-not-yet-created component
+  // proposal so the chat's own preview looks right, which let a page get saved for real referencing a component
+  // the model approved but never actually built (create_component was never called) — the page then rendered fine
+  // inside the Designer but threw "Failed to lookup ... in components" the moment it was opened anywhere else
+  // (Site Pages' own builder preview, or a real visitor).
+  test('saving a page that depends on an APPROVED-but-uncreated component materializes it instead of saving a broken page', async () => {
+    const editor = withClient([
+      toolUse([
+        {
+          name: 'propose_component',
+          input: {
+            name: 'pd_auto_build',
+            label: 'Auto Build',
+            props: { heading: { type: 'string' } },
+            template: '<div>{{ heading }}</div>',
+          },
+        },
+      ]),
+      text('Staged it.'),
+    ]);
+    const created = await editor.create({}, admActor);
+    await editor.sendMessage(created.id, 'Need a banner.', admActor);
+    const { proposals } = await editor.get(created.id);
+    await editor.decideProposal(created.id, proposals[0].id, 'approved', admActor);
+
+    // No create_component tool call ever happens — the save itself must close the gap.
+    assert.throws(() => node.ctx.siteFiles.get('components/pd_auto_build.html'));
+    await editor.save(
+      created.id,
+      {
+        path: 'pages/designer-depends-on-approved.html',
+        frontMatter: { title: 'Depends' },
+        body: '{% render "pd_auto_build", heading: "Hi" %}',
+      },
+      admActor,
+    );
+
+    const component = node.ctx.siteFiles.get('components/pd_auto_build.html');
+    assert.match(component.content, /pd_auto_build|heading/);
+    const page = node.ctx.siteFiles.get('pages/designer-depends-on-approved.html');
+    assert.match(page.content, /pd_auto_build/);
+    const after = await editor.get(created.id);
+    assert.equal(after.proposals[0].status, 'created');
+  });
+
+  test('refuses to save a page that depends on a component that is only pending, with a clear reason', async () => {
+    const editor = withClient([
+      toolUse([
+        {
+          name: 'propose_component',
+          input: { name: 'pd_still_pending', label: 'Pending', props: {}, template: '<div></div>' },
+        },
+      ]),
+      text('Staged it.'),
+    ]);
+    const created = await editor.create({}, admActor);
+    await editor.sendMessage(created.id, 'Need another one.', admActor);
+    await assert.rejects(
+      () =>
+        editor.save(
+          created.id,
+          { path: 'pages/nope2.html', frontMatter: {}, body: '{% render "pd_still_pending" %}' },
+          admActor,
+        ),
+      /pending.*approve it/i,
+    );
+  });
+
+  test('refuses to save a page that depends on a component nobody ever proposed', async () => {
+    const editor = withClient([]);
+    const created = await editor.create({}, admActor);
+    await assert.rejects(
+      () =>
+        editor.save(
+          created.id,
+          { path: 'pages/nope3.html', frontMatter: {}, body: '{% render "totally_made_up" %}' },
+          admActor,
+        ),
+      /isn't an existing component/i,
+    );
+  });
 });
 
 describe('over HTTP', () => {

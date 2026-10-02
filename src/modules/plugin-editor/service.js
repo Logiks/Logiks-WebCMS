@@ -338,10 +338,16 @@ export function createPluginEditor(ctx, { pluginsDir, client: injectedClient }) 
       }
     },
 
-    /** @param {{slug?: string}} opts edit an existing plugin by passing its slug; omit to start a brand-new one */
+    /** @param {{slug?: string}} opts edit an existing plugin by passing its slug; omit to start a brand-new one.
+     * `slug` is unique per session (one ongoing conversation per plugin), so revisiting "Edit with AI" for a
+     * plugin that already has a session resumes it instead of trying to insert a second row and hitting that
+     * constraint — found as a real bug: every plugin's first "Edit with AI" click worked, the second threw a
+     * raw "UNIQUE constraint failed" instead of reopening the existing chat. */
     async create({ slug } = {}, actor = null) {
       if (slug) {
         if (!(await exists(path.join(pluginsDir, slug)))) throw notFound('That plugin');
+        const existing = await db('plugin_editor_sessions').where({ slug }).first();
+        if (existing) return fromRow(existing);
       }
       const t = now();
       const id = await ctx.dialect.insertGetId(db('plugin_editor_sessions'), {

@@ -30,6 +30,18 @@ function serializeComponent({ label, description, props, template, css }) {
   return `${metaBlock}${styleBlock}\n${template ?? ''}`;
 }
 
+const RENDER_CALL = /\{%-?\s*render\s+["']([a-z0-9][a-z0-9_/-]*)["']/gi;
+
+/** Every site component (not `theme/...`, which is always resolved from the active theme, not this tree) a page
+ * body's `{% render %}` calls name — used to catch a draft that quietly depends on a component that was never
+ * actually built (see the "every referenced component must exist" check in `save()` below). */
+function renderedComponentNames(body) {
+  const names = new Set();
+  for (const m of String(body ?? '').matchAll(RENDER_CALL))
+    if (!m[1].startsWith('theme/')) names.add(m[1]);
+  return names;
+}
+
 /**
  * @param {any} ctx the whole platform context
  * @param {{client?: Anthropic}} [opts] `client` is injectable so tests can stub the Anthropic API entirely
@@ -79,6 +91,17 @@ export function createPageDesigner(ctx, { client: injectedClient } = {}) {
     if (!r) throw notFound('That proposal');
     return proposalRow(r);
   };
+
+  /** Writes an approved component proposal's file for real and marks it `created` — the one place this actually
+   * happens, called both by the `create_component` tool (the model's own choice, mid-conversation) and by
+   * `save()` (see its own comment: a draft can reference an approved component the model never got around to
+   * creating, and the page must not go live referencing a file that doesn't exist). */
+  async function materializeComponent(p, actor) {
+    const path = `components/${p.payload.name}.html`;
+    await siteFiles.put(path, serializeComponent(p.payload), actor);
+    await db('page_designer_proposals').where({ id: p.id }).update({ status: 'created' });
+    return path;
+  }
 
   function buildSystemPrompt(session) {
     let existing = '';
@@ -254,10 +277,7 @@ How a page is built here:
               ? 'That component was already created.'
               : `That proposal is "${p.status}", not approved yet. Ask the owner to approve it first.`,
           );
-        const path = `components/${p.payload.name}.html`;
-        await siteFiles.put(path, serializeComponent(p.payload), actor);
-        await db('page_designer_proposals').where({ id: p.id }).update({ status: 'created' });
-        return { ok: true, path };
+        return { ok: true, path: await materializeComponent(p, actor) };
       },
 
       async propose_table_and_service({ table, service }) {
@@ -414,9 +434,40 @@ How a page is built here:
 
     /** Publishes the given draft for real — the one moment this module touches the live site, always an explicit
      * click from the chat UI (never a tool the model itself can call), through the exact same `siteFiles.put` a
-     * human editing the page by hand would go through. */
+     * human editing the page by hand would go through.
+     *
+     * Before writing, every component the body renders must actually exist: `preview_draft` renders an approved-
+     * but-not-yet-built component by laying it over the tree for that one call (so the chat's own preview looks
+     * right), which can leave a draft that previews fine but would 404 the moment anyone opens it outside this
+     * session — the model may simply never have called create_component for something the owner already approved.
+     * So an approved proposal the body depends on is materialized here as part of saving (closing exactly that
+     * gap), and a save is refused with a clear reason if it depends on a component that is neither live nor
+     * approved. */
     async save(id, { path, frontMatter, body }, actor = null) {
       if (!actor?.can('pages.write')) throw forbidden();
+      const live = new Set(siteFiles.list('components/').map((f) => f.name));
+      const missing = [...renderedComponentNames(body)].filter((n) => !live.has(n));
+      if (missing.length) {
+        const proposals = (
+          await db('page_designer_proposals').where({ session_id: id, kind: 'component' })
+        ).map(proposalRow);
+        for (const name of missing) {
+          const p = proposals.find((x) => x.payload.name === name);
+          if (p?.status === 'approved') await materializeComponent(p, actor);
+          else if (p)
+            throw new HttpError(
+              422,
+              'invalid_input',
+              `This page uses the "${name}" component, which is only "${p.status}" — approve it in the chat before saving.`,
+            );
+          else
+            throw new HttpError(
+              422,
+              'invalid_input',
+              `This page uses "${name}", which isn't an existing component or a proposal from this session. Fix the page body or ask Claude to build it first.`,
+            );
+        }
+      }
       const full = `${serializeFrontMatter(frontMatter)}${body}`;
       const result = await siteFiles.put(path, full, actor);
       await db('page_designer_sessions')
