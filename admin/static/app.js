@@ -3841,6 +3841,16 @@ document.addEventListener('alpine:init', () => {
     busy: false,
     error: '',
     loaded: false,
+    // ───── manual editing (docs/DECISIONS.md D-063 shipped read-only; added directly on request) ─────
+    filePath: '',
+    fileContent: '',
+    fileOriginal: '',
+    newFilePath: '',
+    fileSaving: false,
+    fileError: '',
+    get fileDirty() {
+      return !!this.filePath && this.fileContent !== this.fileOriginal;
+    },
     async init() {
       if (!(await this.mountFragment('plugin-editor', 'chat'))) return;
       await this.load();
@@ -3857,6 +3867,64 @@ document.addEventListener('alpine:init', () => {
         this.files = (await api('GET', `/admin/plugin-editor/sessions/${this.id}/files`)).files;
       } catch {
         this.files = [];
+      }
+    },
+    async selectFile(p) {
+      if (this.fileDirty && !confirm('Discard your unsaved changes to this file?')) return;
+      this.fileError = '';
+      try {
+        const content = await (
+          await fetch(
+            `/api/admin/plugin-editor/sessions/${this.id}/file?path=${encodeURIComponent(p)}`,
+            { credentials: 'same-origin' },
+          )
+        ).text();
+        this.filePath = p;
+        this.fileContent = this.fileOriginal = content;
+      } catch (e) {
+        this.fileError = e.message;
+      }
+    },
+    async saveFile() {
+      this.fileSaving = true;
+      this.fileError = '';
+      try {
+        const r = await api('PUT', `/admin/plugin-editor/sessions/${this.id}/file`, {
+          path: this.filePath,
+          content: this.fileContent,
+        });
+        this.files = r.files;
+        this.fileOriginal = this.fileContent;
+        if (!this.session?.slug)
+          this.session = (await api('GET', `/admin/plugin-editor/sessions/${this.id}`)).session;
+        toast('Saved.');
+      } catch (e) {
+        this.fileError = e.message;
+      } finally {
+        this.fileSaving = false;
+      }
+    },
+    async createFile() {
+      const p = this.newFilePath.trim().replace(/^\/+/, '');
+      if (!p) return;
+      this.newFilePath = '';
+      if (this.files.includes(p)) return this.selectFile(p);
+      this.filePath = p;
+      this.fileContent = this.fileOriginal = '';
+      await this.saveFile();
+    },
+    async deleteFile() {
+      if (!confirm(`Delete ${this.filePath}?`)) return;
+      this.fileError = '';
+      try {
+        const r = await api(
+          'DELETE',
+          `/admin/plugin-editor/sessions/${this.id}/file?path=${encodeURIComponent(this.filePath)}`,
+        );
+        this.files = r.files;
+        this.filePath = this.fileContent = this.fileOriginal = '';
+      } catch (e) {
+        this.fileError = e.message;
       }
     },
     async send() {

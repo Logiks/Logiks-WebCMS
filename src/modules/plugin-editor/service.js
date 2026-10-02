@@ -44,10 +44,10 @@ async function loadFileMap(dir) {
 
 /** `path` is untrusted model output: resolve it against the plugin's own directory and refuse anything that escapes. */
 function safePath(dir, p) {
-  if (typeof p !== 'string' || !p) throw new Error('path is required.');
+  if (typeof p !== 'string' || !p) throw new HttpError(422, 'invalid_input', 'path is required.');
   const abs = path.resolve(dir, p);
   if (!abs.startsWith(path.resolve(dir) + path.sep))
-    throw new Error(`"${p}" escapes the plugin's own folder.`);
+    throw new HttpError(422, 'invalid_input', `"${p}" escapes the plugin's own folder.`);
   return abs;
 }
 
@@ -207,8 +207,86 @@ export function createPluginEditor(ctx, { pluginsDir, client: injectedClient }) 
     return fromRow(r);
   };
 
-  /** Tool implementations, scoped to one session's plugin directory. `session` is a plain mutable object the
-   * caller owns for the duration of one turn — write_file may set `session.slug` the first time it's called. */
+  /** `session` is a plain mutable object the caller owns for one call — this may set `session.slug` the first
+   * time a plugin.json is written. Shared by the `write_file` TOOL (the model's own choice, mid-conversation) and
+   * `svc.writeFile` (a human typing directly into the Files panel) — one validated path, two entry points, same
+   * precedent as the SVG support added to the media library (D-065): nothing about writing a file should differ
+   * depending on who asked for it. */
+  async function writeFileReal(session, p, content) {
+    // HttpError throughout (not plain Error): this is called both from the tool loop (which only ever reads
+    // `.message`) and directly from an HTTP route for manual edits, where a plain Error would be swallowed into a
+    // generic 500 by errorHandler — and its real, useful message hidden in production.
+    if (typeof content !== 'string')
+      throw new HttpError(422, 'invalid_input', 'content must be a string of text.');
+    const dir = () => (session.slug ? path.join(pluginsDir, session.slug) : null);
+    if (!session.slug) {
+      if (p !== 'plugin.json')
+        throw new HttpError(
+          422,
+          'invalid_input',
+          'Write plugin.json first — its own "slug" field names this plugin.',
+        );
+      let manifest;
+      try {
+        manifest = manifestSchema.parse(JSON.parse(content));
+      } catch (e) {
+        throw new HttpError(
+          422,
+          'invalid_input',
+          `plugin.json is not valid: ${e.issues?.[0] ? `${e.issues[0].path.join('.')}: ${e.issues[0].message}` : e.message}`,
+          { cause: e },
+        );
+      }
+      const newDir = path.join(pluginsDir, manifest.slug);
+      if (await exists(newDir))
+        throw new HttpError(
+          422,
+          'invalid_input',
+          `"${manifest.slug}" already exists on disk. Choose a different slug.`,
+        );
+      if (await db('plugins').where({ slug: manifest.slug }).first())
+        throw new HttpError(
+          422,
+          'invalid_input',
+          `"${manifest.slug}" is already an installed plugin. Choose a different slug.`,
+        );
+      await fs.mkdir(newDir, { recursive: true });
+      session.slug = manifest.slug;
+    }
+    const size = Buffer.byteLength(content);
+    checkPluginFile(p, size); // throws HttpError on a bad name/extension/folder/size
+    const abs = safePath(dir(), p);
+    const files = await loadFileMap(dir());
+    files.set(p, { encoding: 'utf8', content });
+    checkPluginFiles(files); // throws on an invalid/missing manifest or an oversized package
+    await dryRun(files); // throws if plugin.js, present, isn't structurally valid
+    await fs.mkdir(path.dirname(abs), { recursive: true });
+    await fs.writeFile(abs, content, 'utf8');
+    return { ok: true, path: p, size };
+  }
+
+  /** Shared by the `delete_file` TOOL and `svc.removeFile` — see `writeFileReal`'s comment. */
+  async function deleteFileReal(session, p) {
+    if (!session.slug)
+      throw new HttpError(422, 'invalid_input', 'No plugin exists yet in this session.');
+    const dir = path.join(pluginsDir, session.slug);
+    if (p === 'plugin.json')
+      throw new HttpError(
+        422,
+        'invalid_input',
+        "plugin.json can't be deleted — overwrite it instead, or delete the whole plugin from Plugin Manager once enabled.",
+      );
+    const abs = safePath(dir, p);
+    const files = await loadFileMap(dir);
+    if (!files.has(p)) throw new HttpError(404, 'not_found', `"${p}" doesn't exist.`);
+    files.delete(p);
+    checkPluginFiles(files);
+    await dryRun(files);
+    await fs.rm(abs, { force: true });
+    return { ok: true, path: p };
+  }
+
+  /** Tool implementations, scoped to one session's plugin directory. */
   function toolsFor(session) {
     const dir = () => (session.slug ? path.join(pluginsDir, session.slug) : null);
 
@@ -230,55 +308,11 @@ export function createPluginEditor(ctx, { pluginsDir, client: injectedClient }) 
       },
 
       async write_file({ path: p, content }) {
-        if (typeof content !== 'string') throw new Error('content must be a string of text.');
-        if (!session.slug) {
-          if (p !== 'plugin.json')
-            throw new Error('Write plugin.json first — its own "slug" field names this plugin.');
-          let manifest;
-          try {
-            manifest = manifestSchema.parse(JSON.parse(content));
-          } catch (e) {
-            throw new Error(
-              `plugin.json is not valid: ${e.issues?.[0] ? `${e.issues[0].path.join('.')}: ${e.issues[0].message}` : e.message}`,
-              { cause: e },
-            );
-          }
-          const newDir = path.join(pluginsDir, manifest.slug);
-          if (await exists(newDir))
-            throw new Error(`"${manifest.slug}" already exists on disk. Choose a different slug.`);
-          if (await db('plugins').where({ slug: manifest.slug }).first())
-            throw new Error(
-              `"${manifest.slug}" is already an installed plugin. Choose a different slug.`,
-            );
-          await fs.mkdir(newDir, { recursive: true });
-          session.slug = manifest.slug;
-        }
-        const size = Buffer.byteLength(content);
-        checkPluginFile(p, size); // throws HttpError on a bad name/extension/folder/size
-        const abs = safePath(dir(), p);
-        const files = await loadFileMap(dir());
-        files.set(p, { encoding: 'utf8', content });
-        checkPluginFiles(files); // throws on an invalid/missing manifest or an oversized package
-        await dryRun(files); // throws if plugin.js, present, isn't structurally valid
-        await fs.mkdir(path.dirname(abs), { recursive: true });
-        await fs.writeFile(abs, content, 'utf8');
-        return { ok: true, path: p, size };
+        return writeFileReal(session, p, content);
       },
 
       async delete_file({ path: p }) {
-        if (!dir()) throw new Error('No plugin exists yet in this session.');
-        if (p === 'plugin.json')
-          throw new Error(
-            "plugin.json can't be deleted — overwrite it instead, or delete the whole plugin from Plugin Manager once enabled.",
-          );
-        const abs = safePath(dir(), p);
-        const files = await loadFileMap(dir());
-        if (!files.has(p)) throw new Error(`"${p}" doesn't exist.`);
-        files.delete(p);
-        checkPluginFiles(files);
-        await dryRun(files);
-        await fs.rm(abs, { force: true });
-        return { ok: true, path: p };
+        return deleteFileReal(session, p);
       },
 
       async validate_plugin() {
@@ -336,6 +370,46 @@ export function createPluginEditor(ctx, { pluginsDir, client: injectedClient }) 
       } catch {
         throw notFound('That file');
       }
+    },
+
+    /** Manual editing (docs/DECISIONS.md D-063 named this out of scope for v1; the owner asked for it directly
+     * afterwards): write one file by hand, through the exact same validation the AI's own write_file tool uses.
+     * If this is the first file of a brand-new session, it must be plugin.json — same rule as the chat. */
+    async writeFile(id, p, content, actor = null) {
+      const session = await need(id);
+      const slugAtStart = session.slug;
+      const result = await writeFileReal(session, p, content);
+      if (!slugAtStart && session.slug)
+        await db('plugin_editor_sessions')
+          .where({ id })
+          .update({ slug: session.slug, updated_at: now() });
+      await audit.log({
+        actor,
+        action: 'plugin_editor.file_written',
+        entity: 'plugin_editor_session',
+        entityId: id,
+        meta: { path: p, slug: session.slug },
+      });
+      return {
+        ...result,
+        files: [...(await loadFileMap(path.join(pluginsDir, session.slug))).keys()].sort(),
+      };
+    },
+
+    async removeFile(id, p, actor = null) {
+      const session = await need(id);
+      const result = await deleteFileReal(session, p);
+      await audit.log({
+        actor,
+        action: 'plugin_editor.file_deleted',
+        entity: 'plugin_editor_session',
+        entityId: id,
+        meta: { path: p, slug: session.slug },
+      });
+      return {
+        ...result,
+        files: [...(await loadFileMap(path.join(pluginsDir, session.slug))).keys()].sort(),
+      };
     },
 
     /** @param {{slug?: string}} opts edit an existing plugin by passing its slug; omit to start a brand-new one.

@@ -159,6 +159,7 @@ additive, admin copy reviewed, `CLAUDE.md` "Where we are" updated.
 
 ## Change log
 
+- 2026-10-06 — Plugin Editor's Files panel is no longer read-only (D-066): a file can be viewed and edited by hand, through the same validation the AI's own write_file/delete_file tools use, in a Theme-editor-style file browser + code editor.
 - 2026-10-06 — Webmaster → AI Page Designer built (D-065): a chat session plans a complete new page, picks or proposes components (owner approves anything new), generates raster/SVG images straight into the media library, and lays the page out, reusing the Pages builder's save path, Media Generator's image pipeline and Services/Database's table creation. SVG upload support added to the media library as part of this (sanitized, allow-listed).
 - 2026-10-05 — Plugin Editor's nav moved to a button inside Plugin Manager; Media moved to its own "Media Manager" group, which gained Media Generator (AI images, OpenAI/Google/Stability) and Media Analytics ("Media Usage") (D-064).
 - 2026-10-04 — Applications → Plugin Editor built (M4.1, D-063): a chat session where Claude creates or edits a plugin, writing validated files directly into `plugins/<slug>/`.

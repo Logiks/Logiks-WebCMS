@@ -9,7 +9,7 @@
                 </div>
               </div>
               <div class="row g-3">
-                <div class="col-lg-8">
+                <div class="col-lg-7">
                   <div class="panel chat-panel mb-3" style="max-height:60vh; overflow-y:auto;">
                     <div class="empty" x-show="loaded && !turns.length">Say what you want to build, e.g. "Make a plugin that shows a random quote on the public site."</div>
                     <template x-for="(t, i) in turns" :key="i">
@@ -40,13 +40,25 @@
                     <button class="btn btn-primary" type="submit" :disabled="busy || !draft.trim()">Send</button>
                   </form>
                 </div>
-                <div class="col-lg-4">
-                  <div class="panel">
+                <div class="col-lg-5">
+                  <div class="panel mb-3">
                     <div class="page-head"><h2 class="h6 mb-0">Files</h2></div>
-                    <div class="empty" x-show="!files.length">No files yet.</div>
-                    <ul class="list-unstyled mono small">
-                      <template x-for="f in files" :key="f"><li x-text="f"></li></template>
-                    </ul>
+                    <div class="empty" x-show="!files.length">No files yet — ask Claude to build something, or add plugin.json below to start by hand.</div>
+                    <div class="te-files" x-show="files.length">
+                      <template x-for="f in files" :key="f"><button type="button" class="te-file" :class="{active: f === filePath}" @click="selectFile(f)"><span class="mono small" x-text="f"></span></button></template>
+                    </div>
+                    <div class="p-2 border-top" x-show="can('plugins.manage')">
+                      <form class="d-flex gap-1" @submit.prevent="createFile()"><input class="form-control form-control-sm mono" aria-label="New file path" :placeholder="session?.slug ? 'admin/index.html' : 'plugin.json'" x-model="newFilePath"><button class="btn btn-sm btn-outline-secondary">Add</button></form>
+                    </div>
+                  </div>
+                  <div class="panel" x-show="filePath">
+                    <div class="panel-h d-flex gap-2 align-items-center flex-wrap"><span class="mono" x-text="filePath"></span><span class="tag warn" x-show="fileDirty">Unsaved</span>
+                      <span class="ms-auto"></span>
+                      <button class="btn btn-sm btn-outline-danger" x-show="can('plugins.manage') && filePath !== 'plugin.json'" @click="deleteFile()">Delete</button>
+                      <button class="btn btn-sm btn-primary" x-show="can('plugins.manage')" :disabled="fileSaving || !fileDirty" @click="saveFile()" x-text="fileSaving ? 'Checking and saving…' : 'Save file'"></button>
+                    </div>
+                    <div class="alert alert-danger small m-2" role="alert" x-show="fileError" x-text="fileError"></div>
+                    <textarea id="pe-file-content" class="form-control mono border-0 rounded-0" rows="20" spellcheck="false" aria-label="File content" x-codejar="{ mode: /\.css$/.test(filePath) ? 'css' : /\.jso?n$/.test(filePath) ? 'application/json' : /\.js$/.test(filePath) ? 'javascript' : 'htmlmixed', get: fileContent, set: (v) => (fileContent = v), readOnly: !can('plugins.manage') }"></textarea>
                   </div>
                 </div>
               </div>

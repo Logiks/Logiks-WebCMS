@@ -321,8 +321,14 @@
     <template x-if="route === 'plugins'">
       <section x-data="pluginsPage"></section>
     </template>
-    <template x-if="route.startsWith('plugin-')">
-      <section x-data="pluginScreen(route.slice(7))"></section>
+    <!-- x-for (not x-if): switching from one plugin's screen straight to another's keeps this block's own x-if
+         condition true throughout, so Alpine would never tear down and recreate the section — pluginScreen(slug)'s
+         `slug` is only ever read once, at x-data creation, so the OLD plugin's screen would stay showing until a
+         full reload re-evaluates it fresh. Keying a single-item x-for on the slug forces exactly that destroy/
+         recreate whenever the slug itself changes, the same trick pluginEditorViews/pageDesignerViews already use
+         for their own per-session screens. -->
+    <template x-for="slug in route.startsWith('plugin-') ? [route.slice(7)] : []" :key="slug">
+      <section x-data="pluginScreen(slug)"></section>
     </template>
 
     <!-- Applications → Plugin Editor: the sessions list, or the chat screen for one session -->

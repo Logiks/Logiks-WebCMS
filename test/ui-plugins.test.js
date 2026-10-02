@@ -43,6 +43,19 @@ const PLUGIN = zipOf({
   'admin/index.html': '<div data-testid="uiplug-screen">Hello from the UI plugin</div>',
 });
 
+const PLUGIN_TWO = zipOf({
+  'plugin.json': JSON.stringify({
+    slug: 'uiplug-two',
+    name: 'UI Plugin Two',
+    version: '1.0.0',
+    author: 'Test',
+    description: 'A second UI test plugin, to switch to from the first.',
+    menu: { label: 'UI Plugin Two', icon: 'bi-puzzle' },
+    permissions: [],
+  }),
+  'admin/index.html': '<div data-testid="uiplug-two-screen">Hello from the SECOND UI plugin</div>',
+});
+
 const CONFIGURED_PLUGIN = zipOf({
   'plugin.json': JSON.stringify({
     slug: 'configplug',
@@ -101,6 +114,64 @@ test('installing and enabling a plugin from the admin adds its own nav item and 
   b.click([...row().querySelectorAll('button')].find((x) => x.textContent === 'Disable'));
   await wait(() => /Enable/.test(row().textContent));
   await wait(() => !groupLinks().includes('UI Plugin'));
+});
+
+// Regression: a real bug reported live — clicking from one enabled plugin's nav item straight to another's left
+// the FIRST plugin's screen showing (only a full page reload picked up the new one). `route.startsWith('plugin-')`
+// stayed true across both clicks, so the <template x-if> wrapping `pluginScreen(route.slice(7))` never tore down
+// and recreated the section — `slug` is only ever read once, at x-data creation.
+test('switching from one enabled plugin straight to another updates the screen without a reload', async () => {
+  b.go('#/plugins');
+  await wait(() => sec('pluginsPage'));
+
+  // uiplug was left disabled at the end of the previous test — re-enable it instead of reinstalling.
+  const rowFor = (name) =>
+    [...sec('pluginsPage').querySelectorAll('tr')].find((r) =>
+      new RegExp(name).test(r.textContent),
+    );
+  b.click(
+    [...rowFor('UI Plugin').querySelectorAll('button')].find((x) => x.textContent === 'Enable'),
+  );
+  await wait(() => /Disable/.test(rowFor('UI Plugin').textContent));
+
+  chooseFiles(sec('pluginsPage').querySelector('input[type="file"]'), [
+    file(PLUGIN_TWO, 'uiplug-two.zip', 'application/zip'),
+  ]);
+  await wait(() => rowFor('UI Plugin Two'));
+  b.click(
+    [...rowFor('UI Plugin Two').querySelectorAll('button')].find((x) => x.textContent === 'Enable'),
+  );
+  await wait(() => /Disable/.test(rowFor('UI Plugin Two').textContent));
+
+  await wait(() => groupLinks().includes('UI Plugin') && groupLinks().includes('UI Plugin Two'));
+  const navLink = (label) => [...b.$$('.nav-sub-link')].find((a) => a.textContent.trim() === label);
+
+  b.click(navLink('UI Plugin'));
+  await wait(() => /#\/plugin-uiplug$/.test(b.win.location.hash));
+  await wait(() =>
+    /Hello from the UI plugin\b/.test(b.$('section[x-data^="pluginScreen"]')?.textContent ?? ''),
+  );
+
+  // No reload — straight from one plugin screen to the other.
+  b.click(navLink('UI Plugin Two'));
+  await wait(() => /#\/plugin-uiplug-two$/.test(b.win.location.hash));
+  await wait(() =>
+    /Hello from the SECOND UI plugin/.test(
+      b.$('section[x-data^="pluginScreen"]')?.textContent ?? '',
+    ),
+  );
+  assert.doesNotMatch(
+    b.$('section[x-data^="pluginScreen"]').textContent,
+    /Hello from the UI plugin\b/,
+  );
+
+  // And back the other way, same check.
+  b.click(navLink('UI Plugin'));
+  await wait(() => /#\/plugin-uiplug$/.test(b.win.location.hash));
+  await wait(() =>
+    /Hello from the UI plugin\b/.test(b.$('section[x-data^="pluginScreen"]')?.textContent ?? ''),
+  );
+  assert.doesNotMatch(b.$('section[x-data^="pluginScreen"]').textContent, /SECOND UI plugin/);
 });
 
 test('a plugin with a config block gets a "Configure" button that edits its plugin_<slug> settings', async () => {

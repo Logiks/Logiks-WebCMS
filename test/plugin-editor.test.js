@@ -153,6 +153,72 @@ describe('a chat session', () => {
     assert.equal(rows.length, 1);
   });
 
+  test('manual editing: writeFile establishes the slug the same way the AI tool does, validated the same way', async () => {
+    const editor = withClient([]);
+    const created = await editor.create({}, actor);
+    const manifest = VALID_MANIFEST.replace('chat-demo', 'manual-write');
+    const out = await editor.writeFile(created.id, 'plugin.json', manifest, actor);
+    assert.deepEqual(out.files, ['plugin.json']);
+    const session = await editor.get(created.id);
+    assert.equal(session.session.slug, 'manual-write');
+
+    // An invalid sibling write is refused with the exact same validation the chat path uses.
+    await assert.rejects(
+      () => editor.writeFile(created.id, 'plugin.js', 'export default 42;', actor),
+      /default export/i,
+    );
+    const afterBad = await editor.writeFile(created.id, 'README.md', '# Manual Write', actor);
+    assert.deepEqual(afterBad.files.sort(), ['README.md', 'plugin.json']);
+  });
+
+  test('manual editing: removeFile deletes a file but never plugin.json', async () => {
+    const editor = withClient([]);
+    const created = await editor.create({}, actor);
+    await editor.writeFile(
+      created.id,
+      'plugin.json',
+      VALID_MANIFEST.replace('chat-demo', 'manual-del'),
+      actor,
+    );
+    await editor.writeFile(created.id, 'README.md', '# hi', actor);
+    const out = await editor.removeFile(created.id, 'README.md', actor);
+    assert.deepEqual(out.files, ['plugin.json']);
+    await assert.rejects(
+      () => editor.removeFile(created.id, 'plugin.json', actor),
+      /can't be deleted/i,
+    );
+  });
+
+  test('over HTTP: manual file write/read/delete round-trips through the real routes', async () => {
+    const { session } = (await admin.post('/api/admin/plugin-editor/sessions').send({})).body;
+    const manifest = VALID_MANIFEST.replace('chat-demo', 'http-manual');
+    const put = await admin
+      .put(`/api/admin/plugin-editor/sessions/${session.id}/file`)
+      .send({ path: 'plugin.json', content: manifest });
+    assert.equal(put.status, 200, JSON.stringify(put.body));
+    const got = await admin.get(
+      `/api/admin/plugin-editor/sessions/${session.id}/file?path=${encodeURIComponent('plugin.json')}`,
+    );
+    assert.equal(got.text, manifest);
+
+    const putReadme = await admin
+      .put(`/api/admin/plugin-editor/sessions/${session.id}/file`)
+      .send({ path: 'README.md', content: '# hi' });
+    assert.deepEqual(putReadme.body.files.sort(), ['README.md', 'plugin.json']);
+    const delReadme = await admin.delete(
+      `/api/admin/plugin-editor/sessions/${session.id}/file?path=${encodeURIComponent('README.md')}`,
+    );
+    assert.equal(delReadme.status, 200);
+    assert.deepEqual(delReadme.body.files, ['plugin.json']);
+
+    // plugin.json itself refuses with a clear 422, not a generic 500 — a real gap a plain Error would have hit.
+    const del = await admin.delete(
+      `/api/admin/plugin-editor/sessions/${session.id}/file?path=${encodeURIComponent('plugin.json')}`,
+    );
+    assert.equal(del.status, 422);
+    assert.match(del.body.error.message, /can't be deleted/i);
+  });
+
   test('over HTTP: creating a session and fetching it works end to end (no AI call needed for these)', async () => {
     const created = await admin.post('/api/admin/plugin-editor/sessions').send({});
     assert.equal(created.status, 201);

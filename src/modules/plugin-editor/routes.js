@@ -50,5 +50,30 @@ export default function pluginEditorRoutes(ctx) {
     },
   );
 
+  // Manual editing (docs/DECISIONS.md D-063 shipped read-only; the owner asked for this directly): the same
+  // validated write/delete the AI's own tools use, reachable by hand from the Files panel.
+  r.put(
+    '/plugin-editor/sessions/:id/file',
+    requirePermission('plugins.manage'),
+    async (req, res) => {
+      const body = parse(
+        z.object({ path: z.string().min(1).max(191), content: z.string().max(200_000) }),
+        req.body,
+      );
+      res.json(
+        await pluginEditor.writeFile(Number(req.params.id), body.path, body.content, actorOf(req)),
+      );
+    },
+  );
+
+  r.delete(
+    '/plugin-editor/sessions/:id/file',
+    requirePermission('plugins.manage'),
+    async (req, res) => {
+      const { path: p } = parse(z.object({ path: z.string().min(1).max(191) }), req.query);
+      res.json(await pluginEditor.removeFile(Number(req.params.id), p, actorOf(req)));
+    },
+  );
+
   return r;
 }

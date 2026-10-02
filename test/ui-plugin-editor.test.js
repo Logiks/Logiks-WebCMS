@@ -1,5 +1,7 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
 import AdmZip from 'adm-zip';
 import { makeNode, ADMIN, until } from './helpers.js';
 import { openAdmin } from './ui-harness.js';
@@ -21,6 +23,18 @@ const setValue = (el, v) => {
   el.value = v;
   el.dispatchEvent(new b.win.Event('input', { bubbles: true }));
 };
+/** Same shape as ui-appearance.test.js's own `input()` for the Theme editor's CodeJar-bound textarea. */
+const codeInput = (el, v) => {
+  el.value = v;
+  el.dispatchEvent(new b.win.Event('input', { bubbles: true }));
+  el.dispatchEvent(new b.win.Event('change', { bubbles: true }));
+};
+// x-show only toggles `display:none` — an element stays in the DOM, so querySelector alone can't tell a hidden
+// button from a shown one (the same gotcha CLAUDE.md documents for textContent).
+const btn = (root, label) =>
+  [...root.querySelectorAll('button')]
+    .filter(b.visible)
+    .find((x) => x.textContent.trim() === label);
 
 test('Plugin Editor has no nav entry of its own — it opens from a button inside Plugin Manager', async () => {
   b.go('#/plugins');
@@ -92,4 +106,49 @@ test('"Edit with AI" on a plugin row jumps straight into a session already scope
   await wait(() => /#\/pluginEditor\/\d+/.test(b.win.location.hash));
   await wait(() => sec('pluginEditorChat'));
   assert.match(sec('pluginEditorChat').textContent, /Plugin: editme/);
+});
+
+test('files can be viewed and edited by hand, not only through the chat', async () => {
+  b.go('#/pluginEditor');
+  await wait(() => sec('pluginEditorList'));
+  b.click(btn(sec('pluginEditorList'), 'Start session'));
+  await wait(() => /#\/pluginEditor\/\d+/.test(b.win.location.hash));
+  const page = () => sec('pluginEditorChat');
+  await wait(() => page());
+
+  // No plugin yet: create plugin.json by hand, same validation the AI's own write_file tool uses.
+  const newPathInput = () => page().querySelector('input[aria-label="New file path"]');
+  await wait(() => newPathInput());
+  setValue(newPathInput(), 'plugin.json');
+  b.click([...page().querySelectorAll('button')].find((x) => x.textContent === 'Add'));
+
+  const manifest = JSON.stringify({
+    slug: 'hand-edited',
+    name: 'Hand Edited',
+    version: '1.0.0',
+    author: 'Test',
+    description: 'Written by hand in the Files panel.',
+  });
+  await wait(() => page().querySelector('#pe-file-content'));
+  codeInput(page().querySelector('#pe-file-content'), manifest);
+  await wait(() => btn(page(), 'Save file') && !btn(page(), 'Save file').disabled);
+  b.click(btn(page(), 'Save file'));
+  await wait(() => /Plugin: hand-edited/.test(page().textContent));
+  await wait(() => fs.existsSync(path.join(node.env.PLUGINS_DIR, 'hand-edited', 'plugin.json')));
+
+  // plugin.json itself has no Delete button (every plugin needs one — overwrite it instead).
+  assert.ok(!btn(page(), 'Delete'));
+
+  // Add a second file, then delete it — a file other than plugin.json does get a Delete button.
+  setValue(newPathInput(), 'README.md');
+  b.click([...page().querySelectorAll('button')].find((x) => x.textContent === 'Add'));
+  await wait(() => /README\.md/.test(page().querySelector('.panel-h .mono')?.textContent ?? ''));
+  codeInput(page().querySelector('#pe-file-content'), '# Hand Edited');
+  b.click(btn(page(), 'Save file'));
+  await wait(() => fs.existsSync(path.join(node.env.PLUGINS_DIR, 'hand-edited', 'README.md')));
+  await wait(() => btn(page(), 'Delete'));
+
+  b.win.confirm = () => true;
+  b.click(btn(page(), 'Delete'));
+  await wait(() => !fs.existsSync(path.join(node.env.PLUGINS_DIR, 'hand-edited', 'README.md')));
 });
