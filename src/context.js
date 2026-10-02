@@ -42,6 +42,11 @@ import { createSitemap, defineSitemapSettings } from './modules/sitemap/service.
 import { createLibraries, defineLibrariesSettings } from './modules/libraries/service.js';
 import { createAnalyticsService } from './modules/analytics/service.js';
 import { createPlugins } from './modules/plugins/service.js';
+import { createPluginEditor, defineAiSettings } from './modules/plugin-editor/service.js';
+import {
+  createMediaGenerator,
+  defineMediaGeneratorSettings,
+} from './modules/media-generator/service.js';
 
 const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
 
@@ -77,6 +82,8 @@ export async function createContext({ env, bus: busOverride, log: logOverride, a
   defineCoreSettings(registry);
   defineSitemapSettings(registry);
   defineLibrariesSettings(registry);
+  defineAiSettings(registry);
+  defineMediaGeneratorSettings(registry);
   const permissions = createPermissions();
   defineCorePermissions(permissions);
 
@@ -353,6 +360,11 @@ export async function createContext({ env, bus: busOverride, log: logOverride, a
   // built) and gets the complete ctx, the same reasoning as ctx.services (D-046).
   ctx.plugins = createPlugins(ctx, { pluginsDir: env.PLUGINS_DIR });
   await ctx.plugins.start();
+  // Also needs the finished ctx (db, settings, audit) and the same PLUGINS_DIR plugins itself uses — a Plugin
+  // Editor session writes real plugin files on disk, it never touches the `plugins` table (D-063).
+  ctx.pluginEditor = createPluginEditor(ctx, { pluginsDir: env.PLUGINS_DIR });
+  // Media Manager → Media Generator (D-064): needs settings (provider keys) and media.upload (the actual save).
+  ctx.mediaGenerator = createMediaGenerator(ctx);
   ctx.sitemap = createSitemap({
     settings,
     content,

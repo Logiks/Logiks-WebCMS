@@ -98,6 +98,7 @@ test('signing in shows the shell with navigation for an administrator', async ()
       'Overview',
       'Webmaster',
       'Content',
+      'Media Manager',
       'Applications',
       'Analytics',
       'Logs',
@@ -108,13 +109,13 @@ test('signing in shows the shell with navigation for an administrator', async ()
       'Operations',
       'Automation',
     ],
-    'top level: two links and ten groups',
+    'top level: two links and eleven groups',
   );
   assert.deepEqual(subLinks(), [], 'groups start collapsed on Overview');
 
   click(button('Content'));
   await until(() => subLinks().length);
-  assert.deepEqual(subLinks(), ['Pages', 'Posts', 'Categories and tags', 'Media']);
+  assert.deepEqual(subLinks(), ['Pages', 'Posts', 'Categories and tags']);
   click(button('Content'));
   await until(() => subLinks().length === 0);
 

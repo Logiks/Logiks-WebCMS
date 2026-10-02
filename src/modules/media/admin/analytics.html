@@ -1,0 +1,35 @@
+        <div class="page-head d-flex justify-content-between align-items-end flex-wrap gap-2">
+          <div><h1>Media Analytics</h1><p>Storage and usage across the media library — which files are in use, and which can be cleaned up.</p></div>
+        </div>
+        <div class="row g-3">
+          <div class="col-6 col-lg-3"><div class="panel p-3"><div class="muted small">Files</div><div class="bigver" x-text="data ? data.totalFiles : '–'"></div></div></div>
+          <div class="col-6 col-lg-3"><div class="panel p-3"><div class="muted small">Storage used</div><div class="bigver" x-text="data ? bytes(data.totalBytes) : '–'"></div></div></div>
+          <div class="col-6 col-lg-3"><div class="panel p-3"><div class="muted small">Images</div><div class="bigver" x-text="data ? (data.byKind.image || 0) : '–'"></div></div></div>
+          <div class="col-6 col-lg-3"><div class="panel p-3"><div class="muted small">Unused files</div><div class="bigver" x-text="data ? data.unusedCount : '–'"></div></div></div>
+        </div>
+        <div class="row g-3 mt-1">
+          <div class="col-lg-6">
+            <div class="panel">
+              <div class="page-head"><h2 class="h6 mb-0">Most used</h2></div>
+              <div class="empty" x-show="data && !data.mostUsed.length">Nothing is referenced by any content yet.</div>
+              <table class="table" x-show="data && data.mostUsed.length"><thead><tr><th>File</th><th class="text-end">Used in</th></tr></thead><tbody>
+                <template x-for="m in data?.mostUsed ?? []" :key="m.id"><tr>
+                  <td><a :href="'#/media'" x-text="m.filename"></a></td>
+                  <td class="text-end" x-text="m.usage"></td>
+                </tr></template>
+              </tbody></table>
+            </div>
+          </div>
+          <div class="col-lg-6">
+            <div class="panel">
+              <div class="page-head"><h2 class="h6 mb-0">Unused — candidates for cleanup</h2></div>
+              <div class="empty" x-show="data && !data.unused.length">Nothing unused.</div>
+              <table class="table" x-show="data && data.unused.length"><thead><tr><th>File</th><th></th></tr></thead><tbody>
+                <template x-for="m in data?.unused ?? []" :key="m.id"><tr>
+                  <td x-text="m.filename"></td>
+                  <td class="text-end"><a class="btn btn-sm btn-outline-secondary" href="#/media">View</a></td>
+                </tr></template>
+              </tbody></table>
+            </div>
+          </div>
+        </div>

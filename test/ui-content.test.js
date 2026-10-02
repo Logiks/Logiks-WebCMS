@@ -52,7 +52,7 @@ test('Content lives under its own menu group, with a link per content type', asy
       .filter(b.visible)
       .flatMap((g) => [...g.querySelectorAll('.nav-sub-link')].map((a) => a.textContent.trim()));
   await wait(() => links().includes('Pages'));
-  assert.deepEqual(links(), ['Pages', 'Posts', 'Categories and tags', 'Media']);
+  assert.deepEqual(links(), ['Pages', 'Posts', 'Categories and tags']);
   b.click(b.button('Content'));
 });
 
@@ -494,14 +494,18 @@ test('an author sees only what they can use, and can only save drafts', async ()
     await a.signIn('author@example.com', 'Some-long-pass-12');
     await wait(() => a.$$('.nav-link-x').some((x) => x.textContent.trim() === 'Content'));
     const tops = a.$$('.nav-link-x:not(.nav-sub-link)').map((x) => x.textContent.trim());
-    assert.deepEqual(tops, ['Overview', 'Content'], 'no themes, settings, security or operations');
+    assert.deepEqual(
+      tops,
+      ['Overview', 'Content', 'Media Manager'],
+      'no themes, settings, security or operations',
+    );
     a.click(a.button('Content'));
     await wait(() => a.$$('.nav-sub').some(a.visible));
     const links = a
       .$$('.nav-sub')
       .filter(a.visible)
       .flatMap((g) => [...g.querySelectorAll('.nav-sub-link')].map((x) => x.textContent.trim()));
-    assert.deepEqual(links, ['Pages', 'Posts', 'Media']);
+    assert.deepEqual(links, ['Pages', 'Posts']);
     a.go('#/content/post/new');
     await wait(() => a.$('#e-status'));
     assert.deepEqual(

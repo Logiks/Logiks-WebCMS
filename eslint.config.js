@@ -21,6 +21,7 @@ export default [
         AbortController: 'readonly',
         AbortSignal: 'readonly',
         fetch: 'readonly',
+        FormData: 'readonly',
       },
     },
     rules: { 'no-unused-vars': ['warn', { argsIgnorePattern: '^_' }] },

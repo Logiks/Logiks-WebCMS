@@ -325,6 +325,23 @@
       <section x-data="pluginScreen(route.slice(7))"></section>
     </template>
 
+    <!-- Applications → Plugin Editor: the sessions list, or the chat screen for one session -->
+    <template x-if="route === 'pluginEditor'">
+      <div>
+        <template x-for="v in pluginEditorViews" :key="v.key"><div>
+
+          <template x-if="v.kind === 'list'">
+            <section x-data="pluginEditorList"></section>
+          </template>
+
+          <template x-if="v.kind === 'chat'">
+            <section x-data="pluginEditorChat(v.id)"></section>
+          </template>
+
+        </div></template>
+      </div>
+    </template>
+
     <!-- Categories and tags -->
     <template x-if="route === 'terms'">
       <section x-data="termsPage"></section>
@@ -333,6 +350,14 @@
     <!-- Media -->
     <template x-if="route === 'media'">
       <section x-data="mediaPage" @dragover.prevent="dragging = true" @dragleave="dragging = false" @drop.prevent="dragging = false; can('media.upload') && upload($event.dataTransfer.files)"></section>
+    </template>
+
+    <template x-if="route === 'media-generator'">
+      <section x-data="mediaGeneratorPage"></section>
+    </template>
+
+    <template x-if="route === 'media-analytics'">
+      <section x-data="mediaAnalyticsPage"></section>
     </template>
 
     <!-- Content activity: create/edit/publish/delete across content, pages, components, translations, media, menus, redirects, SEO rules -->

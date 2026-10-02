@@ -1,0 +1,52 @@
+              <div class="page-head d-flex justify-content-between align-items-end flex-wrap gap-2">
+                <div>
+                  <h1 x-text="session?.slug ? 'Plugin: ' + session.slug : 'New plugin'"></h1>
+                  <p>Chat with Claude. Every file it writes is validated the same way an uploaded plugin zip is — nothing invalid is ever saved.</p>
+                </div>
+                <div class="d-flex gap-2">
+                  <a class="btn btn-outline-secondary" href="#/pluginEditor">← Sessions</a>
+                  <a class="btn btn-primary" x-show="session?.slug" href="#/plugins">Review in Plugin Manager →</a>
+                </div>
+              </div>
+              <div class="row g-3">
+                <div class="col-lg-8">
+                  <div class="panel chat-panel mb-3" style="max-height:60vh; overflow-y:auto;">
+                    <div class="empty" x-show="loaded && !turns.length">Say what you want to build, e.g. "Make a plugin that shows a random quote on the public site."</div>
+                    <template x-for="(t, i) in turns" :key="i">
+                      <div class="mb-3">
+                        <template x-if="t.kind === 'user'">
+                          <div class="chat-bubble chat-user"><strong>You</strong><div x-text="t.text"></div></div>
+                        </template>
+                        <template x-if="t.kind === 'assistant'">
+                          <div class="chat-bubble chat-assistant">
+                            <strong>Claude</strong>
+                            <div x-show="t.text" x-text="t.text" style="white-space:pre-wrap"></div>
+                            <template x-for="c in t.calls" :key="c.name + JSON.stringify(c.input)">
+                              <div class="small mono mt-1">
+                                <span x-show="c.ok === true">✓</span><span x-show="c.ok === false" class="text-danger">✗</span><span x-show="c.ok === null">…</span>
+                                <span x-text="c.name"></span><span x-show="c.input?.path" x-text="'(' + c.input.path + ')'"></span>
+                                <div x-show="c.ok === false" class="text-danger" x-text="c.resultText"></div>
+                              </div>
+                            </template>
+                          </div>
+                        </template>
+                      </div>
+                    </template>
+                    <div class="small muted" x-show="busy">Thinking…</div>
+                  </div>
+                  <div class="alert alert-danger" role="alert" x-show="error" x-text="error"></div>
+                  <form class="d-flex gap-2" @submit.prevent="send()">
+                    <textarea class="form-control" rows="2" placeholder="Describe what you want…" x-model="draft" :disabled="busy" @keydown.enter.meta.prevent="send()" @keydown.enter.ctrl.prevent="send()"></textarea>
+                    <button class="btn btn-primary" type="submit" :disabled="busy || !draft.trim()">Send</button>
+                  </form>
+                </div>
+                <div class="col-lg-4">
+                  <div class="panel">
+                    <div class="page-head"><h2 class="h6 mb-0">Files</h2></div>
+                    <div class="empty" x-show="!files.length">No files yet.</div>
+                    <ul class="list-unstyled mono small">
+                      <template x-for="f in files" :key="f"><li x-text="f"></li></template>
+                    </ul>
+                  </div>
+                </div>
+              </div>

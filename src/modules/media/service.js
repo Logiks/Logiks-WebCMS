@@ -233,6 +233,7 @@ export function createMediaService({
         entityId: id,
         meta: { filename: cleanName(name), size: stored.length, kind: type.kind },
       });
+      await cache.invalidate(['media-analytics']); // totals/counts changed
       return svc.get(id);
     },
 
@@ -284,6 +285,60 @@ export function createMediaService({
       return Number((await q.count({ n: '*' }).first()).n);
     },
 
+    /** Totals, most-used and unused files — Media Analytics. Reuses `usage()`'s own per-item definition of
+     * "in use" (the same one `remove()`'s 409 below relies on) rather than a second, possibly-divergent scanner.
+     * Cached (D-015): this is O(media rows × entries), a dashboard, not a hot path — `upload`/`remove` both
+     * invalidate it directly, so staleness is bounded by whichever happens first, not just the 5-minute TTL. */
+    async analytics() {
+      return cache.wrap(
+        'media:analytics',
+        async () => {
+          const rows = await db('media').select(
+            'id',
+            'filename',
+            'kind',
+            'mime',
+            'size',
+            'variants',
+          );
+          let totalBytes = 0;
+          const byKind = {};
+          const byMime = {};
+          for (const r of rows) {
+            const variantBytes = (JSON.parse(r.variants || '[]') ?? []).reduce(
+              (n, v) => n + Number(v.size ?? 0),
+              0,
+            );
+            totalBytes += Number(r.size) + variantBytes;
+            byKind[r.kind] = (byKind[r.kind] ?? 0) + 1;
+            byMime[r.mime] = (byMime[r.mime] ?? 0) + 1;
+          }
+          const withUsage = await Promise.all(
+            rows.map(async (r) => ({
+              id: Number(r.id),
+              filename: r.filename,
+              usage: await svc.usage(r.id),
+            })),
+          );
+          const unused = withUsage.filter((r) => r.usage === 0);
+          const mostUsed = withUsage
+            .filter((r) => r.usage > 0)
+            .sort((a, b) => b.usage - a.usage)
+            .slice(0, 10);
+          return {
+            totalFiles: rows.length,
+            totalBytes,
+            byKind,
+            byMime,
+            unusedCount: unused.length,
+            unused: unused.slice(0, 50),
+            mostUsed,
+          };
+        },
+        { tags: ['media-analytics'], ttl: 300 },
+      );
+    },
+
     async remove(id, { force = false } = {}, actor = null) {
       const m = await svc.get(id);
       const used = await svc.usage(m.id);
@@ -305,7 +360,7 @@ export function createMediaService({
         entityId: m.id,
         meta: { filename: m.filename },
       });
-      await cache.invalidate([`media:${m.id}`]);
+      await cache.invalidate([`media:${m.id}`, 'media-analytics']);
     },
 
     /** The file behind a public URL: the original or one of its variants, or null. */

@@ -1,0 +1,47 @@
+        <div class="page-head d-flex justify-content-between align-items-end flex-wrap gap-2">
+          <div><h1>Media Generator</h1><p>Generate an image with AI, review it, then save it into the media library.</p></div>
+        </div>
+        <div class="alert alert-danger" role="alert" x-show="error" x-text="error"></div>
+        <div class="row g-3">
+          <div class="col-lg-6">
+            <div class="panel p-3">
+              <div class="empty" x-show="!providers.length">Loading providers…</div>
+              <template x-if="providers.length">
+                <div>
+                  <div class="alert alert-warning" x-show="!providers.some((p) => p.configured)">
+                    No provider is configured yet. Add an API key under <a href="#/settings/media_generator">Settings → Media Generator</a> first.
+                  </div>
+                  <label class="form-label" for="mg-provider">Provider</label>
+                  <select id="mg-provider" class="form-select mb-2" x-model="provider">
+                    <template x-for="p in providers" :key="p.id">
+                      <option :value="p.id" :disabled="!p.configured" x-text="p.label + (p.configured ? '' : ' (no key set)')"></option>
+                    </template>
+                  </select>
+                  <label class="form-label" for="mg-prompt">Prompt</label>
+                  <textarea id="mg-prompt" class="form-control mb-2" rows="4" maxlength="2000" placeholder="Describe the image to generate" x-model="prompt"></textarea>
+                  <button class="btn btn-primary" :disabled="busy || !prompt.trim() || !provider" @click="generate()">
+                    <span x-show="!busy">Generate</span><span x-show="busy">Generating…</span>
+                  </button>
+                </div>
+              </template>
+            </div>
+          </div>
+          <div class="col-lg-6">
+            <template x-if="result">
+              <div class="panel p-3">
+                <div class="ph big mb-2"><img :src="result.dataUrl" alt="Generated preview"></div>
+                <label class="form-label" for="mg-filename">File name</label>
+                <input id="mg-filename" class="form-control mb-2" maxlength="200" x-model="filename">
+                <label class="form-label" for="mg-alt">Description for screen readers (alt text)</label>
+                <input id="mg-alt" class="form-control mb-2" maxlength="500" x-model="alt">
+                <div class="d-flex gap-2 flex-wrap">
+                  <button class="btn btn-primary btn-sm" :disabled="saving" @click="save()">
+                    <span x-show="!saving">Save to Media Library</span><span x-show="saving">Saving…</span>
+                  </button>
+                  <button class="btn btn-outline-secondary btn-sm" :disabled="saving" @click="discard()">Discard</button>
+                </div>
+              </div>
+            </template>
+            <div class="empty" x-show="!result">Nothing generated yet.</div>
+          </div>
+        </div>

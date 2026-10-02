@@ -1,0 +1,26 @@
+              <div class="page-head d-flex justify-content-between align-items-end flex-wrap gap-2">
+                <div><h1>Plugin Editor</h1><p>Chat with Claude to create a new plugin or edit an existing one. Nothing is live until you review it and click Enable in Plugin Manager.</p></div>
+              </div>
+              <div class="alert alert-danger" role="alert" x-show="error" x-text="error"></div>
+              <div class="panel mb-3">
+                <div class="d-flex gap-2 align-items-end flex-wrap">
+                  <div>
+                    <label class="form-label mb-1" for="pe-target">Work on</label>
+                    <select id="pe-target" class="form-select" style="min-width:16rem" x-model="targetSlug">
+                      <option value="">A brand-new plugin</option>
+                      <template x-for="p in plugins" :key="p.slug"><option :value="p.slug" x-text="p.name + ' (' + p.slug + ')'"></option></template>
+                    </select>
+                  </div>
+                  <button class="btn btn-primary" type="button" :disabled="busy" @click="start()" x-text="busy ? 'Starting…' : 'Start session'"></button>
+                </div>
+              </div>
+              <div class="panel">
+                <div class="empty" x-show="loaded && !sessions.length">No sessions yet — start one above.</div>
+                <table class="table" x-show="sessions.length"><thead><tr><th>Session</th><th>Plugin</th><th></th></tr></thead><tbody>
+                  <template x-for="s in sessions" :key="s.id"><tr>
+                    <td x-text="s.title || '(untitled)'"></td>
+                    <td class="mono small" x-text="s.slug || '—'"></td>
+                    <td class="text-end"><a class="btn btn-sm btn-outline-secondary" :href="'#/pluginEditor/' + s.id">Open</a></td>
+                  </tr></template>
+                </tbody></table>
+              </div>

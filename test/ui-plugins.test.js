@@ -62,7 +62,7 @@ const groupLinks = () =>
     .filter(b.visible)
     .flatMap((g) => [...g.querySelectorAll('.nav-sub-link')].map((a) => a.textContent.trim()));
 
-test('Applications group starts with just the Plugin Manager', async () => {
+test('Applications group starts with just Plugin Manager (Plugin Editor is a button inside it, not its own nav entry, D-063)', async () => {
   b.go('#/overview');
   await wait(() => b.button('Applications'));
   b.click(b.button('Applications'));

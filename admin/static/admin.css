@@ -259,6 +259,7 @@ body {
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: 6px;
+  padding: 5px;
   overflow-x: auto; /* wide tables scroll inside their panel on phones, never the whole page */
 }
 .panel-h {
@@ -287,6 +288,30 @@ body {
   padding: 2.5rem 1.25rem;
   text-align: center;
   color: var(--muted);
+}
+
+/* ── Plugin Editor chat (D-063) ── */
+.chat-panel {
+  padding: 1rem 1.1rem;
+}
+.chat-bubble {
+  border-radius: 8px;
+  padding: 0.6rem 0.85rem;
+  max-width: 85%;
+}
+.chat-bubble strong {
+  display: block;
+  font-size: 0.78rem;
+  color: var(--muted);
+  font-weight: 600;
+  margin-bottom: 0.15rem;
+}
+.chat-user {
+  background: var(--paper);
+  margin-left: auto;
+}
+.chat-assistant {
+  background: #eef3f8;
 }
 
 /* ── settings ── */

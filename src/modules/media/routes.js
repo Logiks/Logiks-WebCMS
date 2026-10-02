@@ -45,6 +45,10 @@ export default function mediaRoutes(ctx) {
     },
   );
 
+  r.get('/media/analytics', requirePermission('media.read'), async (_req, res) => {
+    res.json(await media.analytics());
+  });
+
   r.get('/media/:id', requirePermission('media.read'), async (req, res) => {
     const item = await media.get(req.params.id);
     res.json({ item, usage: await media.usage(item.id) });

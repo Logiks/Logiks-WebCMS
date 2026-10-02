@@ -38,6 +38,8 @@ import sitemapRoutes from './modules/sitemap/routes.js';
 import librariesRoutes, { libraryPublicRoute } from './modules/libraries/routes.js';
 import analyticsRoutes from './modules/analytics/routes.js';
 import pluginsRoutes, { pluginDispatcher, pluginAdminFragments } from './modules/plugins/routes.js';
+import pluginEditorRoutes from './modules/plugin-editor/routes.js';
+import mediaGeneratorRoutes from './modules/media-generator/routes.js';
 import publicSite from './modules/site/public.js';
 import publicContentApi from './modules/site/api.js';
 import { metricsRoute } from './core/http/metricsRoute.js';
@@ -237,6 +239,8 @@ export function createApp(ctx) {
     librariesRoutes,
     analyticsRoutes,
     pluginsRoutes,
+    pluginEditorRoutes,
+    mediaGeneratorRoutes,
   ])
     admin.use(mod(ctx));
   // A plugin's own admin/backend routes (src/modules/plugins/routes.js) — dispatched dynamically since plugins

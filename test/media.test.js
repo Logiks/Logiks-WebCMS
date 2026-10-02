@@ -194,6 +194,35 @@ test('alt text can be edited (and tells pages to refresh); usage stops a delete 
   assert.equal((await request(node.app).get(`/media/${m.id}/original.jpg`)).status, 404);
 });
 
+test('analytics aggregates totals, most-used and unused, and busts its cache tag on upload/remove', async () => {
+  const before = (await node.ctx.cache.versions(['media-analytics']))['media-analytics'];
+  const used = (await upload(admin, await photo(), 'analytics-used.jpg')).body.item;
+  const unused = (await upload(admin, await photo(), 'analytics-unused.jpg')).body.item;
+  await node.ctx.content.create(
+    'post',
+    { title: 'Analytics post', data: { featured_image: used.id } },
+    null,
+  );
+
+  const after = (await node.ctx.cache.versions(['media-analytics']))['media-analytics'];
+  assert.ok(after > before, 'uploading busts the media-analytics cache tag');
+
+  const res = await admin.get('/api/admin/media/analytics');
+  assert.equal(res.status, 200);
+  const { body } = res;
+  assert.ok(body.totalFiles >= 2);
+  assert.ok(body.totalBytes > 0);
+  assert.ok(body.byKind.image >= 2);
+  assert.ok(body.mostUsed.some((m) => m.id === used.id && m.usage === 1));
+  assert.ok(body.unused.some((m) => m.id === unused.id));
+  assert.ok(!body.unused.some((m) => m.id === used.id));
+
+  const beforeRemove = (await node.ctx.cache.versions(['media-analytics']))['media-analytics'];
+  await admin.delete(`/api/admin/media/${unused.id}`);
+  const afterRemove = (await node.ctx.cache.versions(['media-analytics']))['media-analytics'];
+  assert.ok(afterRemove > beforeRemove, 'deleting also busts the media-analytics cache tag');
+});
+
 test('permissions: reading, uploading and deleting are separate', async () => {
   const role = await node.ctx.users.createRole(
     { name: 'Viewer2', permissions: ['admin.access', 'media.read'] },

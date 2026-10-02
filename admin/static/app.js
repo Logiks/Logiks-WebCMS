@@ -524,7 +524,18 @@ document.addEventListener('alpine:init', () => {
               perm: `content.${t.id}.read`,
             })),
             { id: 'terms', label: 'Categories and tags', perm: 'content.terms.manage' },
-            { id: 'media', label: 'Media', perm: 'media.read' },
+          ],
+        },
+        {
+          // Moved out of Content to its own top-level group: media is used across the whole site (components,
+          // themes, Services), not just content entries, so it doesn't belong nested under one content type's menu.
+          id: 'media-manager',
+          label: 'Media Manager',
+          icon: 'bi-images',
+          items: [
+            { id: 'media', label: 'Media Library', perm: 'media.read' },
+            { id: 'media-generator', label: 'Media Generator', perm: 'media.upload' },
+            { id: 'media-analytics', label: 'Media Analytics', perm: 'media.read' },
           ],
         },
         {
@@ -534,6 +545,8 @@ document.addEventListener('alpine:init', () => {
           label: 'Applications',
           icon: 'bi-grid-3x3-gap',
           items: [
+            // Plugin Editor is reached from a button inside Plugin Manager itself (not its own nav entry) — its
+            // route stays reachable via syncRoute()'s special-case below, the same way 'account' is.
             { id: 'plugins', label: 'Plugin Manager', perm: 'plugins.read' },
             ...this.pluginNav.map((p) => ({
               id: `plugin-${p.slug}`,
@@ -686,6 +699,13 @@ document.addEventListener('alpine:init', () => {
       if (!sub) return [{ key: 'list', kind: 'list' }];
       return [{ key: `edit:${sub}`, kind: 'edit', id: sub === 'new' ? null : sub }];
     },
+    /** Applications → Plugin Editor: the sessions list, or the chat screen for one session (its id). */
+    get pluginEditorViews() {
+      const [r, sub] = this.parts;
+      if (r !== 'pluginEditor') return [];
+      if (!sub) return [{ key: 'list', kind: 'list' }];
+      return [{ key: `chat:${sub}`, kind: 'chat', id: sub }];
+    },
     /** Automation → Scheduler: a list, or the editor for one task (its id). */
     get schedulerViews() {
       const [r, sub] = this.parts;
@@ -784,7 +804,12 @@ document.addEventListener('alpine:init', () => {
       const [first, second] = this.parts;
       const key =
         (first || 'overview') === 'content' ? `content/${second || ''}` : first || 'overview';
-      const ok = key === 'account' || this.navRoutes.includes(key);
+      // Plugin Editor is reached from a button in Plugin Manager, not its own nav link (still permission-gated),
+      // the same "reachable but not listed" shape 'account' already has.
+      const ok =
+        key === 'account' ||
+        (key === 'pluginEditor' && this.can('plugins.manage')) ||
+        this.navRoutes.includes(key);
       this.route = ok ? first || 'overview' : 'overview';
       this.path = ok ? key : 'overview';
       // Landing on a screen (link, reload, back button) opens its group so the menu shows where you are.
@@ -1577,6 +1602,87 @@ document.addEventListener('alpine:init', () => {
       } catch (e) {
         this.error = e.message;
       }
+    },
+  }));
+
+  // ───────── Media Analytics ("Media Usage") ─────────
+  Alpine.data('mediaAnalyticsPage', () => ({
+    ...H,
+    data: null,
+    error: '',
+    bytes,
+    async init() {
+      if (!(await this.mountFragment('media', 'analytics'))) return;
+      try {
+        this.data = await api('GET', '/admin/media/analytics');
+      } catch (e) {
+        this.error = e.message;
+      }
+    },
+  }));
+
+  // ───────── Media Generator (AI images) ─────────
+  Alpine.data('mediaGeneratorPage', () => ({
+    ...H,
+    providers: [],
+    provider: '',
+    prompt: '',
+    result: null,
+    filename: '',
+    alt: '',
+    busy: false,
+    saving: false,
+    error: '',
+    async init() {
+      if (!(await this.mountFragment('media-generator', 'page'))) return;
+      try {
+        const { providers } = await api('GET', '/admin/media-generator/providers');
+        this.providers = providers;
+        const first = providers.find((p) => p.configured);
+        this.provider = first ? first.id : providers[0]?.id || '';
+      } catch (e) {
+        this.error = e.message;
+      }
+    },
+    async generate() {
+      this.busy = true;
+      this.error = '';
+      try {
+        const { dataUrl } = await api('POST', '/admin/media-generator/generate', {
+          provider: this.provider,
+          prompt: this.prompt,
+        });
+        this.result = { dataUrl };
+        this.filename = 'generated.png';
+        this.alt = this.prompt.trim();
+      } catch (e) {
+        this.error = e.message;
+      } finally {
+        this.busy = false;
+      }
+    },
+    async save() {
+      this.saving = true;
+      this.error = '';
+      try {
+        await api('POST', '/admin/media-generator/save', {
+          dataUrl: this.result.dataUrl,
+          filename: this.filename,
+          alt: this.alt,
+        });
+        toast('Saved to the media library.');
+        this.discard();
+      } catch (e) {
+        this.error = e.message;
+      } finally {
+        this.saving = false;
+      }
+    },
+    discard() {
+      this.result = null;
+      this.prompt = '';
+      this.filename = '';
+      this.alt = '';
     },
   }));
 
@@ -3619,6 +3725,16 @@ document.addEventListener('alpine:init', () => {
     exportUrl(p) {
       return `/api/admin/plugins/${p.slug}/export`;
     },
+    // Plugin Editor is a button here, not its own nav entry — this starts a session already scoped to the
+    // plugin that was clicked, so the chat opens straight into editing it (docs/DECISIONS.md D-063).
+    async editWithAi(p) {
+      try {
+        const { session } = await api('POST', '/admin/plugin-editor/sessions', { slug: p.slug });
+        location.hash = '#/pluginEditor/' + session.id;
+      } catch (e) {
+        this.error = e.message;
+      }
+    },
 
     // ───── config (D-061: plugin.json's `config` → a plugin_<slug> settings namespace) ─────
     configSlug: null, // which row's config panel is open, or null
@@ -3667,6 +3783,133 @@ document.addEventListener('alpine:init', () => {
     slug,
     async init() {
       await this.mountPluginFragment(slug);
+    },
+  }));
+
+  // ───────── Applications → Plugin Editor (docs/DECISIONS.md D-063) ─────────
+  Alpine.data('pluginEditorList', () => ({
+    ...H,
+    sessions: [],
+    plugins: [],
+    targetSlug: '', // '' = start a brand-new plugin; else edit this existing one
+    loaded: false,
+    busy: false,
+    error: '',
+    async init() {
+      if (!(await this.mountFragment('plugin-editor', 'list'))) return;
+      await this.load();
+      try {
+        this.plugins = (await api('GET', '/admin/plugins')).plugins;
+      } catch {
+        /* the "edit an existing plugin" dropdown just stays empty */
+      }
+    },
+    async load() {
+      this.sessions = (await api('GET', '/admin/plugin-editor/sessions')).sessions;
+      this.loaded = true;
+    },
+    async start() {
+      this.busy = true;
+      this.error = '';
+      try {
+        const body = this.targetSlug ? { slug: this.targetSlug } : {};
+        const { session } = await api('POST', '/admin/plugin-editor/sessions', body);
+        location.hash = '#/pluginEditor/' + session.id;
+      } catch (e) {
+        this.error = e.message;
+      } finally {
+        this.busy = false;
+      }
+    },
+  }));
+
+  Alpine.data('pluginEditorChat', (id) => ({
+    ...H,
+    id,
+    session: null,
+    messages: [],
+    files: [],
+    draft: '',
+    busy: false,
+    error: '',
+    loaded: false,
+    async init() {
+      if (!(await this.mountFragment('plugin-editor', 'chat'))) return;
+      await this.load();
+    },
+    async load() {
+      const data = await api('GET', `/admin/plugin-editor/sessions/${this.id}`);
+      this.session = data.session;
+      this.messages = data.messages;
+      this.loaded = true;
+      await this.loadFiles();
+    },
+    async loadFiles() {
+      try {
+        this.files = (await api('GET', `/admin/plugin-editor/sessions/${this.id}/files`)).files;
+      } catch {
+        this.files = [];
+      }
+    },
+    async send() {
+      const text = this.draft.trim();
+      if (!text || this.busy) return;
+      this.draft = '';
+      this.error = '';
+      this.busy = true;
+      try {
+        const out = await api('POST', `/admin/plugin-editor/sessions/${this.id}/messages`, {
+          text,
+        });
+        this.session = out.session;
+        this.messages = [...this.messages, ...out.messages];
+        await this.loadFiles();
+      } catch (e) {
+        this.error = e.message;
+        this.draft = text; // give it back so nothing typed is lost
+      } finally {
+        this.busy = false;
+      }
+    },
+    // ───── turning the raw Anthropic message history into chat-friendly entries ─────
+    // A tool call (assistant message) and its result (the VERY NEXT message, role 'user', per the API's own
+    // shape) live in two separate stored rows — merge them into one renderable "turn" here instead of asking the
+    // template to reach across messages itself. A user-authored message is always a plain string; a tool-result
+    // message is always a content-block array, so that alone tells the two apart.
+    get turns() {
+      const out = [];
+      for (let i = 0; i < this.messages.length; i++) {
+        const m = this.messages[i];
+        if (m.role === 'user' && typeof m.content === 'string') {
+          out.push({ kind: 'user', text: m.content });
+          continue;
+        }
+        if (m.role === 'user') continue; // a tool-result message: already folded into the turn before it
+        const blocks = Array.isArray(m.content) ? m.content : [];
+        const text = blocks
+          .filter((b) => b.type === 'text')
+          .map((b) => b.text)
+          .join('\n');
+        const nextContent = this.messages[i + 1]?.content;
+        const results = Array.isArray(nextContent) ? nextContent : [];
+        const calls = blocks
+          .filter((b) => b.type === 'tool_use')
+          .map((c) => {
+            const r = results.find((x) => x.tool_use_id === c.id);
+            return {
+              name: c.name,
+              input: c.input,
+              ok: r ? !r.is_error : null,
+              resultText: r
+                ? typeof r.content === 'string'
+                  ? r.content
+                  : JSON.stringify(r.content)
+                : '',
+            };
+          });
+        if (text || calls.length) out.push({ kind: 'assistant', text, calls });
+      }
+      return out;
     },
   }));
 

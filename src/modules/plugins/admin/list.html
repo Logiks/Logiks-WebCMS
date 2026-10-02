@@ -1,6 +1,7 @@
               <div class="page-head d-flex justify-content-between align-items-end flex-wrap gap-2">
                 <div><h1>Plugin Manager</h1><p>Installed plugins. A plugin's server code runs with full access to this server — only install ones you trust.</p></div>
                 <div class="d-flex gap-2">
+                  <a class="btn btn-outline-primary" x-show="can('plugins.manage')" href="#/pluginEditor">✨ Plugin Editor</a>
                   <button class="btn btn-outline-secondary" type="button" x-show="can('plugins.manage')" :class="{disabled: busy}" @click="rescan()">Rescan plugins/</button>
                   <label class="btn btn-primary mb-0" x-show="can('plugins.manage')" :class="{disabled: busy}">Install from .zip<input type="file" hidden accept=".zip,application/zip" @change="upload($event.target.files[0]); $event.target.value = ''"></label>
                 </div>
@@ -18,6 +19,7 @@
                       <span class="tag" x-show="p.enabled && !p.loaded" title="Enabled but not yet loaded on this server">Loading…</span>
                     </td>
                     <td class="text-end text-nowrap">
+                      <button class="btn btn-sm btn-outline-secondary" type="button" x-show="can('plugins.manage')" @click="editWithAi(p)">Edit with AI</button>
                       <button class="btn btn-sm btn-outline-secondary" type="button" x-show="can('plugins.manage') && p.hasConfig" :class="{active: configSlug === p.slug}" @click="toggleConfig(p)">Configure</button>
                       <button class="btn btn-sm btn-outline-secondary" type="button" x-show="can('plugins.manage')" @click="toggle(p)" x-text="p.enabled ? 'Disable' : 'Enable'"></button>
                       <a class="btn btn-sm btn-outline-secondary" x-show="can('plugins.read')" :href="exportUrl(p)">Export</a>
