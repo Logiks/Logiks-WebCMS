@@ -3834,6 +3834,7 @@ document.addEventListener('alpine:init', () => {
   Alpine.data('pluginEditorChat', (id) => ({
     ...H,
     id,
+    tab: 'chat',
     session: null,
     messages: [],
     files: [],
@@ -3881,6 +3882,7 @@ document.addEventListener('alpine:init', () => {
         ).text();
         this.filePath = p;
         this.fileContent = this.fileOriginal = content;
+        this.tab = 'files';
       } catch (e) {
         this.fileError = e.message;
       }
@@ -3911,6 +3913,7 @@ document.addEventListener('alpine:init', () => {
       if (this.files.includes(p)) return this.selectFile(p);
       this.filePath = p;
       this.fileContent = this.fileOriginal = '';
+      this.tab = 'files';
       await this.saveFile();
     },
     async deleteFile() {
@@ -3923,6 +3926,7 @@ document.addEventListener('alpine:init', () => {
         );
         this.files = r.files;
         this.filePath = this.fileContent = this.fileOriginal = '';
+        this.tab = 'chat';
       } catch (e) {
         this.fileError = e.message;
       }

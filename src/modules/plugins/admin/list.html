@@ -28,24 +28,26 @@
                   </tr></template>
                 </tbody></table>
               </div>
-              <template x-if="configPlugin">
-                <div class="panel mt-3">
-                  <div class="page-head"><h2 class="h5 mb-0" x-text="configPlugin.name + ' settings'"></h2></div>
-                  <div class="alert alert-danger" role="alert" x-show="configError" x-text="configError"></div>
-                  <template x-for="f in configFields" :key="f.key">
-                    <div class="mb-3">
-                      <label class="form-label" :for="'pc_' + f.key" x-text="f.label"></label>
-                      <template x-if="f.type === 'string'"><input :id="'pc_' + f.key" class="form-control" :value="configValues[f.key]" @input="configValues[f.key] = $event.target.value"></template>
-                      <template x-if="f.type === 'text'"><textarea :id="'pc_' + f.key" rows="3" class="form-control" :value="configValues[f.key]" @input="configValues[f.key] = $event.target.value"></textarea></template>
-                      <template x-if="f.type === 'number'"><input :id="'pc_' + f.key" type="number" class="form-control" style="max-width:10rem" :value="configValues[f.key]" :min="f.min" :max="f.max" @input="configValues[f.key] = $event.target.value === '' ? '' : Number($event.target.value)"></template>
-                      <template x-if="f.type === 'boolean'"><div class="form-check form-switch"><input :id="'pc_' + f.key" type="checkbox" class="form-check-input" role="switch" :checked="configValues[f.key]" @change="configValues[f.key] = $event.target.checked"><label class="form-check-label muted" :for="'pc_' + f.key" x-text="configValues[f.key] ? 'On' : 'Off'"></label></div></template>
-                      <template x-if="f.type === 'select'"><select :id="'pc_' + f.key" class="form-select" @change="configValues[f.key] = $event.target.value"><template x-for="o in f.options" :key="o.value"><option :value="o.value" :selected="o.value === configValues[f.key]" x-text="o.label"></option></template></select></template>
-                      <div class="small muted" x-show="f.help" x-text="f.help"></div>
+              <div class="modal-x" x-show="configPlugin" style="display:none" role="dialog" aria-modal="true" :aria-label="(configPlugin?.name || '') + ' settings'" @keydown.escape.window="configPlugin && (configSlug = null)">
+                <template x-if="configPlugin">
+                  <div class="modal-card">
+                    <div class="page-head"><h2 class="h5 mb-0" x-text="configPlugin.name + ' settings'"></h2></div>
+                    <div class="alert alert-danger" role="alert" x-show="configError" x-text="configError"></div>
+                    <template x-for="f in configFields" :key="f.key">
+                      <div class="mb-3">
+                        <label class="form-label" :for="'pc_' + f.key" x-text="f.label"></label>
+                        <template x-if="f.type === 'string'"><input :id="'pc_' + f.key" class="form-control" :value="configValues[f.key]" @input="configValues[f.key] = $event.target.value"></template>
+                        <template x-if="f.type === 'text'"><textarea :id="'pc_' + f.key" rows="3" class="form-control" :value="configValues[f.key]" @input="configValues[f.key] = $event.target.value"></textarea></template>
+                        <template x-if="f.type === 'number'"><input :id="'pc_' + f.key" type="number" class="form-control" style="max-width:10rem" :value="configValues[f.key]" :min="f.min" :max="f.max" @input="configValues[f.key] = $event.target.value === '' ? '' : Number($event.target.value)"></template>
+                        <template x-if="f.type === 'boolean'"><div class="form-check form-switch"><input :id="'pc_' + f.key" type="checkbox" class="form-check-input" role="switch" :checked="configValues[f.key]" @change="configValues[f.key] = $event.target.checked"><label class="form-check-label muted" :for="'pc_' + f.key" x-text="configValues[f.key] ? 'On' : 'Off'"></label></div></template>
+                        <template x-if="f.type === 'select'"><select :id="'pc_' + f.key" class="form-select" @change="configValues[f.key] = $event.target.value"><template x-for="o in f.options" :key="o.value"><option :value="o.value" :selected="o.value === configValues[f.key]" x-text="o.label"></option></template></select></template>
+                        <div class="small muted" x-show="f.help" x-text="f.help"></div>
+                      </div>
+                    </template>
+                    <div class="d-flex gap-2">
+                      <button class="btn btn-primary" type="button" :disabled="configBusy" @click="saveConfig(configPlugin)">Save settings</button>
+                      <button class="btn btn-outline-secondary" type="button" @click="configSlug = null">Cancel</button>
                     </div>
-                  </template>
-                  <div class="d-flex gap-2">
-                    <button class="btn btn-primary" type="button" :disabled="configBusy" @click="saveConfig(configPlugin)">Save settings</button>
-                    <button class="btn btn-outline-secondary" type="button" @click="configSlug = null">Cancel</button>
                   </div>
-                </div>
-              </template>
+                </template>
+              </div>

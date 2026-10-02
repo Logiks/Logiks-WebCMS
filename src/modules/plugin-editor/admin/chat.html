@@ -10,35 +10,54 @@
               </div>
               <div class="row g-3">
                 <div class="col-lg-7">
-                  <div class="panel chat-panel mb-3" style="max-height:60vh; overflow-y:auto;">
-                    <div class="empty" x-show="loaded && !turns.length">Say what you want to build, e.g. "Make a plugin that shows a random quote on the public site."</div>
-                    <template x-for="(t, i) in turns" :key="i">
-                      <div class="mb-3">
-                        <template x-if="t.kind === 'user'">
-                          <div class="chat-bubble chat-user"><strong>You</strong><div x-text="t.text"></div></div>
-                        </template>
-                        <template x-if="t.kind === 'assistant'">
-                          <div class="chat-bubble chat-assistant">
-                            <strong>Claude</strong>
-                            <div x-show="t.text" x-text="t.text" style="white-space:pre-wrap"></div>
-                            <template x-for="c in t.calls" :key="c.name + JSON.stringify(c.input)">
-                              <div class="small mono mt-1">
-                                <span x-show="c.ok === true">✓</span><span x-show="c.ok === false" class="text-danger">✗</span><span x-show="c.ok === null">…</span>
-                                <span x-text="c.name"></span><span x-show="c.input?.path" x-text="'(' + c.input.path + ')'"></span>
-                                <div x-show="c.ok === false" class="text-danger" x-text="c.resultText"></div>
-                              </div>
-                            </template>
-                          </div>
-                        </template>
-                      </div>
-                    </template>
-                    <div class="small muted" x-show="busy">Thinking…</div>
+                  <ul class="nav nav-tabs mb-3">
+                    <li class="nav-item"><button type="button" class="nav-link" :class="{active: tab === 'chat'}" @click="tab = 'chat'">Chat</button></li>
+                    <li class="nav-item"><button type="button" class="nav-link" :class="{active: tab === 'files'}" @click="tab = 'files'" :disabled="!filePath">Code editor <span class="tag warn" x-show="fileDirty">Unsaved</span></button></li>
+                  </ul>
+
+                  <div x-show="tab === 'chat'">
+                    <div class="panel chat-panel mb-3" style="max-height:60vh; overflow-y:auto;">
+                      <div class="empty" x-show="loaded && !turns.length">Say what you want to build, e.g. "Make a plugin that shows a random quote on the public site."</div>
+                      <template x-for="(t, i) in turns" :key="i">
+                        <div class="mb-3">
+                          <template x-if="t.kind === 'user'">
+                            <div class="chat-bubble chat-user"><strong>You</strong><div x-text="t.text"></div></div>
+                          </template>
+                          <template x-if="t.kind === 'assistant'">
+                            <div class="chat-bubble chat-assistant">
+                              <strong>Claude</strong>
+                              <div x-show="t.text" x-text="t.text" style="white-space:pre-wrap"></div>
+                              <template x-for="c in t.calls" :key="c.name + JSON.stringify(c.input)">
+                                <div class="small mono mt-1">
+                                  <span x-show="c.ok === true">✓</span><span x-show="c.ok === false" class="text-danger">✗</span><span x-show="c.ok === null">…</span>
+                                  <span x-text="c.name"></span><span x-show="c.input?.path" x-text="'(' + c.input.path + ')'"></span>
+                                  <div x-show="c.ok === false" class="text-danger" x-text="c.resultText"></div>
+                                </div>
+                              </template>
+                            </div>
+                          </template>
+                        </div>
+                      </template>
+                      <div class="small muted" x-show="busy">Thinking…</div>
+                    </div>
+                    <div class="alert alert-danger" role="alert" x-show="error" x-text="error"></div>
+                    <form class="d-flex gap-2" @submit.prevent="send()">
+                      <textarea class="form-control" rows="2" placeholder="Describe what you want…" x-model="draft" :disabled="busy" @keydown.enter.meta.prevent="send()" @keydown.enter.ctrl.prevent="send()"></textarea>
+                      <button class="btn btn-primary" type="submit" :disabled="busy || !draft.trim()">Send</button>
+                    </form>
                   </div>
-                  <div class="alert alert-danger" role="alert" x-show="error" x-text="error"></div>
-                  <form class="d-flex gap-2" @submit.prevent="send()">
-                    <textarea class="form-control" rows="2" placeholder="Describe what you want…" x-model="draft" :disabled="busy" @keydown.enter.meta.prevent="send()" @keydown.enter.ctrl.prevent="send()"></textarea>
-                    <button class="btn btn-primary" type="submit" :disabled="busy || !draft.trim()">Send</button>
-                  </form>
+
+                  <div x-show="tab === 'files'">
+                    <div class="panel" x-show="filePath">
+                      <div class="panel-h d-flex gap-2 align-items-center flex-wrap"><span class="mono" x-text="filePath"></span><span class="tag warn" x-show="fileDirty">Unsaved</span>
+                        <span class="ms-auto"></span>
+                        <button class="btn btn-sm btn-outline-danger" x-show="can('plugins.manage') && filePath !== 'plugin.json'" @click="deleteFile()">Delete</button>
+                        <button class="btn btn-sm btn-primary" x-show="can('plugins.manage')" :disabled="fileSaving || !fileDirty" @click="saveFile()" x-text="fileSaving ? 'Checking and saving…' : 'Save file'"></button>
+                      </div>
+                      <div class="alert alert-danger small m-2" role="alert" x-show="fileError" x-text="fileError"></div>
+                      <textarea id="pe-file-content" class="form-control mono border-0 rounded-0" rows="22" spellcheck="false" aria-label="File content" x-codejar="{ mode: /\.css$/.test(filePath) ? 'css' : /\.jso?n$/.test(filePath) ? 'application/json' : /\.js$/.test(filePath) ? 'javascript' : 'htmlmixed', get: fileContent, set: (v) => (fileContent = v), readOnly: !can('plugins.manage') }"></textarea>
+                    </div>
+                  </div>
                 </div>
                 <div class="col-lg-5">
                   <div class="panel mb-3">
@@ -50,15 +69,6 @@
                     <div class="p-2 border-top" x-show="can('plugins.manage')">
                       <form class="d-flex gap-1" @submit.prevent="createFile()"><input class="form-control form-control-sm mono" aria-label="New file path" :placeholder="session?.slug ? 'admin/index.html' : 'plugin.json'" x-model="newFilePath"><button class="btn btn-sm btn-outline-secondary">Add</button></form>
                     </div>
-                  </div>
-                  <div class="panel" x-show="filePath">
-                    <div class="panel-h d-flex gap-2 align-items-center flex-wrap"><span class="mono" x-text="filePath"></span><span class="tag warn" x-show="fileDirty">Unsaved</span>
-                      <span class="ms-auto"></span>
-                      <button class="btn btn-sm btn-outline-danger" x-show="can('plugins.manage') && filePath !== 'plugin.json'" @click="deleteFile()">Delete</button>
-                      <button class="btn btn-sm btn-primary" x-show="can('plugins.manage')" :disabled="fileSaving || !fileDirty" @click="saveFile()" x-text="fileSaving ? 'Checking and saving…' : 'Save file'"></button>
-                    </div>
-                    <div class="alert alert-danger small m-2" role="alert" x-show="fileError" x-text="fileError"></div>
-                    <textarea id="pe-file-content" class="form-control mono border-0 rounded-0" rows="20" spellcheck="false" aria-label="File content" x-codejar="{ mode: /\.css$/.test(filePath) ? 'css' : /\.jso?n$/.test(filePath) ? 'application/json' : /\.js$/.test(filePath) ? 'javascript' : 'htmlmixed', get: fileContent, set: (v) => (fileContent = v), readOnly: !can('plugins.manage') }"></textarea>
                   </div>
                 </div>
               </div>
