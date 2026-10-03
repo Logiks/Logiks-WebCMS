@@ -135,6 +135,7 @@
   <div class="mobile-topbar">
     <button type="button" class="menu-btn" @click="sidebarOpen = true" aria-label="Open menu" aria-controls="sidebar" :aria-expanded="sidebarOpen"><i class="bi bi-list"></i></button>
     <span class="mobile-brand" x-text="siteName || 'Admin'"></span>
+    <a class="topbar-site-link" href="/" target="_blank" rel="noopener" aria-label="View site" title="View site"><i class="bi bi-box-arrow-up-right"></i></a>
   </div>
   <div class="sidebar-backdrop" x-show="sidebarOpen" x-cloak @click="sidebarOpen = false"></div>
   <aside class="sidebar" id="sidebar" :class="{open: sidebarOpen}">
@@ -159,6 +160,11 @@
         </div>
       </template>
     </nav>
+    <div class="quick-links">
+      <a href="/" target="_blank" rel="noopener"><i class="bi bi-box-arrow-up-right"></i> View site</a>
+      <a href="/sitemap.xml" target="_blank" rel="noopener"><i class="bi bi-diagram-3"></i> Sitemap</a>
+      <a href="/robots.txt" target="_blank" rel="noopener"><i class="bi bi-robot"></i> Robots.txt</a>
+    </div>
     <div class="me">
       <a href="#/account" class="text-white text-decoration-none" :class="{'fw-semibold': route === 'account'}" x-text="user.name" title="My account"></a>
       <small class="muted d-block" x-text="user.role"></small>

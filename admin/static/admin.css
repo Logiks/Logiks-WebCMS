@@ -190,8 +190,27 @@ body {
   padding: 0.35rem 0.65rem;
   font-size: 0.92rem;
 }
-.me {
+.quick-links {
   margin-top: auto;
+  padding: 0.75rem 0.6rem 0;
+  border-top: 1px solid var(--ink-2);
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+.quick-links a {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: #9fc7c9;
+  text-decoration: none;
+  font-size: 0.82rem;
+  padding: 0.15rem 0.05rem;
+}
+.quick-links a:hover {
+  color: #fff;
+}
+.me {
   padding: 0.75rem 0.6rem 0;
   border-top: 1px solid var(--ink-2);
   font-size: 0.85rem;
@@ -265,6 +284,19 @@ body {
   }
   .mobile-brand {
     font-weight: 600;
+  }
+  .topbar-site-link {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #cfe0e0;
+    min-width: 44px;
+    min-height: 44px;
+    margin-right: -0.5rem;
+  }
+  .topbar-site-link:hover {
+    color: #fff;
   }
   .sidebar-backdrop {
     display: block;
