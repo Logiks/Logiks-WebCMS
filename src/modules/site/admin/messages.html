@@ -2,7 +2,7 @@
         <div class="panel">
           <div class="empty" x-show="loaded && !messages.length">No messages yet.</div>
           <template x-for="m in messages" :key="m.id">
-            <div class="frow" style="grid-template-columns: 1fr auto">
+            <div class="frow frow-split">
               <div><strong x-text="m.name"></strong> <a :href="'mailto:' + m.email" x-text="m.email"></a> <span class="muted small" x-text="ago(m.at)"></span> <span class="tag" x-show="!m.emailed">Not emailed</span>
                 <div class="pre" x-text="m.message"></div><div class="muted small" x-show="m.page" x-text="'From ' + m.page"></div></div>
               <div><button class="btn btn-sm btn-outline-danger" @click="remove(m)">Delete</button></div>

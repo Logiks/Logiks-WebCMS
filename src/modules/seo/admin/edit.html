@@ -56,10 +56,10 @@
                     <div class="help small muted mb-2">Anything not covered above — Facebook’s <code>fb:pages</code>, a verification tag, or whatever a platform asks for next.</div>
                     <template x-for="(m, i) in metaTags" :key="i">
                       <div class="row g-2 mb-2 align-items-center">
-                        <div class="col-3"><select class="form-select form-select-sm" aria-label="Tag kind" x-model="m.kind"><option value="name">name=</option><option value="property">property=</option></select></div>
-                        <div class="col-4"><input class="form-control form-control-sm mono" aria-label="Tag key" placeholder="e.g. fb:pages" x-model="m.key"></div>
-                        <div class="col-4"><input class="form-control form-control-sm" aria-label="Tag content" placeholder="content" x-model="m.content"></div>
-                        <div class="col-1 text-end"><button type="button" class="btn btn-sm btn-outline-danger" @click="removeMetaTag(i)" aria-label="Remove tag">×</button></div>
+                        <div class="col-12 col-md-3"><select class="form-select form-select-sm" aria-label="Tag kind" x-model="m.kind"><option value="name">name=</option><option value="property">property=</option></select></div>
+                        <div class="col-12 col-md-4"><input class="form-control form-control-sm mono" aria-label="Tag key" placeholder="e.g. fb:pages" x-model="m.key"></div>
+                        <div class="col-12 col-md-4"><input class="form-control form-control-sm" aria-label="Tag content" placeholder="content" x-model="m.content"></div>
+                        <div class="col-12 col-md-1 text-end"><button type="button" class="btn btn-sm btn-outline-danger" @click="removeMetaTag(i)" aria-label="Remove tag">×</button></div>
                       </div>
                     </template>
                     <button type="button" class="btn btn-sm btn-outline-secondary" @click="addMetaTag()">Add tag</button>

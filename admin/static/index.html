@@ -17,14 +17,14 @@
   <script src="/admin/static/app.js" defer></script>
   <script src="/admin/vendor/alpine/cdn.min.js" defer></script>
 </head>
-<body x-data="app" x-cloak @profile-updated="setUser($event.detail)">
+<body x-data="app" x-cloak @profile-updated="setUser($event.detail)" @keydown.escape.window="picker.open ? closePicker() : (sidebarOpen = false)">
 
 <div class="toaster" aria-live="polite">
   <template x-for="t in toasts" :key="t.id"><div class="toast-x" :class="t.type" x-text="t.msg"></div></template>
 </div>
 
 <!-- Media picker: used by the editor's image fields and blocks -->
-<div class="modal-x" x-show="picker.open" style="display:none" role="dialog" aria-modal="true" aria-label="Choose from the media library" @keydown.escape.window="picker.open && closePicker()">
+<div class="modal-x" x-show="picker.open" style="display:none" role="dialog" aria-modal="true" aria-label="Choose from the media library">
   <div class="modal-card">
     <div class="d-flex gap-2 mb-2 flex-wrap">
       <input class="form-control" style="max-width:16rem" placeholder="Search files" aria-label="Search files" x-model="picker.q" @input.debounce.300ms="loadPicker()">
@@ -132,7 +132,13 @@
 <!-- ───────── Shell ───────── -->
 <template x-if="view === 'app'">
 <div class="shell">
-  <aside class="sidebar">
+  <div class="mobile-topbar">
+    <button type="button" class="menu-btn" @click="sidebarOpen = true" aria-label="Open menu" aria-controls="sidebar" :aria-expanded="sidebarOpen"><i class="bi bi-list"></i></button>
+    <span class="mobile-brand" x-text="siteName || 'Admin'"></span>
+  </div>
+  <div class="sidebar-backdrop" x-show="sidebarOpen" x-cloak @click="sidebarOpen = false"></div>
+  <aside class="sidebar" id="sidebar" :class="{open: sidebarOpen}">
+    <button type="button" class="sidebar-close" @click="sidebarOpen = false" aria-label="Close menu"><i class="bi bi-x-lg"></i></button>
     <div class="brand"><span x-text="siteName || 'Admin'"></span><small>Admin console</small></div>
     <nav>
       <template x-for="n in nav" :key="n.id">

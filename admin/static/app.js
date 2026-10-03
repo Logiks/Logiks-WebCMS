@@ -468,6 +468,7 @@ document.addEventListener('alpine:init', () => {
     passwordReset: false,
     hash: location.hash,
     openGroups: [],
+    sidebarOpen: false,
     contentTypes: [],
     pluginNav: [],
     path: 'overview',
@@ -762,6 +763,7 @@ document.addEventListener('alpine:init', () => {
         this.hash = location.hash;
         this.syncRoute();
         this.openResetLink();
+        this.sidebarOpen = false;
       });
       window.addEventListener('toast', (e) => this.pushToast(e.detail.msg, e.detail.type));
       window.addEventListener('signed-out', () => this.setUser(null));

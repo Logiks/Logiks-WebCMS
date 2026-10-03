@@ -102,20 +102,20 @@
                             <div class="d-flex justify-content-between align-items-center mt-3 mb-2" x-show="tTable"><label class="form-label mb-0">Parameters</label><button type="button" class="btn btn-sm btn-outline-secondary" @click="addTableParam()">Add parameter</button></div>
                             <template x-for="(p, i) in tParams" :key="i">
                               <div class="row g-2 mb-2 align-items-center">
-                                <div class="col-4"><input class="form-control form-control-sm mono" aria-label="Parameter name" placeholder="status" x-model="p.name"></div>
-                                <div class="col-3"><select class="form-select form-select-sm" aria-label="Parameter type" x-model="p.type"><option value="string">Text</option><option value="number">Number</option><option value="boolean">On/off</option></select></div>
-                                <div class="col-3 form-check"><input class="form-check-input" type="checkbox" :id="'treq-' + i" x-model="p.required"><label class="form-check-label small" :for="'treq-' + i">Required</label></div>
-                                <div class="col-2 text-end"><button type="button" class="btn btn-sm btn-outline-danger" @click="removeTableParam(i)" aria-label="Remove parameter">×</button></div>
+                                <div class="col-12 col-md-4"><input class="form-control form-control-sm mono" aria-label="Parameter name" placeholder="status" x-model="p.name"></div>
+                                <div class="col-6 col-md-3"><select class="form-select form-select-sm" aria-label="Parameter type" x-model="p.type"><option value="string">Text</option><option value="number">Number</option><option value="boolean">On/off</option></select></div>
+                                <div class="col-6 col-md-3 form-check"><input class="form-check-input" type="checkbox" :id="'treq-' + i" x-model="p.required"><label class="form-check-label small" :for="'treq-' + i">Required</label></div>
+                                <div class="col-12 col-md-2 text-md-end"><button type="button" class="btn btn-sm btn-outline-danger" @click="removeTableParam(i)" aria-label="Remove parameter">×</button></div>
                               </div>
                             </template>
 
                             <div class="d-flex justify-content-between align-items-center mt-3 mb-2" x-show="tTable"><label class="form-label mb-0">Filter by column = parameter</label><button type="button" class="btn btn-sm btn-outline-secondary" @click="addWhere()">Add filter</button></div>
                             <template x-for="(w, i) in tWhere" :key="i">
                               <div class="row g-2 mb-2 align-items-center">
-                                <div class="col-5"><select class="form-select form-select-sm mono" aria-label="Column" x-model="w.column"><option value="">Column…</option><template x-for="c in tAvailableColumns" :key="c"><option :value="c" x-text="c"></option></template></select></div>
-                                <span class="col-auto">=</span>
-                                <div class="col-5"><select class="form-select form-select-sm mono" aria-label="Parameter" x-model="w.param"><option value="">Parameter…</option><template x-for="p in tParams" :key="p.name"><option :value="p.name" x-text="p.name"></option></template></select></div>
-                                <div class="col-1 text-end"><button type="button" class="btn btn-sm btn-outline-danger" @click="removeWhere(i)" aria-label="Remove filter">×</button></div>
+                                <div class="col-10 col-md-5"><select class="form-select form-select-sm mono" aria-label="Column" x-model="w.column"><option value="">Column…</option><template x-for="c in tAvailableColumns" :key="c"><option :value="c" x-text="c"></option></template></select></div>
+                                <span class="col-2 col-md-auto text-center">=</span>
+                                <div class="col-10 col-md-5"><select class="form-select form-select-sm mono" aria-label="Parameter" x-model="w.param"><option value="">Parameter…</option><template x-for="p in tParams" :key="p.name"><option :value="p.name" x-text="p.name"></option></template></select></div>
+                                <div class="col-2 col-md-1 text-end"><button type="button" class="btn btn-sm btn-outline-danger" @click="removeWhere(i)" aria-label="Remove filter">×</button></div>
                               </div>
                             </template>
                           </div>
@@ -141,10 +141,10 @@
                         <div class="empty small" x-show="!sParams.length">No parameters.</div>
                         <template x-for="(p, i) in sParams" :key="i">
                           <div class="row g-2 mb-2 align-items-center">
-                            <div class="col-4"><input class="form-control form-control-sm mono" aria-label="Parameter name" placeholder="type" x-model="p.name"></div>
-                            <div class="col-3"><select class="form-select form-select-sm" aria-label="Parameter type" x-model="p.type"><option value="string">Text</option><option value="number">Number</option><option value="boolean">On/off</option></select></div>
-                            <div class="col-3 form-check"><input class="form-check-input" type="checkbox" :id="'req-' + i" x-model="p.required"><label class="form-check-label small" :for="'req-' + i">Required</label></div>
-                            <div class="col-2 text-end"><button type="button" class="btn btn-sm btn-outline-danger" @click="removeParam(i)" aria-label="Remove parameter">×</button></div>
+                            <div class="col-12 col-md-4"><input class="form-control form-control-sm mono" aria-label="Parameter name" placeholder="type" x-model="p.name"></div>
+                            <div class="col-6 col-md-3"><select class="form-select form-select-sm" aria-label="Parameter type" x-model="p.type"><option value="string">Text</option><option value="number">Number</option><option value="boolean">On/off</option></select></div>
+                            <div class="col-6 col-md-3 form-check"><input class="form-check-input" type="checkbox" :id="'req-' + i" x-model="p.required"><label class="form-check-label small" :for="'req-' + i">Required</label></div>
+                            <div class="col-12 col-md-2 text-md-end"><button type="button" class="btn btn-sm btn-outline-danger" @click="removeParam(i)" aria-label="Remove parameter">×</button></div>
                           </div>
                         </template>
 

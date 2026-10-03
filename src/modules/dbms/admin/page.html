@@ -19,12 +19,12 @@
               <div class="d-flex justify-content-between align-items-center mt-3 mb-2"><label class="form-label mb-0">Columns</label><button type="button" class="btn btn-sm btn-outline-secondary" @click="addColumn()">Add column</button></div>
               <template x-for="(c, i) in newTable.columns" :key="i">
                 <div class="row g-2 mb-2 align-items-center">
-                  <div class="col-3"><input class="form-control form-control-sm mono" aria-label="Column name" placeholder="name" x-model="c.name"></div>
-                  <div class="col-2"><select class="form-select form-select-sm" aria-label="Column type" x-model="c.type"><option value="string">Short text</option><option value="text">Long text</option><option value="integer">Whole number</option><option value="bigInteger">Big whole number</option><option value="boolean">On/off</option><option value="float">Decimal</option><option value="json">JSON (text)</option></select></div>
-                  <div class="col-2 form-check"><input class="form-check-input" type="checkbox" :id="'pk-' + i" x-model="c.primaryKey"><label class="form-check-label small" :for="'pk-' + i">Primary key</label></div>
-                  <div class="col-2 form-check" x-show="c.primaryKey"><input class="form-check-input" type="checkbox" :id="'ai-' + i" x-model="c.autoIncrement"><label class="form-check-label small" :for="'ai-' + i">Auto-increment</label></div>
-                  <div class="col-2"><input class="form-control form-control-sm" aria-label="Default value" placeholder="Default" x-model="c.default" x-show="!(c.primaryKey && c.autoIncrement)"></div>
-                  <div class="col-1 text-end"><button type="button" class="btn btn-sm btn-outline-danger" @click="removeColumn(i)" aria-label="Remove column">×</button></div>
+                  <div class="col-6 col-md-3"><input class="form-control form-control-sm mono" aria-label="Column name" placeholder="name" x-model="c.name"></div>
+                  <div class="col-6 col-md-2"><select class="form-select form-select-sm" aria-label="Column type" x-model="c.type"><option value="string">Short text</option><option value="text">Long text</option><option value="integer">Whole number</option><option value="bigInteger">Big whole number</option><option value="boolean">On/off</option><option value="float">Decimal</option><option value="json">JSON (text)</option></select></div>
+                  <div class="col-6 col-md-2 form-check"><input class="form-check-input" type="checkbox" :id="'pk-' + i" x-model="c.primaryKey"><label class="form-check-label small" :for="'pk-' + i">Primary key</label></div>
+                  <div class="col-6 col-md-2 form-check" x-show="c.primaryKey"><input class="form-check-input" type="checkbox" :id="'ai-' + i" x-model="c.autoIncrement"><label class="form-check-label small" :for="'ai-' + i">Auto-increment</label></div>
+                  <div class="col-6 col-md-2"><input class="form-control form-control-sm" aria-label="Default value" placeholder="Default" x-model="c.default" x-show="!(c.primaryKey && c.autoIncrement)"></div>
+                  <div class="col-6 col-md-1 text-end"><button type="button" class="btn btn-sm btn-outline-danger" @click="removeColumn(i)" aria-label="Remove column">×</button></div>
                 </div>
               </template>
               <div class="help small muted mt-1">No date/time type on purpose — this platform stores every timestamp as milliseconds in a big whole number.</div>
@@ -133,7 +133,7 @@
                 <div class="panel-h">Saved queries</div>
                 <div class="empty small" x-show="!savedQueries.length">None yet.</div>
                 <template x-for="q in savedQueries" :key="q.id">
-                  <div class="frow" style="grid-template-columns: 1fr auto">
+                  <div class="frow frow-split">
                     <div><a href="#" @click.prevent="loadSavedQuery(q)" x-text="q.name"></a></div>
                     <div><button class="btn btn-sm btn-outline-danger" type="button" @click="deleteSavedQuery(q)" aria-label="Delete saved query">×</button></div>
                   </div>

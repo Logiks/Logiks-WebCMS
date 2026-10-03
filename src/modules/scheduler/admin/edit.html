@@ -36,8 +36,8 @@
                     </div>
                     <template x-if="scheduleType === 'interval'">
                       <div class="row g-2 align-items-end">
-                        <div class="col-4"><label class="form-label" for="sc-every-value">Every</label><input id="sc-every-value" type="number" min="1" class="form-control" x-model.number="everyValue"></div>
-                        <div class="col-4"><select class="form-select" aria-label="Unit" x-model="everyUnit"><option value="minutes">Minutes</option><option value="hours">Hours</option><option value="days">Days</option></select></div>
+                        <div class="col-6 col-md-4"><label class="form-label" for="sc-every-value">Every</label><input id="sc-every-value" type="number" min="1" class="form-control" x-model.number="everyValue"></div>
+                        <div class="col-6 col-md-4"><select class="form-select" aria-label="Unit" x-model="everyUnit"><option value="minutes">Minutes</option><option value="hours">Hours</option><option value="days">Days</option></select></div>
                       </div>
                       <div class="help small muted mt-1">At least a minute &mdash; this runs real work, not a cheap check.</div>
                     </template>

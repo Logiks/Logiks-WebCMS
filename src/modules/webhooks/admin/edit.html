@@ -26,9 +26,9 @@
                     <div class="panel-h">Custom headers</div>
                     <template x-for="(h, i) in headers" :key="i">
                       <div class="row g-2 mb-2 align-items-center">
-                        <div class="col-5"><input class="form-control form-control-sm mono" aria-label="Header name" placeholder="X-Example" x-model="h.name"></div>
-                        <div class="col-6"><input class="form-control form-control-sm" aria-label="Header value" placeholder="value" x-model="h.value"></div>
-                        <div class="col-1 text-end"><button type="button" class="btn btn-sm btn-outline-danger" @click="removeHeader(i)" aria-label="Remove header">&times;</button></div>
+                        <div class="col-12 col-md-5"><input class="form-control form-control-sm mono" aria-label="Header name" placeholder="X-Example" x-model="h.name"></div>
+                        <div class="col-12 col-md-6"><input class="form-control form-control-sm" aria-label="Header value" placeholder="value" x-model="h.value"></div>
+                        <div class="col-12 col-md-1 text-md-end"><button type="button" class="btn btn-sm btn-outline-danger" @click="removeHeader(i)" aria-label="Remove header">&times;</button></div>
                       </div>
                     </template>
                     <button type="button" class="btn btn-sm btn-outline-secondary" @click="addHeader()">Add header</button>

@@ -23,11 +23,11 @@
                     <div class="empty small" x-show="!props.length">No properties: this component always shows the same thing.</div>
                     <template x-for="(p, i) in props" :key="i">
                       <div class="row g-2 mb-2 align-items-center">
-                        <div class="col-3"><input class="form-control form-control-sm mono" aria-label="Property key" placeholder="heading" x-model="p.key"></div>
-                        <div class="col-3"><input class="form-control form-control-sm" aria-label="Label" placeholder="Label" x-model="p.label"></div>
-                        <div class="col-3"><select class="form-select form-select-sm" aria-label="Type" x-model="p.type"><option value="string">Short text</option><option value="text">Long text</option><option value="number">Number</option><option value="boolean">On/off</option></select></div>
-                        <div class="col-2"><input class="form-control form-control-sm" aria-label="Default value" placeholder="Default" x-model="p.default"></div>
-                        <div class="col-1 text-end"><button type="button" class="btn btn-sm btn-outline-danger" @click="removeProp(i)" aria-label="Remove property">×</button></div>
+                        <div class="col-6 col-md-3"><input class="form-control form-control-sm mono" aria-label="Property key" placeholder="heading" x-model="p.key"></div>
+                        <div class="col-6 col-md-3"><input class="form-control form-control-sm" aria-label="Label" placeholder="Label" x-model="p.label"></div>
+                        <div class="col-6 col-md-3"><select class="form-select form-select-sm" aria-label="Type" x-model="p.type"><option value="string">Short text</option><option value="text">Long text</option><option value="number">Number</option><option value="boolean">On/off</option></select></div>
+                        <div class="col-6 col-md-2"><input class="form-control form-control-sm" aria-label="Default value" placeholder="Default" x-model="p.default"></div>
+                        <div class="col-12 col-md-1 text-md-end"><button type="button" class="btn btn-sm btn-outline-danger" @click="removeProp(i)" aria-label="Remove property">×</button></div>
                       </div>
                     </template>
                   </div>
@@ -37,10 +37,10 @@
                     <div class="empty small" x-show="!apis.length">No data: this component only uses its properties.</div>
                     <template x-for="(a, i) in apis" :key="i">
                       <div class="row g-2 mb-2 align-items-center">
-                        <div class="col-3"><input class="form-control form-control-sm mono" aria-label="Name (api.name in the template)" placeholder="post" x-model="a.name"></div>
-                        <div class="col-6"><input class="form-control form-control-sm mono" aria-label="Address" placeholder="/api/public/content/post/{{ slug }}" x-model="a.url"></div>
-                        <div class="col-2 form-check"><input class="form-check-input" type="checkbox" :id="'api-req-' + i" x-model="a.required"><label class="form-check-label small" :for="'api-req-' + i">Required</label></div>
-                        <div class="col-1 text-end"><button type="button" class="btn btn-sm btn-outline-danger" @click="removeApi(i)" aria-label="Remove endpoint">×</button></div>
+                        <div class="col-12 col-md-3"><input class="form-control form-control-sm mono" aria-label="Name (api.name in the template)" placeholder="post" x-model="a.name"></div>
+                        <div class="col-12 col-md-6"><input class="form-control form-control-sm mono" aria-label="Address" placeholder="/api/public/content/post/{{ slug }}" x-model="a.url"></div>
+                        <div class="col-6 col-md-2 form-check"><input class="form-check-input" type="checkbox" :id="'api-req-' + i" x-model="a.required"><label class="form-check-label small" :for="'api-req-' + i">Required</label></div>
+                        <div class="col-6 col-md-1 text-end"><button type="button" class="btn btn-sm btn-outline-danger" @click="removeApi(i)" aria-label="Remove endpoint">×</button></div>
                       </div>
                     </template>
                   </div>

@@ -2,10 +2,10 @@
         <div class="alert alert-danger" role="alert" x-show="error" x-text="error"></div>
         <div class="panel">
           <template x-for="t in themes" :key="t.id">
-            <div class="node" style="grid-template-columns: 1fr auto">
+            <div class="node node-split">
               <div><strong x-text="t.name"></strong> <span class="tag" x-text="'v' + t.version"></span> <span class="tag ok" x-show="t.active">Live</span> <span class="tag" x-show="t.source === 'disk'">Built in</span>
                 <div class="muted small" x-text="t.description"></div><div class="muted small" x-show="t.author" x-text="'By ' + t.author"></div></div>
-              <div class="text-nowrap"><a class="btn btn-sm btn-outline-secondary" :href="'#/customize/' + t.id">Customize</a>
+              <div class="d-flex flex-wrap gap-1 justify-content-end"><a class="btn btn-sm btn-outline-secondary" :href="'#/customize/' + t.id">Customize</a>
                 <a class="btn btn-sm btn-outline-secondary" :href="'#/theme-editor/' + t.id" x-text="t.source === 'db' && can('themes.edit') ? 'Edit files' : 'View files'"></a>
                 <button class="btn btn-sm btn-outline-secondary" x-show="can('themes.manage')" @click="duplicate(t)">Duplicate</button>
                 <a class="btn btn-sm btn-outline-secondary" :href="'/api/admin/themes/' + t.id + '/export'">Export .zip</a>
