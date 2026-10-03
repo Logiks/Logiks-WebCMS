@@ -1,0 +1,31 @@
+        <div class="page-head"><h1>Modules</h1><p>What this installation is made of. Each module says what it needs, what it adds, and which admin routes it owns.</p></div>
+        <div class="alert alert-danger" role="alert" x-show="error" x-text="error"></div>
+        <div class="panel">
+          <div class="empty" x-show="loaded && !modules.length">No modules found.</div>
+          <table class="table" x-show="modules.length"><thead><tr><th>Module</th><th>Version</th><th>Needs</th><th>Adds</th><th></th></tr></thead><tbody>
+            <template x-for="m in modules" :key="m.id">
+              <tr>
+                <td>
+                  <button type="button" class="btn btn-link p-0 text-start" :aria-expanded="open === m.id" @click="toggle(m.id)" x-text="m.label"></button>
+                  <span class="tag" x-show="m.kind === 'plugin'">Plugin</span>
+                  <div class="muted small" x-text="m.description"></div>
+                  <div class="small mt-2" x-show="open === m.id">
+                    <div x-show="m.provides.permissions.length"><span class="muted">Permissions:</span> <span class="mono" x-text="m.provides.permissions.join(', ')"></span></div>
+                    <div x-show="m.provides.services.length"><span class="muted">Services:</span> <span class="mono" x-text="m.provides.services.join(', ')"></span></div>
+                    <div x-show="m.provides.api.length"><span class="muted">Public API:</span> <span class="mono" x-text="m.provides.api.map(o => o.path).join(', ')"></span></div>
+                    <div x-show="m.routes && m.routes.length"><span class="muted">Admin routes:</span> <span x-text="m.routes ? m.routes.length : 0"></span></div>
+                  </div>
+                </td>
+                <td class="muted small mono" x-text="m.version"></td>
+                <td class="muted small" x-text="m.requires.length ? m.requires.join(', ') : '—'"></td>
+                <td class="muted small" x-text="(m.provides.services.length) + ' services · ' + (m.provides.permissions.length) + ' permissions'"></td>
+                <td class="text-nowrap">
+                  <span class="tag" :class="m.enabled ? 'ok' : 'warn'" x-text="m.enabled ? 'On' : 'Off'"></span>
+                  <template x-if="m.optional && can('modules.manage')">
+                    <button type="button" class="btn btn-sm btn-outline-secondary ms-1" :disabled="busy === m.id" @click="toggleModule(m.id)" x-text="m.switchedOff ? 'Turn on' : 'Turn off'"></button>
+                  </template>
+                </td>
+              </tr>
+            </template>
+          </tbody></table>
+        </div>

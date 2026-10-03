@@ -23,7 +23,7 @@ One codebase, one image, three roles chosen by `ROLE`:
 `src/server.js` builds the context, **installs graceful shutdown first**, then starts HTTP unless `ROLE=worker`, starts job workers unless
 `ROLE=web`, and heartbeats. Shutdown comes first so a SIGTERM during startup still drains instead of killing the process (D-024).
 
-## 2. The context (`src/context.js`)
+## 2. The context (`src/context.js`) and the module registry
 
 `createContext({ env })` builds every shared service **once per process** and returns `ctx`. It is the only place services are wired:
 
@@ -31,6 +31,11 @@ One codebase, one image, three roles chosen by `ROLE`:
 nodes → jobs → cache → mailer → recovery`, then `metrics.bind(ctx)`. Startup applies pending migrations in dev/test and **refuses to start** in
 production if any are pending. Modules extend the platform through registries on `ctx` (`settings.registry.define`, `permissions.define`,
 `jobs.define/schedule`, `cache.namespace`, `mailer.sendTemplate`).
+
+Since D-067 the modules that need the finished context are built by `ctx.modules` (`src/core/modules/registry.js`) from
+their `module.js` manifests, in `requires` order, and the registry checks each manifest's promises (services, permissions,
+settings, jobs) against the finished context before the server starts. It also mounts the `/api/auth` and `/api/admin`
+routers. See `docs/MODULES.md`.
 
 ## 3. Settings — the cluster-wide config system
 
@@ -52,7 +57,7 @@ production if any are pending. Modules extend the platform through registries on
 4. helmet/CSP (`core/http/securityHeaders.js`) — **hot-swapped** when CSP settings change. `upgrade-insecure-requests` and HSTS are sent only when the request arrived over HTTPS (`req.secure`, i.e. ALB `X-Forwarded-Proto` + `TRUST_PROXY_HOPS`), see D-025
 5. admin static assets (self-hosted vendor files) and the SPA shell
 6. `/api`: JSON body (256 kB) → API rate limit (limit read from settings per request)
-   - `/api/public/*` — cookie-less, CORS from settings; no session
+   - `/api/v1/*` and `/api/public/*` — cookie-less, CORS from settings; no session. `apiKeyAuth` identifies a machine client first, then the address limiter (skipped for a verified key, which has its own budget), then the module/scope check (D-068)
    - session (hot-swapped on secret/cookie/TTL change) → cookie-parser → **CSRF** → load principal
    - `/api/auth/*` — login, logout, me, password, forgot/reset, sessions
    - `/api/admin/*` — requires `admin.access`, then per-route `requirePermission`; modules: settings, users/roles, audit, cluster, system, updates

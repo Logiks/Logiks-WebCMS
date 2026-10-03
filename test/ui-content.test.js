@@ -229,7 +229,8 @@ test('media: upload files, describe an image, use it in a page through the picke
   await wait(async () => (await node.ctx.db('media').first()).alt === 'A red rectangle');
 
   chooseFiles(sec('mediaPage').querySelector('input[type="file"]'), [
-    file(Buffer.from('<svg onload=alert(1)/>'), 'x.svg', 'image/svg+xml'),
+    // SVGs are accepted and sanitised now (D-065), so the refusal shown here is for a file that isn't one.
+    file(Buffer.from('<html>not an svg</html>'), 'x.svg', 'image/svg+xml'),
   ]);
   await wait(
     () =>

@@ -233,5 +233,5 @@ export function createSeo(ctx) {
       return best;
     },
   };
-  return svc;
+  return Object.assign(svc, { schemas: { rule: ruleSchema } });
 }

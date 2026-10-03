@@ -78,6 +78,21 @@ const frontSchema = z
       .string()
       .regex(/^[a-z][a-z0-9_]{0,31}$/, 'terms: use a taxonomy id such as category')
       .optional(),
+    // Page ⇄ module binding (D-069): the modules whose data this page's components may read, e.g. "content, menus", or "none".
+    uses: z
+      .string()
+      .regex(
+        /^(none|[a-z][a-z0-9-]*(\s*,\s*[a-z][a-z0-9-]*)*)$/,
+        'uses: list module ids separated by commas (content, menus) or write none',
+      )
+      .optional(),
+    uses_services: z
+      .string()
+      .regex(
+        /^[a-z0-9][a-z0-9_-]*(\s*,\s*[a-z0-9][a-z0-9_-]*)*$/,
+        'uses_services: list Service slugs separated by commas',
+      )
+      .optional(),
     cache: z.boolean().optional(), // false: never cached (search results, per-visitor pages)
     limit: z.enum(['search']).optional(), // rate limit applied to visitors of this page
   })
@@ -152,8 +167,9 @@ const metaSchema = z
             .string()
             .max(400)
             .refine(
-              (u) => u.startsWith('/api/public/') && !/[\r\n]/.test(u),
-              'api urls must start with /api/public/',
+              (u) =>
+                (u.startsWith('/api/public/') || u.startsWith('/api/v1/')) && !/[\r\n]/.test(u),
+              'api urls must start with /api/v1/ (or the older /api/public/)',
             ),
           // true: if this data is not found (404) the whole page is a 404 (a post that does not exist)
           required: z.boolean().default(false),

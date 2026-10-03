@@ -21,12 +21,15 @@ export const loadPrincipal = (ctx) => async (req, _res, next) => {
 export const requireAuth = (req, _res, next) => (req.user ? next() : next(unauthorized()));
 
 /** All listed permissions are required. */
-export const requirePermission =
-  (...perms) =>
-  (req, _res, next) => {
-    if (!req.user) return next(unauthorized());
-    return perms.every((p) => req.user.can(p)) ? next() : next(forbidden());
-  };
+export const requirePermission = (...perms) =>
+  // `permissions` is read by the module registry to list which permission guards each admin route (D-067).
+  Object.assign(
+    (/** @type {any} */ req, /** @type {any} */ _res, /** @type {any} */ next) => {
+      if (!req.user) return next(unauthorized());
+      return perms.every((p) => req.user.can(p)) ? next() : next(forbidden());
+    },
+    { permissions: perms },
+  );
 
 /** Shape passed to services for audit + secret-permission checks. */
 export const actorOf = (req) =>

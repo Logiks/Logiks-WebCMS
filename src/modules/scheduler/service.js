@@ -224,7 +224,7 @@ export function createScheduler(ctx) {
       }
     },
   };
-  return svc;
+  return Object.assign(svc, { schemas: { task: taskSchema } });
 }
 
 /**
@@ -238,6 +238,7 @@ export function createScheduler(ctx) {
 export function registerSchedulerJobs(ctx) {
   const { jobs, scheduler, services } = ctx;
   jobs.define('scheduler.run_task', async ({ taskId }) => {
+    if (!ctx.modules.isOn('scheduler', ctx)) return; // switched off at System → Modules (D-070)
     const task = await scheduler.get(taskId).catch(() => null);
     if (!task) return; // deleted since enqueue
     try {

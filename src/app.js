@@ -14,35 +14,13 @@ import { createCsrf } from './core/http/csrf.js';
 import { apiNotFound, errorHandler } from './core/http/errors.js';
 import { healthRoutes } from './core/http/health.js';
 import { loadPrincipal, requirePermission } from './core/http/middleware.js';
-import authRoutes from './modules/auth/routes.js';
-import settingsRoutes from './modules/settings/routes.js';
-import usersRoutes from './modules/users/routes.js';
-import auditRoutes from './modules/audit/routes.js';
-import clusterRoutes from './modules/cluster/routes.js';
-import systemRoutes from './modules/system/routes.js';
-import updatesRoutes from './modules/updates/routes.js';
-import contentRoutes from './modules/content/routes.js';
-import mediaRoutes, { mediaPublicRoute } from './modules/media/routes.js';
-import themesRoutes from './modules/themes/routes.js';
-import siteRoutes from './modules/site/routes.js';
-import siteFilesRoutes from './modules/site/files-routes.js';
-import siteBuilderRoutes from './modules/site/builder-routes.js';
-import siteLocalesRoutes from './modules/site/locales-routes.js';
-import servicesRoutes from './modules/services/routes.js';
-import dbmsRoutes from './modules/dbms/routes.js';
-import seoRoutes from './modules/seo/routes.js';
-import eventsRoutes from './modules/events/routes.js';
-import webhooksRoutes from './modules/webhooks/routes.js';
-import schedulerRoutes from './modules/scheduler/routes.js';
-import sitemapRoutes from './modules/sitemap/routes.js';
-import librariesRoutes, { libraryPublicRoute } from './modules/libraries/routes.js';
-import analyticsRoutes from './modules/analytics/routes.js';
-import pluginsRoutes, { pluginDispatcher, pluginAdminFragments } from './modules/plugins/routes.js';
-import pluginEditorRoutes from './modules/plugin-editor/routes.js';
-import mediaGeneratorRoutes from './modules/media-generator/routes.js';
-import pageDesignerRoutes from './modules/page-designer/routes.js';
+import { mediaPublicRoute } from './modules/media/routes.js';
+import { libraryPublicRoute } from './modules/libraries/routes.js';
+import { pluginDispatcher, pluginAdminFragments } from './modules/plugins/routes.js';
 import publicSite from './modules/site/public.js';
 import publicContentApi from './modules/site/api.js';
+import { apiKeyAuth } from './modules/api/middleware.js';
+import { envelope } from './core/api/envelope.js';
 import { metricsRoute } from './core/http/metricsRoute.js';
 import { securityHeaders } from './core/http/securityHeaders.js';
 
@@ -150,45 +128,53 @@ export function createApp(ctx) {
   // ── API ──
   const api = express.Router();
   api.use(express.json({ limit: '1mb' })); // rich content is sent as one JSON document
+  api.use(['/public', '/v1'], apiKeyAuth(ctx)); // identify a machine client before counting the request
   api.use(ctx.limiters.api);
 
-  // Public, cookie-less, CORS-enabled surface (headless clients). Origins come from settings, live.
-  const publicApi = express.Router();
-  publicApi.use(
-    cors({
-      origin: (origin, cb) =>
-        cb(null, !origin || settings.get('security.cors_origins').includes(origin)),
-      methods: ['GET', 'HEAD', 'OPTIONS'],
-      maxAge: 600,
-    }),
-  );
-  publicApi.get('/info', async (_req, res) => {
-    const g = settings.ns('general');
-    const l = settings.ns('login');
-    const media = await ctx.media.describeMany(
-      [l.logo, l.favicon, l.background_image].filter(Boolean),
+  // Public, cookie-less, CORS-enabled surface (headless clients). Origins come from settings, live. Two addresses, one
+  // implementation (D-068): /api/v1 wraps successes in { data, meta }; /api/public is the original, raw-body address.
+  const publicApi = (v1) => {
+    const router = express.Router();
+    router.use(
+      cors({
+        origin: (origin, cb) =>
+          cb(null, !origin || settings.get('security.cors_origins').includes(origin)),
+        methods: v1 ? ['GET', 'HEAD', 'POST', 'PUT', 'OPTIONS'] : ['GET', 'HEAD', 'OPTIONS'],
+        allowedHeaders: ['Authorization', 'X-API-Key', 'Content-Type'],
+        maxAge: 600,
+      }),
     );
-    res.set('Cache-Control', 'public, max-age=30');
-    res.json({
-      siteName: g.site_name,
-      tagline: g.tagline,
-      maintenance: g.maintenance_mode,
-      passwordReset: ctx.mailer.enabled(),
-      passwordMinLength: settings.get('security.password_min_length'),
-      login: {
-        logoUrl: media.get(l.logo)?.src || null,
-        faviconUrl: media.get(l.favicon)?.src || null,
-        backgroundType: l.background_type,
-        backgroundColor: l.background_color,
-        backgroundImageUrl: media.get(l.background_image)?.src || null,
-        welcomeHeading: l.welcome_heading,
-        welcomeText: l.welcome_text,
-        customCss: l.custom_css,
-      },
+    router.get('/info', async (_req, res) => {
+      const g = settings.ns('general');
+      const l = settings.ns('login');
+      const media = await ctx.media.describeMany(
+        [l.logo, l.favicon, l.background_image].filter(Boolean),
+      );
+      res.set('Cache-Control', 'public, max-age=30');
+      const info = {
+        siteName: g.site_name,
+        tagline: g.tagline,
+        maintenance: g.maintenance_mode,
+        passwordReset: ctx.mailer.enabled(),
+        passwordMinLength: settings.get('security.password_min_length'),
+        login: {
+          logoUrl: media.get(l.logo)?.src || null,
+          faviconUrl: media.get(l.favicon)?.src || null,
+          backgroundType: l.background_type,
+          backgroundColor: l.background_color,
+          backgroundImageUrl: media.get(l.background_image)?.src || null,
+          welcomeHeading: l.welcome_heading,
+          welcomeText: l.welcome_text,
+          customCss: l.custom_css,
+        },
+      };
+      res.json(v1 ? envelope(info) : info);
     });
-  });
-  publicApi.use(publicContentApi(ctx));
-  api.use('/public', publicApi);
+    router.use(publicContentApi(ctx, { v1 }));
+    return router;
+  };
+  api.use('/public', publicApi(false));
+  api.use('/v1', publicApi(true));
 
   // Cookie-session surface: sessions are rebuilt live when the secret / cookie name / TTL change.
   api.use(
@@ -212,39 +198,12 @@ export function createApp(ctx) {
   api.use(cookieParser());
   api.use(ctx.csrf.doubleCsrfProtection); // every non-GET below this line needs a valid token
   api.use(loadPrincipal(ctx));
-  api.use('/auth', authRoutes(ctx));
+  ctx.modules.mount('auth', api, ctx, '/auth');
 
   const admin = express.Router();
   admin.use(requirePermission('admin.access'));
-  for (const mod of [
-    settingsRoutes,
-    usersRoutes,
-    auditRoutes,
-    clusterRoutes,
-    systemRoutes,
-    updatesRoutes,
-    contentRoutes,
-    mediaRoutes,
-    themesRoutes,
-    siteRoutes,
-    siteFilesRoutes,
-    siteBuilderRoutes,
-    siteLocalesRoutes,
-    servicesRoutes,
-    dbmsRoutes,
-    seoRoutes,
-    eventsRoutes,
-    webhooksRoutes,
-    schedulerRoutes,
-    sitemapRoutes,
-    librariesRoutes,
-    analyticsRoutes,
-    pluginsRoutes,
-    pluginEditorRoutes,
-    mediaGeneratorRoutes,
-    pageDesignerRoutes,
-  ])
-    admin.use(mod(ctx));
+  // Every module's admin routers, in module order (src/modules/index.js, ordered by each manifest's `requires`; D-067).
+  ctx.modules.mount('admin', admin, ctx);
   // A plugin's own admin/backend routes (src/modules/plugins/routes.js) — dispatched dynamically since plugins
   // can be installed/enabled after boot, unlike the fixed module list above.
   admin.use(pluginDispatcher(ctx));

@@ -135,6 +135,9 @@ export function createJobs({ redis, log, backoffMs = 2000 }) {
       handlers.set(name, handler);
     },
 
+    /** Whether a handler is defined (the module registry checks the jobs a module says it owns). */
+    has: (name) => handlers.has(name),
+
     /** A schedule fixed at process boot — the platform's own maintenance jobs (registerBuiltinJobs and friends). */
     schedule(name, { everyMs, data = {} }) {
       schedules.set(name, { everyMs, data });

@@ -18,6 +18,9 @@ CMS command line
   config:set <ns.key> <value>                value is parsed as JSON when possible (true, 42, ["a"]) else string
   config:reset <ns.key>                      revert to the default
 
+  module:new <id>                            scaffold a module (manifest, service, route, test) and register it
+  module:list                                list the built-in modules and what they need
+
   search:reindex                             rebuild the site search index from published content
 
   site:seed [--force]                        load the starter pages and components (only into an empty site unless --force)
@@ -70,6 +73,30 @@ async function main() {
       'Created .env with a new APP_MASTER_KEY. Back this key up: encrypted settings cannot be read without it.',
     );
     (await import('dotenv')).config({ path: path.join(ROOT, '.env'), override: false });
+  }
+
+  // Modules (D-067): scaffolding writes files and needs no database; listing only reads the manifests.
+  if (cmd === 'module:new') {
+    if (!pos[0]) throw new Error('Say which module to create: npm run cli -- module:new <id>');
+    const { scaffoldModule } = await import('../core/modules/scaffold.js');
+    const made = scaffoldModule(pos[0], ROOT);
+    console.log(
+      `Created module "${pos[0]}":\n  ${made.join('\n  ')}\nRun: node --test test/${pos[0]}.test.js`,
+    );
+    return;
+  }
+  if (cmd === 'module:list') {
+    const { builtinModules } = await import('../modules/index.js');
+    const { createModuleRegistry } = await import('../core/modules/registry.js');
+    const reg = createModuleRegistry();
+    reg.registerAll(builtinModules);
+    for (const id of reg.ids()) {
+      const m = /** @type {any} */ (reg.get(id));
+      console.log(
+        `${id.padEnd(16)} ${m.label}${m.requires.length ? `  (needs ${m.requires.join(', ')})` : ''}`,
+      );
+    }
+    return;
   }
 
   const { loadEnv } = await import('../core/env.js');

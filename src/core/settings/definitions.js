@@ -356,6 +356,17 @@ export function defineCoreSettings(registry) {
     },
   });
 
+  // Which optional modules an administrator has switched off (System → Modules, D-070). Hidden: it is edited through
+  // that screen, which also checks what depends on what, not as a free-text list.
+  registry.define('modules', {
+    title: 'Modules',
+    description: 'Optional modules that are switched off. Change these under System → Modules.',
+    order: 41,
+    fields: {
+      disabled: { type: 'list', label: 'Switched-off modules', default: [], hidden: true },
+    },
+  });
+
   registry.define('features', {
     title: 'Features',
     description:

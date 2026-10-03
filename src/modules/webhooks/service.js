@@ -240,16 +240,19 @@ export function createWebhooks(ctx) {
         .del();
     },
   };
-  return svc;
+  return Object.assign(svc, { schemas: { webhook: webhookSchema } });
 }
 
 /** Registers the two job handlers webhook delivery runs on top of (mirrors registerBuiltinJobs, src/core/jobs/index.js). */
-export function registerWebhookJobs({ jobs, webhooks }) {
+export function registerWebhookJobs({ jobs, webhooks, enabled = () => true }) {
+  // `enabled`: the Webhooks module can be switched off (D-070); queued work already in flight is dropped, not retried.
   jobs.define('webhooks.dispatch_event', async ({ event, payload }) => {
+    if (!enabled()) return;
     for (const webhook of await webhooks.matching(event))
       await jobs.enqueue('webhooks.deliver', { webhookId: webhook.id, event, payload });
   });
   jobs.define('webhooks.deliver', async ({ webhookId, event, payload }) => {
+    if (!enabled()) return;
     const webhook = await webhooks.get(webhookId).catch(() => null);
     if (!webhook) return; // deleted since enqueue
     await webhooks.deliver(webhook, event, payload);

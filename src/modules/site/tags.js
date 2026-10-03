@@ -22,7 +22,7 @@ export function registerSiteTags(engine) {
       const out = {};
       for (const decl of cms.declared(this.id)) {
         const url = yield this.liquid.parseAndRender(decl.url, vars);
-        out[decl.name] = yield cms.load(decl, String(url));
+        out[decl.name] = yield cms.load(decl, String(url), this.id);
       }
       ctx.bottom().api = out;
     },

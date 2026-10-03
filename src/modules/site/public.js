@@ -304,7 +304,7 @@ export default function publicSite(ctx) {
   // System → Sitemap (D-053): /sitemap.xml is the whole list, or an index of /sitemap-<n>.xml parts once it is long.
   const sendSitemap = async (part, res, next) => {
     try {
-      if (!ctx.sitemap.enabled()) return next();
+      if (!ctx.sitemap.enabled() || !ctx.modules.isOn('sitemap', ctx)) return next();
       const out = await ctx.sitemap.xml(part);
       if (out === null) return next();
       res.type('application/xml').set('Cache-Control', 'public, max-age=300').send(out);

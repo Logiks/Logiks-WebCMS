@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { Router } from 'express';
 import { parse } from '../../core/http/errors.js';
 import { requirePermission } from '../../core/http/middleware.js';
+import { docs } from '../../core/http/docs.js';
 
 const rangeQuery = (req) => ({
   from: typeof req.query.from === 'string' ? req.query.from : undefined,
@@ -61,7 +62,7 @@ export default function analyticsRoutes(ctx) {
 
   // Any signed-in admin (gated by admin.access already, app.js) can be tracked — reading analytics is a
   // separate, stronger permission (analytics.read) than merely appearing in it.
-  r.post('/analytics/beacon', async (req, res) => {
+  r.post('/analytics/beacon', docs({ body: beaconBody }), async (req, res) => {
     const { type, path } = parse(beaconBody, req.body);
     if (ctx.settings.get('analytics.enabled'))
       await jobs

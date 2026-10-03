@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { forbidden, parse } from '../../core/http/errors.js';
+import { docs } from '../../core/http/docs.js';
 import { actorOf } from '../../core/http/middleware.js';
 
 const entryBody = z.object({
@@ -75,14 +76,14 @@ export default function contentRoutes(ctx) {
       ),
     );
   });
-  r.post('/content/types/:type/entries', async (req, res) => {
+  r.post('/content/types/:type/entries', docs({ body: entryBody }), async (req, res) => {
     const entry = await content.create(req.params.type, parse(entryBody, req.body), actorOf(req));
     res.status(201).json({ entry });
   });
   r.get('/content/entries/:id', async (req, res) => {
     res.json({ entry: await content.get(req.params.id, actorOf(req)) });
   });
-  r.put('/content/entries/:id', async (req, res) => {
+  r.put('/content/entries/:id', docs({ body: entryBody }), async (req, res) => {
     res.json({
       entry: await content.update(req.params.id, parse(entryBody, req.body), actorOf(req)),
     });
@@ -94,19 +95,23 @@ export default function contentRoutes(ctx) {
   r.get('/content/entries/:id/revisions', async (req, res) => {
     res.json({ revisions: await content.revisions(req.params.id, actorOf(req)) });
   });
-  r.post('/content/entries/:id/revisions/:rid/restore', async (req, res) => {
-    res.json({ entry: await content.restore(req.params.id, req.params.rid, actorOf(req)) });
-  });
+  r.post(
+    '/content/entries/:id/revisions/:rid/restore',
+    docs({ noBody: true }),
+    async (req, res) => {
+      res.json({ entry: await content.restore(req.params.id, req.params.rid, actorOf(req)) });
+    },
+  );
 
   r.get('/content/taxonomies/:tax/terms', async (req, res) => {
     res.json({ terms: await content.terms(req.params.tax) });
   });
-  r.post('/content/taxonomies/:tax/terms', async (req, res) => {
+  r.post('/content/taxonomies/:tax/terms', docs({ body: termBody }), async (req, res) => {
     res.status(201).json({
       term: await content.createTerm(req.params.tax, parse(termBody, req.body), actorOf(req)),
     });
   });
-  r.put('/content/terms/:id', async (req, res) => {
+  r.put('/content/terms/:id', docs({ body: termBody }), async (req, res) => {
     await content.updateTerm(req.params.id, parse(termBody, req.body), actorOf(req));
     res.json({ ok: true });
   });

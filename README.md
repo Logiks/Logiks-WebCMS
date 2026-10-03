@@ -86,9 +86,15 @@ every server with the commit it is running and acts on the one you pick; the req
 - **Not for container images:** an image has no `.git`, so the screen says "Not a git checkout". Rebuild the image and roll the containers instead.
 - Roll back by hand: `git reset --hard <sha>` on the server, then restart. Migrations are additive, so older code keeps working with a newer schema.
 
+## Modules and the API
+
+The platform is Page → Module → Service (`docs/MODULES.md`): every feature is a module with a `module.js` manifest, and
+`npm run cli -- module:new <id>` scaffolds one. The site reads its data through a versioned public API, `/api/v1`
+(`{ data, meta }`, OpenAPI at `/api/v1/openapi.json`); apps use the same API with an API key from System → API.
+
 ## CLI
 
-`npm run cli -- help` lists everything: `config:list|get|set|reset`, `user:create|reset-password|unlock`, `migrate*`.
+`npm run cli -- help` lists everything: `config:list|get|set|reset`, `user:create|reset-password|unlock`, `module:new|list`, `migrate*`.
 Config changes made from the CLI are published to running servers like any other change, and audited.
 
 ## Tests

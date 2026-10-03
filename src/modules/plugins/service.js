@@ -60,6 +60,8 @@ export function createPlugins(ctx, { pluginsDir }) {
   let timer = null;
   /** @type {Map<string, {row: any, router: any, manifest: any, adminDir: string}>} */
   const active = new Map();
+  /** @type {Map<string, string>} slug -> why an enabled plugin isn't running */
+  const loadErrors = new Map();
   /** @type {Map<string, Promise<void>>} slug -> materializing */
   const materializing = new Map();
   /** @type {Map<string, string>} slug -> JSON of the config fields last registered into the settings registry */
@@ -114,6 +116,11 @@ export function createPlugins(ctx, { pluginsDir }) {
     size: p.size,
     enabled: p.enabled,
     loaded: active.has(p.slug),
+    loadError: loadErrors.get(p.slug) ?? null,
+    requires: [
+      ...(p.manifest.requires ?? []),
+      ...(p.manifest.depends ?? []).map((d) => `plugin-${d}`),
+    ],
     hasConfig: Object.keys(p.manifest.config ?? {}).length > 0,
     settingsNs: nsOf(p.slug),
     installedAt: p.installedAt,
@@ -241,20 +248,57 @@ export function createPlugins(ctx, { pluginsDir }) {
     if (anyChange) await settings.reloadDefinitions();
   }
 
-  /** Load newly-enabled plugins, drop newly-disabled ones from the active set (never literally unloading code). */
+  /** Take a plugin out of the active set and out of the module registry (with anything that needed it). */
+  function drop(slug) {
+    active.delete(slug);
+    ctx.modules.unregister(`plugin-${slug}`);
+  }
+
+  /**
+   * Load newly-enabled plugins, drop newly-disabled ones from the active set (never literally unloading code). A plugin
+   * that needs another plugin is retried after the others in the same pass, so install order doesn't matter.
+   */
   async function reconcile() {
+    for (const slug of [...active.keys()])
+      if (!rows.some((p) => p.slug === slug && p.enabled)) drop(slug);
+    let pending = [];
     for (const p of rows) {
       const loaded = active.get(p.slug);
       if (!p.enabled) {
-        if (loaded) active.delete(p.slug);
+        loadErrors.delete(p.slug);
         continue;
       }
       if (loaded && loaded.row.version === p.version) continue; // already current
-      try {
-        await load(p);
-      } catch (e) {
-        log.error({ slug: p.slug, err: e.message }, 'plugins: failed to load an enabled plugin');
+      pending.push(p);
+    }
+    for (let progress = true; pending.length && progress;) {
+      progress = false;
+      const stuck = [];
+      for (const p of pending) {
+        try {
+          await load(p);
+          loadErrors.delete(p.slug);
+          progress = true;
+        } catch (e) {
+          if (e.code === 'module_requirement_missing') stuck.push(p);
+          else {
+            loadErrors.set(p.slug, e.message);
+            log.error(
+              { slug: p.slug, err: e.message },
+              'plugins: failed to load an enabled plugin',
+            );
+          }
+        }
       }
+      pending = stuck;
+    }
+    for (const p of pending) {
+      const msg = `${p.name} was not loaded: it needs a module or plugin that isn't installed or isn't on.`;
+      loadErrors.set(p.slug, msg);
+      log.error(
+        { slug: p.slug },
+        'plugins: a plugin was not loaded because its requirements are missing',
+      );
     }
   }
 
@@ -322,7 +366,49 @@ export function createPlugins(ctx, { pluginsDir }) {
     return inFlight;
   }
 
+  /** The module-registry entry of a plugin: what it needs and what it adds (D-070). */
+  function asModule(p) {
+    const needs = [
+      ...new Set([
+        'plugins',
+        ...(p.manifest.requires ?? []),
+        ...(p.manifest.depends ?? []).map((d) => `plugin-${d}`),
+      ]),
+    ];
+    return {
+      id: `plugin-${p.slug}`,
+      kind: 'plugin',
+      label: p.name,
+      description: p.description ?? '',
+      version: p.version,
+      requires: needs,
+      provides: {
+        permissions: (p.manifest.permissions ?? []).map((x) => x.key),
+        settings: Object.keys(p.manifest.config ?? {}).length ? [nsOf(p.slug)] : [],
+      },
+      enabled: () => active.has(p.slug),
+    };
+  }
+
   async function load(p) {
+    // Needs first, so a missing one says so before any of the plugin's code runs.
+    for (const r of p.manifest.requires ?? [])
+      if (!ctx.modules.isOn(r, ctx))
+        throw new HttpError(
+          422,
+          'module_requirement_missing',
+          `"${p.name}" needs the "${r}" module, which isn't installed or is switched off.`,
+        );
+    ctx.modules.registerDynamic(asModule(p)); // throws module_requirement_missing for a missing plugin
+    try {
+      await loadFiles(p);
+    } catch (e) {
+      ctx.modules.unregister(`plugin-${p.slug}`);
+      throw e;
+    }
+  }
+
+  async function loadFiles(p) {
     const dir = path.join(pluginsDir, p.slug);
     if (p.source === 'db') await materialize(p, dir);
     const entryPath = path.join(dir, 'plugin.js');

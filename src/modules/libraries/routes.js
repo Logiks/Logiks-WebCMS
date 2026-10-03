@@ -1,7 +1,14 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { HttpError, parse } from '../../core/http/errors.js';
+import { docs } from '../../core/http/docs.js';
 import { actorOf, requirePermission } from '../../core/http/middleware.js';
+
+const librariesBody1 = z.object({
+  name: z.string().max(191),
+  version: z.string().max(64).default('latest'),
+  autoload: z.boolean().optional(),
+});
 
 /**
  * System → Libraries (D-054). A package name has a slash when it is scoped (@fortawesome/fontawesome-free), so it
@@ -33,9 +40,14 @@ export default function librariesRoutes(ctx) {
     res.json(libraries.exportList());
   });
 
-  r.post('/libraries/import', requirePermission('libraries.manage'), async (req, res) => {
-    res.json(await libraries.importList(req.body ?? {}, actorOf(req)));
-  });
+  r.post(
+    '/libraries/import',
+    requirePermission('libraries.manage'),
+    docs({ freeForm: 'A list exported from another installation' }),
+    async (req, res) => {
+      res.json(await libraries.importList(req.body ?? {}, actorOf(req)));
+    },
+  );
 
   r.get('/libraries/search', requirePermission('libraries.manage'), async (req, res) => {
     res.json({ results: await libraries.search(req.query.q) });
@@ -49,21 +61,24 @@ export default function librariesRoutes(ctx) {
     res.json({ library: libraries.get(nameOf(req)) });
   });
 
-  r.post('/libraries', requirePermission('libraries.manage'), async (req, res) => {
-    const body = parse(
-      z.object({
-        name: z.string().max(191),
-        version: z.string().max(64).default('latest'),
-        autoload: z.boolean().optional(),
-      }),
-      req.body,
-    );
-    res.status(201).json({ library: await libraries.install(body, actorOf(req)) });
-  });
+  r.post(
+    '/libraries',
+    requirePermission('libraries.manage'),
+    docs({ body: librariesBody1 }),
+    async (req, res) => {
+      const body = parse(librariesBody1, req.body);
+      res.status(201).json({ library: await libraries.install(body, actorOf(req)) });
+    },
+  );
 
-  r.put('/libraries/one', requirePermission('libraries.manage'), async (req, res) => {
-    res.json({ library: await libraries.update(nameOf(req), req.body ?? {}, actorOf(req)) });
-  });
+  r.put(
+    '/libraries/one',
+    requirePermission('libraries.manage'),
+    docs({ freeForm: 'Library options' }),
+    async (req, res) => {
+      res.json({ library: await libraries.update(nameOf(req), req.body ?? {}, actorOf(req)) });
+    },
+  );
 
   r.delete('/libraries/one', requirePermission('libraries.manage'), async (req, res) => {
     await libraries.remove(nameOf(req), actorOf(req));

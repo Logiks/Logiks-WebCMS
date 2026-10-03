@@ -71,6 +71,8 @@ test('Pages: the list shows the starter site, in a new page you can add componen
   assert.match(saved, /title: A page built in the browser/);
   assert.match(saved, /\{% render "hero", heading: "Built from the page builder" %\}/);
   // the address bar never shows the storage details: no "pages/" prefix, no ".html" suffix
+  // The address changes when the save's response arrives, a moment after the row is in the database.
+  await wait(() => b.win.location.hash === '#/pages/ui-test-page');
   assert.equal(b.win.location.hash, '#/pages/ui-test-page');
 
   // back on the list, the new page shows up, and can be deleted
@@ -101,6 +103,7 @@ test('Pages: typing ".html" into the address is dropped, not doubled into a real
     !node.ctx.siteFiles.list().some((f) => f.path === 'pages/extension-test.html.html'),
     'the typed .html was not doubled up',
   );
+  await wait(() => b.win.location.hash === '#/pages/extension-test');
   assert.equal(b.win.location.hash, '#/pages/extension-test');
 
   await node.ctx.siteFiles.remove('pages/extension-test.html', null);

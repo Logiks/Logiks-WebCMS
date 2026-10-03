@@ -2,6 +2,7 @@ import express, { Router } from 'express';
 import { z } from 'zod';
 import AdmZip from 'adm-zip';
 import { HttpError, parse } from '../../core/http/errors.js';
+import { docs } from '../../core/http/docs.js';
 import { actorOf, requirePermission } from '../../core/http/middleware.js';
 import { flatten, languageName, nest } from './i18n.js';
 
@@ -105,6 +106,7 @@ export default function siteLocalesRoutes(ctx) {
   r.post(
     '/site/locales/import',
     requirePermission('locales.write'),
+    docs({ binary: 'application/zip' }),
     express.raw({ type: () => true, limit: '5mb' }),
     async (req, res) => {
       if (!Buffer.isBuffer(req.body) || !req.body.length)
@@ -160,11 +162,16 @@ export default function siteLocalesRoutes(ctx) {
     });
   });
 
-  r.put('/site/locales/:code', requirePermission('locales.write'), async (req, res) => {
-    const code = codeOf(req);
-    const { strings, expectedHash } = parse(body, req.body);
-    res.json(await saveOverrides(code, strings, actorOf(req), expectedHash));
-  });
+  r.put(
+    '/site/locales/:code',
+    requirePermission('locales.write'),
+    docs({ body }),
+    async (req, res) => {
+      const code = codeOf(req);
+      const { strings, expectedHash } = parse(body, req.body);
+      res.json(await saveOverrides(code, strings, actorOf(req), expectedHash));
+    },
+  );
 
   r.delete('/site/locales/:code', requirePermission('locales.write'), async (req, res) => {
     await siteFiles.remove(fileOf(codeOf(req)), actorOf(req));

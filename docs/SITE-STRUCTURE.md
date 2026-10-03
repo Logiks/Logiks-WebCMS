@@ -91,12 +91,12 @@ One file: a Liquid/HTML template, its **scoped CSS**, and a JSON **meta** block 
     "api": [
       {
         "name": "post",
-        "url": "/api/public/content/post/{{ slug | url_encode }}",
+        "url": "/api/v1/content/post/{{ slug | url_encode }}",
         "required": true
       },
       {
         "name": "more",
-        "url": "/api/public/content/post?per_page=3&page={{ query.page | default: 1 }}"
+        "url": "/api/v1/content/post?per_page=3&page={{ query.page | default: 1 }}"
       }
     ]
   }
@@ -267,6 +267,14 @@ either, which is why the escape hatch is generic (meta tags + JSON-LD) rather th
 A rule write invalidates every cached page (the `seo_rules` cache tag sits alongside `sitefiles` in every page's tag
 list — the same deliberate exception to §7's narrow invalidation rule that D-038 already makes for site-tree edits),
 since a pattern can start or stop matching an address without that address's own content changing.
+
+## 8b. Which modules a page may use (D-069)
+
+Front matter may add `uses: content, site` (module ids, or `none`) and `uses_services: team` (which Services, when
+`services` is listed). A page that declares `uses` is held to it when it renders: a component on it that reads data from
+a module it did not list gets nothing, and a warning in the log says what to add. A page without `uses` is unrestricted. The
+theme's own components are never restricted. The page editor shows what a page needs and warns about gaps. Component `api`
+URLs may start with `/api/v1/` (preferred) or the older `/api/public/`. See `docs/MODULES.md`.
 
 ## 9. Not built yet
 

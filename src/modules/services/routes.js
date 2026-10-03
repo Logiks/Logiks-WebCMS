@@ -2,6 +2,7 @@ import express, { Router } from 'express';
 import { z } from 'zod';
 import { parse, HttpError } from '../../core/http/errors.js';
 import { actorOf, requirePermission } from '../../core/http/middleware.js';
+import { docs } from '../../core/http/docs.js';
 
 const definitionBody = z.object({
   slug: z.string().min(1).max(64),
@@ -49,6 +50,7 @@ export default function servicesRoutes(ctx) {
   r.post(
     '/services/import',
     requirePermission('services.write'),
+    docs({ binary: 'application/zip' }),
     express.raw({ type: () => true, limit: '10mb' }),
     async (req, res) => {
       if (!Buffer.isBuffer(req.body) || !req.body.length)
@@ -61,15 +63,25 @@ export default function servicesRoutes(ctx) {
     res.json(await services.get(req.params.slug));
   });
 
-  r.post('/services', requirePermission('services.write'), async (req, res) => {
-    const body = parse(definitionBody, req.body);
-    res.status(201).json(await services.create(body, actorOf(req)));
-  });
+  r.post(
+    '/services',
+    requirePermission('services.write'),
+    docs({ body: definitionBody }),
+    async (req, res) => {
+      const body = parse(definitionBody, req.body);
+      res.status(201).json(await services.create(body, actorOf(req)));
+    },
+  );
 
-  r.put('/services/:slug', requirePermission('services.write'), async (req, res) => {
-    const body = parse(definitionBody, { ...req.body, slug: req.body.slug ?? req.params.slug });
-    res.json(await services.update(req.params.slug, body, actorOf(req)));
-  });
+  r.put(
+    '/services/:slug',
+    requirePermission('services.write'),
+    docs({ body: definitionBody }),
+    async (req, res) => {
+      const body = parse(definitionBody, { ...req.body, slug: req.body.slug ?? req.params.slug });
+      res.json(await services.update(req.params.slug, body, actorOf(req)));
+    },
+  );
 
   r.delete('/services/:slug', requirePermission('services.write'), async (req, res) => {
     await services.remove(req.params.slug, actorOf(req));
@@ -79,14 +91,19 @@ export default function servicesRoutes(ctx) {
   const previewBody = definitionBody.extend({
     query: z.record(z.string(), z.string().max(200)).default({}),
   });
-  r.post('/services/preview', requirePermission('services.write'), async (req, res) => {
-    const body = parse(previewBody, req.body);
-    const result = await services.preview(body, {
-      query: body.query,
-      publicData: ctx.publicData,
-    });
-    res.json(result);
-  });
+  r.post(
+    '/services/preview',
+    requirePermission('services.write'),
+    docs({ body: previewBody }),
+    async (req, res) => {
+      const body = parse(previewBody, req.body);
+      const result = await services.preview(body, {
+        query: body.query,
+        publicData: ctx.publicData,
+      });
+      res.json(result);
+    },
+  );
 
   return r;
 }

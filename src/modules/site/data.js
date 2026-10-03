@@ -1,11 +1,12 @@
-import { HttpError } from '../../core/http/errors.js';
+import { z } from 'zod';
+import { HttpError, parse } from '../../core/http/errors.js';
 import { Safe } from '../themes/sandbox.js';
 import { mediaIdsIn, renderBlocks, blocksToText } from '../content/blocks.js';
 import { excerptOf } from './seo.js';
+import { compilePath, matchPath, splitApiPath } from '../../core/api/match.js';
 
 const int = (v, d, min, max) => Math.min(max, Math.max(min, Math.floor(Number(v)) || d));
 const iso = (ms) => (ms ? new Date(ms).toISOString() : null);
-const PREFIX = '/api/public';
 
 /**
  * The public data layer: what a visitor's page can know about the site's content.
@@ -295,49 +296,209 @@ export function createPublicData(ctx) {
     },
   };
 
+  // ───────── writes (D-070): what an API key may do, and the contact form ─────────
+
+  const entryBody = z
+    .object({
+      title: z.string().trim().min(1, 'Give it a title.').max(255),
+      slug: z.string().trim().max(191).optional(),
+      data: z.record(z.string(), z.unknown()).default({}),
+      termIds: z.array(z.number().int().positive()).max(50).optional(),
+      locale: z.string().max(12).optional(),
+    })
+    .strict();
+  const entryPatch = entryBody.partial().extend({ version: z.number().int().optional() }).strict();
+  const contactBody = z.object({
+    name: z.string().trim().min(1).max(120),
+    email: z
+      .string()
+      .trim()
+      .max(200)
+      .regex(/^[^\s@]+@[^\s@]+\.[^\s@]+$/, 'Enter a valid email address.'),
+    message: z.string().trim().min(1).max(5000),
+    website: z.string().optional(), // honeypot: a person never fills this
+  });
+
+  /** The "person" behind an API key: it can write drafts of the one type it is writing, and nothing else. */
+  const keyActor = (type, o) => ({
+    id: null,
+    email: `api-key:${o.apiKey?.name ?? 'unknown'}`,
+    ip: o.ip,
+    can: (perm) => perm === `content.${type}.write`,
+  });
+  const brief = (e) => ({
+    id: e.id,
+    type: e.type,
+    locale: e.locale,
+    title: e.title,
+    slug: e.slug,
+    path: e.path,
+    status: e.status,
+    version: e.version,
+  });
+
+  const writes = {
+    /** A new entry, always a draft. Publishing stays a person's decision in the admin. */
+    async createEntry(typeId, o) {
+      content.registry.type(typeId);
+      const b = parse(entryBody, o.body);
+      const made = await content.create(typeId, { ...b, status: 'draft' }, keyActor(typeId, o));
+      return { body: { item: brief(made) }, tags: [], entries: [], cacheable: false };
+    },
+
+    /** Change an entry this API created and nobody has published since; anything else is edited in the admin. */
+    async updateEntry(typeId, id, o) {
+      content.registry.type(typeId);
+      const b = parse(entryPatch, o.body);
+      const cur = await content.get(Number(id)).catch(() => null);
+      if (!cur || cur.type !== typeId) throw notFound('Nothing is there with that id.');
+      if (cur.authorId !== null || cur.status !== 'draft')
+        throw new HttpError(
+          403,
+          'not_editable',
+          'The API can only change drafts it created itself. Edit this one in the admin.',
+        );
+      const saved = await content.update(cur.id, { ...b, status: 'draft' }, keyActor(typeId, o));
+      return { body: { item: brief(saved) }, tags: [], entries: [], cacheable: false };
+    },
+
+    /** The site's contact form, for headless front-ends. Same checks as the HTML form, minus the form token. */
+    async contact(o) {
+      const b = parse(contactBody, o.body);
+      if (b.website) return { body: { received: true }, tags: [], entries: [], cacheable: false };
+      if ((b.message.match(/https?:\/\//gi) ?? []).length > 3)
+        throw new HttpError(422, 'invalid_input', 'Remove some of the links from the message.', {
+          field: 'message',
+        });
+      await ctx.site.contact.submit({
+        name: b.name,
+        email: b.email,
+        message: b.message,
+        ip: o.ip,
+        page: '/api/v1/contact',
+      });
+      return { body: { received: true }, tags: [], entries: [], cacheable: false };
+    },
+  };
+
+  /** One handler per declared operation (the declarations live in the owning module's manifest, D-068). */
+  const handlers = {
+    'content.types': () => routes.types(),
+    'content.list': (p, q, o) => routes.list(p.type, q, o),
+    'content.item': (p, q, o) => routes.item(p.type, p.path, q, o),
+    'content.terms': (p, q, o) => routes.terms(p.taxonomy, q, o),
+    'content.term': (p, q, o) => routes.term(p.taxonomy, p.slug, q, o),
+    'site.menu': (p) => routes.menu(p.name),
+    'search.query': (_p, q, o) => routes.search(q, o),
+    'services.run': (p, q, o) => routes.service(p.slug, q, o),
+    'content.create': (p, _q, o) => writes.createEntry(p.type, o),
+    'content.update': (p, _q, o) => writes.updateEntry(p.type, p.id, o),
+    'site.contact': (_p, _q, o) => writes.contact(o),
+  };
+
+  /** Split an address into its path segments and query, or throw a 404 for anything that can't be one of ours. */
+  function locate(url) {
+    let u;
+    try {
+      u = new URL(url, 'http://local');
+    } catch {
+      throw notFound('Not a valid address.');
+    }
+    const sp = splitApiPath(u.pathname);
+    if (!sp || u.pathname.includes('//')) throw notFound('There is no such data.');
+    const seg = sp.segments.map((s) => {
+      try {
+        return decodeURIComponent(s);
+      } catch {
+        return '';
+      }
+    });
+    if (seg.some((s) => !s || s.includes('\0') || s === '..'))
+      throw notFound('There is no such data.');
+    return { u, seg, q: Object.fromEntries(u.searchParams) };
+  }
+
+  /** The operations from every module manifest, compiled once (the registry is complete before the first request). */
+  let compiled;
+  const table = () =>
+    (compiled ??= ctx.modules.operations().map((op) => ({ ...op, parts: compilePath(op.path) })));
+
+  /** Find the operation for a method and address, apply the gates, run its handler. */
+  async function call(method, url, o) {
+    const { u, seg, q } = locate(url);
+    for (const op of table()) {
+      if (op.method !== method) continue;
+      const p = matchPath(op.parts, seg);
+      if (!p) continue;
+      if (!ctx.modules.isEnabled(op.module, ctx) || (op.flag && !settings.get(op.flag)))
+        throw notFound('There is no such data.');
+      if (o.allow) {
+        if (!o.allow.modules.has(op.module))
+          throw new HttpError(
+            403,
+            'module_not_declared',
+            `This page doesn't list the "${op.module}" module in "uses", so it can't read ${u.pathname}. Add "${op.module}" to the page's "uses".`,
+          );
+        if (op.id === 'services.run' && o.allow.services && !o.allow.services.has(p.slug))
+          throw new HttpError(
+            403,
+            'service_not_declared',
+            `This page doesn't list the "${p.slug}" Service in "uses_services". Add it, or remove "uses_services" to allow any Service.`,
+          );
+      }
+      const out = await handlers[op.id](p, q, o);
+      return { ...out, operation: op.id, status: out.status ?? op.status };
+    }
+    throw notFound('There is no such data.');
+  }
+
   return {
     /** Entries → the same JSON shape the content API uses (images resolved, rich fields rendered). Reused by
      *  the Services module's query mode, so a saved Service and the content API never format things differently. */
     shape,
     /**
-     * @param {string} url  e.g. /api/public/content/post?per_page=5
-     * @param {{safe?: boolean, extra?: boolean, locale?: string, previewId?: number}} [o] `safe`: for templates (HTML values are Safe);
-     *        `extra`: hierarchy and translations for single items (on by default for templates)
-     * @returns {Promise<{body: any, tags: string[], entries: [number, number][], cacheable?: boolean}>}
+     * @param {string} url  e.g. /api/v1/content/post?per_page=5 (the older /api/public/… address is the same thing)
+     * @param {{safe?: boolean, extra?: boolean, locale?: string, previewId?: number, allow?: {modules: Set<string>, services: Set<string>|null}|null}} [o]
+     *        `safe`: for templates (HTML values are Safe); `extra`: hierarchy and translations for single items (on by default for templates);
+     *        `allow`: the page's declared `uses` (D-069) — an operation of a module outside it is refused
+     * @returns {Promise<{body: any, tags: string[], entries: [number, number][], cacheable?: boolean, operation?: string}>}
      */
     async get(url, o = {}) {
-      let u;
+      return call('GET', url, o);
+    },
+
+    /** Run a write (POST/PUT) operation. `o.body` is the parsed JSON, `o.apiKey` the verified key, `o.ip` the caller. */
+    async write(method, url, o = {}) {
+      return call(method, url, o);
+    },
+
+    /** Which declared operation answers this address (and with which path parameters), without running it. */
+    resolve(url, method = 'GET') {
       try {
-        u = new URL(url, 'http://local');
+        const { seg } = locate(url);
+        for (const op of table()) {
+          if (op.method !== method) continue;
+          const params = matchPath(op.parts, seg);
+          if (params) return { op, params };
+        }
       } catch {
-        throw notFound('Not a valid address.');
+        /* not ours: get() will say 404 */
       }
-      if (!u.pathname.startsWith(`${PREFIX}/`) || u.pathname.includes('//'))
-        throw notFound('There is no such data.');
-      const seg = u.pathname
-        .slice(PREFIX.length + 1)
-        .split('/')
-        .filter(Boolean)
-        .map((s) => {
-          try {
-            return decodeURIComponent(s);
-          } catch {
-            return '';
-          }
-        });
-      const q = Object.fromEntries(u.searchParams);
-      const [head, a, b, ...rest] = seg;
-      if (seg.some((s) => !s || s.includes('\0') || s === '..'))
-        throw notFound('There is no such data.');
-      if (head === 'content' && !a) return routes.types();
-      if (head === 'content' && a && !b) return routes.list(a, q, o);
-      if (head === 'content' && a && b) return routes.item(a, [b, ...rest].join('/'), q, o);
-      if (head === 'terms' && a && !b) return routes.terms(a, q, o);
-      if (head === 'terms' && a && b && !rest.length) return routes.term(a, b, q, o);
-      if (head === 'menus' && a && !b) return routes.menu(a);
-      if (head === 'search' && !a) return routes.search(q, o);
-      if (head === 'services' && a && !b) return routes.service(a, q, o);
-      throw notFound('There is no such data.');
+      return null;
+    },
+
+    /**
+     * Startup check (called once the site module is built): every declared operation has a handler and every handler is
+     * declared, so the API contract, the OpenAPI document and the code cannot drift apart.
+     */
+    verify() {
+      const declared = new Set(ctx.modules.operations().map((op) => op.id));
+      for (const id of declared)
+        if (!handlers[id])
+          throw new Error(`The API operation "${id}" is declared but has no handler.`);
+      for (const id of Object.keys(handlers))
+        if (!declared.has(id))
+          throw new Error(`The handler "${id}" has no matching operation in any module manifest.`);
     },
   };
 }

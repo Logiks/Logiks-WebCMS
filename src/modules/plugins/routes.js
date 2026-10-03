@@ -4,6 +4,7 @@ import fs from 'node:fs/promises';
 import { z } from 'zod';
 import { HttpError, parse } from '../../core/http/errors.js';
 import { actorOf, requirePermission } from '../../core/http/middleware.js';
+import { docs } from '../../core/http/docs.js';
 
 const configWriteBody = z.object({
   values: z.record(z.string(), z.any()).optional(),
@@ -20,14 +21,20 @@ export default function pluginsRoutes(ctx) {
     res.json({ plugins: plugins.list() });
   });
 
-  r.post('/plugins/rescan', requirePermission('plugins.manage'), async (_req, res) => {
-    await plugins.rescanDisk();
-    res.json({ plugins: plugins.list() });
-  });
+  r.post(
+    '/plugins/rescan',
+    requirePermission('plugins.manage'),
+    docs({ noBody: true }),
+    async (_req, res) => {
+      await plugins.rescanDisk();
+      res.json({ plugins: plugins.list() });
+    },
+  );
 
   r.post(
     '/plugins',
     requirePermission('plugins.manage'),
+    docs({ binary: 'application/zip' }),
     express.raw({ type: () => true, limit: '25mb' }),
     async (req, res) => {
       if (!Buffer.isBuffer(req.body) || !req.body.length)
@@ -40,13 +47,23 @@ export default function pluginsRoutes(ctx) {
     },
   );
 
-  r.post('/plugins/:slug/enable', requirePermission('plugins.manage'), async (req, res) => {
-    res.json({ plugin: await plugins.setEnabled(req.params.slug, true, actorOf(req)) });
-  });
+  r.post(
+    '/plugins/:slug/enable',
+    requirePermission('plugins.manage'),
+    docs({ noBody: true }),
+    async (req, res) => {
+      res.json({ plugin: await plugins.setEnabled(req.params.slug, true, actorOf(req)) });
+    },
+  );
 
-  r.post('/plugins/:slug/disable', requirePermission('plugins.manage'), async (req, res) => {
-    res.json({ plugin: await plugins.setEnabled(req.params.slug, false, actorOf(req)) });
-  });
+  r.post(
+    '/plugins/:slug/disable',
+    requirePermission('plugins.manage'),
+    docs({ noBody: true }),
+    async (req, res) => {
+      res.json({ plugin: await plugins.setEnabled(req.params.slug, false, actorOf(req)) });
+    },
+  );
 
   r.delete('/plugins/:slug', requirePermission('plugins.manage'), async (req, res) => {
     await plugins.uninstall(req.params.slug, actorOf(req));
@@ -71,12 +88,17 @@ export default function pluginsRoutes(ctx) {
     res.json(ctx.settings.describe(plugins.settingsNs(req.params.slug)));
   });
 
-  r.put('/plugins/:slug/config', requirePermission('plugins.manage'), async (req, res) => {
-    const ns = plugins.settingsNs(req.params.slug);
-    const body = parse(configWriteBody, req.body);
-    const out = await ctx.settings.update(ns, body, actorOf(req));
-    res.json({ ...out, settings: ctx.settings.describe(ns) });
-  });
+  r.put(
+    '/plugins/:slug/config',
+    requirePermission('plugins.manage'),
+    docs({ body: configWriteBody }),
+    async (req, res) => {
+      const ns = plugins.settingsNs(req.params.slug);
+      const body = parse(configWriteBody, req.body);
+      const out = await ctx.settings.update(ns, body, actorOf(req));
+      res.json({ ...out, settings: ctx.settings.describe(ns) });
+    },
+  );
 
   // Every signed-in admin user calls this (not gated by plugins.read, which is the Plugin Manager screen itself)
   // to know which of the currently-enabled plugins their own permissions let them open.

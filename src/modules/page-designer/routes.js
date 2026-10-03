@@ -2,6 +2,11 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { parse } from '../../core/http/errors.js';
 import { actorOf, requirePermission } from '../../core/http/middleware.js';
+import { docs } from '../../core/http/docs.js';
+
+const pageDesignerBody1 = z.object({ path: z.string().max(191).optional() });
+
+const pageDesignerBody2 = z.object({ text: z.string().max(20_000) });
 
 /**
  * Webmaster → AI Page Designer (docs/DECISIONS.md D-065). The whole screen requires `pages.write` — the same
@@ -18,10 +23,15 @@ export default function pageDesignerRoutes(ctx) {
     res.json({ sessions: await pageDesigner.list() });
   });
 
-  r.post('/page-designer/sessions', requirePermission('pages.write'), async (req, res) => {
-    const body = parse(z.object({ path: z.string().max(191).optional() }), req.body);
-    res.status(201).json({ session: await pageDesigner.create(body, actorOf(req)) });
-  });
+  r.post(
+    '/page-designer/sessions',
+    requirePermission('pages.write'),
+    docs({ body: pageDesignerBody1 }),
+    async (req, res) => {
+      const body = parse(pageDesignerBody1, req.body);
+      res.status(201).json({ session: await pageDesigner.create(body, actorOf(req)) });
+    },
+  );
 
   r.get('/page-designer/sessions/:id', requirePermission('pages.write'), async (req, res) => {
     res.json(await pageDesigner.get(Number(req.params.id)));
@@ -30,8 +40,9 @@ export default function pageDesignerRoutes(ctx) {
   r.post(
     '/page-designer/sessions/:id/messages',
     requirePermission('pages.write'),
+    docs({ body: pageDesignerBody2 }),
     async (req, res) => {
-      const body = parse(z.object({ text: z.string().max(20_000) }), req.body);
+      const body = parse(pageDesignerBody2, req.body);
       res.json(await pageDesigner.sendMessage(Number(req.params.id), body.text, actorOf(req)));
     },
   );
@@ -39,6 +50,7 @@ export default function pageDesignerRoutes(ctx) {
   r.post(
     '/page-designer/sessions/:id/proposals/:proposalId/approve',
     requirePermission('pages.write'),
+    docs({ noBody: true }),
     async (req, res) => {
       res.json(
         await pageDesigner.decideProposal(
@@ -54,6 +66,7 @@ export default function pageDesignerRoutes(ctx) {
   r.post(
     '/page-designer/sessions/:id/proposals/:proposalId/reject',
     requirePermission('pages.write'),
+    docs({ noBody: true }),
     async (req, res) => {
       res.json(
         await pageDesigner.decideProposal(
@@ -69,6 +82,7 @@ export default function pageDesignerRoutes(ctx) {
   r.post(
     '/page-designer/sessions/:id/preview',
     requirePermission('pages.write'),
+    docs({ noBody: true }),
     async (req, res) => {
       res.json(await pageDesigner.preview(Number(req.params.id)));
     },
@@ -79,10 +93,15 @@ export default function pageDesignerRoutes(ctx) {
     frontMatter: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).default({}),
     body: z.string().max(400_000),
   });
-  r.post('/page-designer/sessions/:id/save', requirePermission('pages.write'), async (req, res) => {
-    const input = parse(saveBody, req.body);
-    res.json(await pageDesigner.save(Number(req.params.id), input, actorOf(req)));
-  });
+  r.post(
+    '/page-designer/sessions/:id/save',
+    requirePermission('pages.write'),
+    docs({ body: saveBody }),
+    async (req, res) => {
+      const input = parse(saveBody, req.body);
+      res.json(await pageDesigner.save(Number(req.params.id), input, actorOf(req)));
+    },
+  );
 
   return r;
 }

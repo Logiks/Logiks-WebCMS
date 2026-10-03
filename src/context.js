@@ -26,28 +26,19 @@ import { createContentService } from './modules/content/service.js';
 import { createLocalStorage } from './modules/media/storage.js';
 import { createMediaService } from './modules/media/service.js';
 import { createThemesService } from './modules/themes/service.js';
-import { createServices } from './modules/services/service.js';
 import { createDbms } from './modules/dbms/service.js';
-import { createSeo } from './modules/seo/service.js';
 import { createEvents } from './modules/events/service.js';
 import { createWebhooks, registerWebhookJobs } from './modules/webhooks/service.js';
-import { createScheduler, registerSchedulerJobs } from './modules/scheduler/service.js';
 import { createSearchService } from './modules/search/service.js';
 import { createSiteService } from './modules/site/service.js';
 import { createSiteFiles } from './modules/site/files.js';
-import { createSitePages } from './modules/site/sitepages.js';
-import { createPublicData } from './modules/site/data.js';
-import { createI18n } from './modules/site/i18n.js';
-import { createSitemap, defineSitemapSettings } from './modules/sitemap/service.js';
 import { createLibraries, defineLibrariesSettings } from './modules/libraries/service.js';
+import { defineSitemapSettings } from './modules/sitemap/service.js';
+import { defineAiSettings } from './modules/plugin-editor/service.js';
+import { createModuleRegistry } from './core/modules/registry.js';
+import { builtinModules } from './modules/index.js';
 import { createAnalyticsService } from './modules/analytics/service.js';
-import { createPlugins } from './modules/plugins/service.js';
-import { createPluginEditor, defineAiSettings } from './modules/plugin-editor/service.js';
-import {
-  createMediaGenerator,
-  defineMediaGeneratorSettings,
-} from './modules/media-generator/service.js';
-import { createPageDesigner } from './modules/page-designer/service.js';
+import { defineMediaGeneratorSettings } from './modules/media-generator/service.js';
 
 const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
 
@@ -130,8 +121,18 @@ export async function createContext({ env, bus: busOverride, log: logOverride, a
     settings,
     log,
   });
-  registerWebhookJobs({ jobs, webhooks });
-  const events = createEvents({ db, dialect: dialect(db), jobs, log });
+  registerWebhookJobs({
+    jobs,
+    webhooks,
+    enabled: () => ctx.modules?.isOn('webhooks', ctx) ?? true, // read when a job runs, after the context exists
+  });
+  const events = createEvents({
+    db,
+    dialect: dialect(db),
+    jobs,
+    log,
+    enabled: () => ctx.modules?.isOn('events', ctx) ?? true,
+  });
   jobs.define('events.prune', async () => {
     const n = await events.prune(settings.get('automation.events_retention_days'));
     if (n) log.info({ deleted: n }, 'old events pruned');
@@ -149,6 +150,7 @@ export async function createContext({ env, bus: busOverride, log: logOverride, a
   // on a write here — the same "queue it" principle as email (D-014) and webhook delivery (D-050).
   const analytics = createAnalyticsService({ db, dialect: dialect(db) });
   jobs.define('analytics.record', async (data) => {
+    if (ctx.modules && !ctx.modules.isOn('analytics', ctx)) return; // switched off at System → Modules (D-070)
     await analytics.record(data);
   });
   jobs.define('analytics.prune', async () => {
@@ -251,7 +253,6 @@ export async function createContext({ env, bus: busOverride, log: logOverride, a
   const libraries = createLibraries({ env, db, settings, bus, audit, cache, log });
   await libraries.start();
   const dbms = createDbms({ db, dialect: dialect(db), audit });
-  const seo = createSeo({ db, dialect: dialect(db), cache, audit });
   const search = createSearchService({ db, dialect: dialect(db), content, log });
   search.attach();
   jobs.define('search.reindex', async () => {
@@ -273,7 +274,16 @@ export async function createContext({ env, bus: busOverride, log: logOverride, a
   // library scripts are allowed), so a change to any of them refreshes every cached page.
   settings.onChange('*', (_next, _prev, ns) => {
     if (
-      ['general', 'site', 'seo', 'content', 'features', 'libraries', 'analytics'].includes(ns) ||
+      [
+        'general',
+        'site',
+        'seo',
+        'content',
+        'features',
+        'libraries',
+        'analytics',
+        'modules',
+      ].includes(ns) ||
       ns.startsWith('theme_')
     )
       return cache.invalidate(['site']);
@@ -319,7 +329,6 @@ export async function createContext({ env, bus: busOverride, log: logOverride, a
     siteFiles,
     libraries,
     dbms,
-    seo,
     events,
     webhooks,
     analytics,
@@ -343,42 +352,11 @@ export async function createContext({ env, bus: busOverride, log: logOverride, a
       await db.destroy();
     },
   };
-  // These read the finished context (content, media, site, search…) on every call.
-  ctx.i18n = createI18n(ctx, {
-    shippedDir: fileURLToPath(new URL('../site/locales', import.meta.url)),
-  });
-  // Passed the whole ctx (not destructured deps) because a script Service (D-046) gets the full platform context
-  // at RUN time, well after every one of these is finished — by construction time it only needs `content`.
-  ctx.services = createServices(ctx);
-  // Also needs the finished ctx: it runs an existing Service (ctx.services) or fires a Webhook (ctx.webhooks) on
-  // an admin-editable schedule (D-051) built on ctx.jobs.reschedule()/unschedule().
-  ctx.scheduler = createScheduler(ctx);
-  registerSchedulerJobs(ctx);
-  await ctx.scheduler.reloadAll();
-  ctx.publicData = createPublicData(ctx);
-  ctx.sitePages = createSitePages(ctx);
-  // Also needs the finished ctx: a plugin's server.js factory runs at load time (well after every other service is
-  // built) and gets the complete ctx, the same reasoning as ctx.services (D-046).
-  ctx.plugins = createPlugins(ctx, { pluginsDir: env.PLUGINS_DIR });
-  await ctx.plugins.start();
-  // Also needs the finished ctx (db, settings, audit) and the same PLUGINS_DIR plugins itself uses — a Plugin
-  // Editor session writes real plugin files on disk, it never touches the `plugins` table (D-063).
-  ctx.pluginEditor = createPluginEditor(ctx, { pluginsDir: env.PLUGINS_DIR });
-  // Media Manager → Media Generator (D-064): needs settings (provider keys) and media.upload (the actual save).
-  ctx.mediaGenerator = createMediaGenerator(ctx);
-  // Webmaster → AI Page Designer (D-065): needs the whole finished ctx — siteFiles/sitePages/themes/site (compose
-  // and preview a page), content (site_context), media/mediaGenerator (image tools), dbms/services (the
-  // table+Service proposal) and settings.ns('ai') (reuses Plugin Editor's Anthropic credentials, D-063).
-  ctx.pageDesigner = createPageDesigner(ctx);
-  ctx.sitemap = createSitemap({
-    settings,
-    content,
-    cache,
-    db,
-    audit,
-    site,
-    pages: () => ctx.sitePages,
-  });
+  // The modules that need the finished context (services, scheduler, the site's data layer, plugins, the AI tools…)
+  // are built here, in the order their manifests' `requires` imply, and each manifest's contract is checked (D-067).
+  ctx.modules = createModuleRegistry();
+  ctx.modules.registerAll(builtinModules);
+  await ctx.modules.boot(ctx);
   metrics.bind(ctx);
   return ctx;
 }

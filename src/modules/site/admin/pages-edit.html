@@ -32,6 +32,34 @@
                   </div>
 
                   <div class="panel p-3 mb-3">
+                    <div class="panel-h">Data this page may read</div>
+                    <div class="help small muted mb-2">A page can list the modules its components read from. When it does, a component can’t pull data from any other module. Leave it open and nothing is held back.</div>
+                    <div class="btn-group mb-2" role="group" aria-label="Data access">
+                      <button type="button" class="btn btn-sm btn-outline-secondary" :class="{active: front.usesMode === 'any'}" @click="front.usesMode = 'any'">Any module</button>
+                      <button type="button" class="btn btn-sm btn-outline-secondary" :class="{active: front.usesMode === 'listed'}" @click="front.usesMode = 'listed'">Only the ones I pick</button>
+                    </div>
+                    <div x-show="front.usesMode === 'listed'">
+                      <div class="d-flex flex-wrap gap-3 mb-2">
+                        <template x-for="m in usesInfo.modules.filter(x => x.data)" :key="m.id">
+                          <div class="form-check"><input :id="'p-use-' + m.id" class="form-check-input" type="checkbox" :checked="front.usesModules.includes(m.id)" @change="toggleUses(m.id)"><label class="form-check-label small" :for="'p-use-' + m.id" x-text="m.label"></label></div>
+                        </template>
+                      </div>
+                      <div x-show="front.usesModules.includes('services')">
+                        <label class="form-label small" for="p-use-services">Services it may run (slugs, comma-separated; empty allows any)</label>
+                        <input id="p-use-services" class="form-control form-control-sm mono" x-model="front.usesServices">
+                      </div>
+                    </div>
+                    <div class="small mt-2" x-show="usesInfo.inferred.modules.length">
+                      <span class="muted">Its components read from:</span>
+                      <span class="tag" x-text="usesInfo.inferred.modules.join(', ')"></span>
+                      <button type="button" class="btn btn-link btn-sm" x-show="front.usesMode !== 'listed'" @click="useWhatItNeeds()">List exactly these</button>
+                    </div>
+                    <template x-for="i in usesInfo.issues" :key="i.code + i.message">
+                      <div class="alert alert-warning py-1 px-2 small mt-2 mb-0" role="alert" x-text="i.message"></div>
+                    </template>
+                  </div>
+
+                  <div class="panel p-3 mb-3">
                     <div class="panel-h">SEO defaults for this page</div>
                     <div class="help small muted mb-2">Applies to every address this page produces. A <a href="#/seo">SEO Manager</a> rule for one specific address overrides all of this.</div>
                     <div class="row g-2">

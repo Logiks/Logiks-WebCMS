@@ -1,8 +1,27 @@
 import express, { Router } from 'express';
 import { z } from 'zod';
 import { HttpError, parse } from '../../core/http/errors.js';
+import { docs } from '../../core/http/docs.js';
 import { actorOf, requirePermission } from '../../core/http/middleware.js';
 import { siteGlobals } from '../site/public.js';
+
+const themesBody1 = z.object({ id: z.string().max(40), name: z.string().max(80).optional() });
+
+const themesBody2 = z.object({ content: z.string().max(1_000_000) });
+
+const themesBody3 = z.object({
+  values: z.record(z.string(), z.any()).default({}),
+  versions: z.record(z.string(), z.number()).optional(),
+});
+
+const themesBody4 = z.object({
+  path: z
+    .string()
+    .max(300)
+    .regex(/^\/[^\s?#]*$/, 'A preview address starts with / and has no spaces.')
+    .default('/'),
+  values: z.record(z.string(), z.any()).default({}),
+});
 
 /**
  * Appearance → Themes, Customize and Theme editor.
@@ -26,6 +45,7 @@ export default function themesRoutes(ctx) {
   r.post(
     '/themes',
     requirePermission('themes.manage'),
+    docs({ binary: 'application/zip' }),
     express.raw({ type: () => true, limit: '25mb' }),
     async (req, res) => {
       if (!Buffer.isBuffer(req.body) || !req.body.length)
@@ -38,27 +58,34 @@ export default function themesRoutes(ctx) {
     },
   );
 
-  r.post('/themes/:id/activate', requirePermission('themes.manage'), async (req, res) => {
-    res.json({ themes: await themes.activate(req.params.id, actorOf(req)) });
-  });
+  r.post(
+    '/themes/:id/activate',
+    requirePermission('themes.manage'),
+    docs({ noBody: true }),
+    async (req, res) => {
+      res.json({ themes: await themes.activate(req.params.id, actorOf(req)) });
+    },
+  );
 
   r.delete('/themes/:id', requirePermission('themes.manage'), async (req, res) => {
     await themes.uninstall(req.params.id, actorOf(req));
     res.status(204).end();
   });
 
-  r.post('/themes/:id/duplicate', requirePermission('themes.manage'), async (req, res) => {
-    const body = parse(
-      z.object({ id: z.string().max(40), name: z.string().max(80).optional() }),
-      req.body,
-    );
-    const theme = await themes.duplicate(
-      req.params.id,
-      { newId: body.id, name: body.name },
-      actorOf(req),
-    );
-    res.status(201).json({ theme });
-  });
+  r.post(
+    '/themes/:id/duplicate',
+    requirePermission('themes.manage'),
+    docs({ body: themesBody1 }),
+    async (req, res) => {
+      const body = parse(themesBody1, req.body);
+      const theme = await themes.duplicate(
+        req.params.id,
+        { newId: body.id, name: body.name },
+        actorOf(req),
+      );
+      res.status(201).json({ theme });
+    },
+  );
 
   r.get('/themes/:id/export', requirePermission('themes.read'), async (req, res) => {
     const zip = await themes.exportZip(req.params.id);
@@ -88,15 +115,21 @@ export default function themesRoutes(ctx) {
     res.json({ file: await themes.file(req.params.id, filePath(req)) });
   });
 
-  r.put('/themes/:id/file', requirePermission('themes.edit'), async (req, res) => {
-    const { content } = parse(z.object({ content: z.string().max(1_000_000) }), req.body);
-    res.json(await themes.saveFile(req.params.id, filePath(req), content, actorOf(req)));
-  });
+  r.put(
+    '/themes/:id/file',
+    requirePermission('themes.edit'),
+    docs({ body: themesBody2 }),
+    async (req, res) => {
+      const { content } = parse(themesBody2, req.body);
+      res.json(await themes.saveFile(req.params.id, filePath(req), content, actorOf(req)));
+    },
+  );
 
   // Images and fonts: the raw file as the request body.
   r.post(
     '/themes/:id/file',
     requirePermission('themes.edit'),
+    docs({ binary: 'application/octet-stream' }),
     express.raw({ type: () => true, limit: '3mb' }),
     async (req, res) => {
       if (!Buffer.isBuffer(req.body) || !req.body.length)
@@ -124,69 +157,63 @@ export default function themesRoutes(ctx) {
     });
   });
 
-  r.put('/themes/:id/customize', requirePermission('themes.customize'), async (req, res) => {
-    const ns = known(req.params.id);
-    const body = parse(
-      z.object({
-        values: z.record(z.string(), z.any()).default({}),
-        versions: z.record(z.string(), z.number()).optional(),
-      }),
-      req.body,
-    );
-    const out = await settings.update(ns, body, actorOf(req));
-    res.json({ ...out, settings: settings.describe(ns) });
-  });
+  r.put(
+    '/themes/:id/customize',
+    requirePermission('themes.customize'),
+    docs({ body: themesBody3 }),
+    async (req, res) => {
+      const ns = known(req.params.id);
+      const body = parse(themesBody3, req.body);
+      const out = await settings.update(ns, body, actorOf(req));
+      res.json({ ...out, settings: settings.describe(ns) });
+    },
+  );
 
   /**
    * Render one address of the site in this theme with DRAFT options and custom CSS, for Customize's live preview. Nothing
    * is saved, and the result is never cached: it goes straight back to the admin, which shows it in a sandboxed iframe.
    */
-  r.post('/themes/:id/preview', requirePermission('themes.customize'), async (req, res) => {
-    const themeId = req.params.id;
-    const ns = known(themeId);
-    const body = parse(
-      z.object({
-        path: z
-          .string()
-          .max(300)
-          .regex(/^\/[^\s?#]*$/, 'A preview address starts with / and has no spaces.')
-          .default('/'),
-        values: z.record(z.string(), z.any()).default({}),
-      }),
-      req.body,
-    );
-    const fields = settings.registry.get(ns).fields;
-    const draft = {};
-    for (const [k, v] of Object.entries(body.values))
-      if (fields[k] && !fields[k].secret) draft[k] = settings.registry.validate(ns, k, v);
-    const locale = settings.get('general.default_locale');
-    const found = ctx.sitePages.match(body.path);
-    const globals = await siteGlobals(ctx, {
-      locale,
-      path: body.path,
-      query: {},
-      preview: true,
-      themeId,
-    });
-    globals.settings = { ...globals.settings, ...draft };
-    const out = await ctx.sitePages.render({
-      file: found?.file ?? (ctx.sitePages.has404() ? 'pages/404.html' : null),
-      params: found?.params ?? {},
-      status: found ? 200 : 404,
-      themeId,
-      globals,
-      customCss: draft.custom_css,
-      request: {
-        path: body.path,
-        canonical: ctx.site.urls.absolute(body.path),
-        query: {},
+  r.post(
+    '/themes/:id/preview',
+    requirePermission('themes.customize'),
+    docs({ body: themesBody4 }),
+    async (req, res) => {
+      const themeId = req.params.id;
+      const ns = known(themeId);
+      const body = parse(themesBody4, req.body);
+      const fields = settings.registry.get(ns).fields;
+      const draft = {};
+      for (const [k, v] of Object.entries(body.values))
+        if (fields[k] && !fields[k].secret) draft[k] = settings.registry.validate(ns, k, v);
+      const locale = settings.get('general.default_locale');
+      const found = ctx.sitePages.match(body.path);
+      const globals = await siteGlobals(ctx, {
         locale,
-        ip: req.ip,
-      },
-    });
-    if (out.redirect) return res.json({ redirect: out.redirect });
-    res.json({ status: out.status, html: out.html });
-  });
+        path: body.path,
+        query: {},
+        preview: true,
+        themeId,
+      });
+      globals.settings = { ...globals.settings, ...draft };
+      const out = await ctx.sitePages.render({
+        file: found?.file ?? (ctx.sitePages.has404() ? 'pages/404.html' : null),
+        params: found?.params ?? {},
+        status: found ? 200 : 404,
+        themeId,
+        globals,
+        customCss: draft.custom_css,
+        request: {
+          path: body.path,
+          canonical: ctx.site.urls.absolute(body.path),
+          query: {},
+          locale,
+          ip: req.ip,
+        },
+      });
+      if (out.redirect) return res.json({ redirect: out.redirect });
+      res.json({ status: out.status, html: out.html });
+    },
+  );
 
   return r;
 }

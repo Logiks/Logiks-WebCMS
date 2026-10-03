@@ -1,0 +1,104 @@
+        <div class="page-head d-flex justify-content-between align-items-end flex-wrap gap-2">
+          <div><h1>API</h1><p>The read-only <span class="mono">/api/v1</span> that apps and other sites use to read your content. The site’s own pages read the same data inside the server.</p></div>
+          <button type="button" class="btn btn-primary" x-show="tab === 'keys' && can('api.keys.manage') && !form" @click="startNew()">New API key</button>
+        </div>
+        <div class="btn-group mb-3" role="group" aria-label="API view">
+          <button type="button" class="btn btn-outline-secondary" :class="{active: tab === 'keys'}" @click="tab = 'keys'">API keys</button>
+          <button type="button" class="btn btn-outline-secondary" :class="{active: tab === 'reference'}" @click="tab = 'reference'">Reference</button>
+        </div>
+
+        <template x-if="tab === 'keys'">
+          <div>
+            <div class="alert alert-info" role="status" x-show="ref && !ref.enabled">
+              Anonymous access is off (Settings &rarr; Features &rarr; Public content API). An API key still works.
+            </div>
+            <div class="alert alert-success" role="alert" x-show="secret">
+              <div class="fw-semibold mb-1">Copy this key now. It is shown only once.</div>
+              <div class="d-flex gap-2 align-items-center flex-wrap">
+                <code class="mono small text-break" x-text="secret"></code>
+                <button type="button" class="btn btn-sm btn-outline-secondary" @click="copy(secret)">Copy</button>
+                <button type="button" class="btn btn-sm btn-link" @click="secret = ''">I’ve saved it</button>
+              </div>
+              <div class="small mt-1">Send it as <span class="mono">Authorization: Bearer &hellip;</span> or <span class="mono">X-API-Key: &hellip;</span>.</div>
+            </div>
+
+            <div class="panel p-3 mb-3" x-show="form" style="max-width:40rem">
+              <template x-if="form">
+                <div>
+                  <label class="form-label" for="k-name">Name</label>
+                  <input id="k-name" class="form-control" x-model="form.name" placeholder="Mobile app">
+                  <div class="form-check mt-3"><input id="k-all" class="form-check-input" type="checkbox" x-model="form.allModules"><label class="form-check-label" for="k-all">Can read every module</label></div>
+                  <div class="d-flex flex-wrap gap-3 mt-2" x-show="!form.allModules">
+                    <template x-for="m in (ref ? ref.readable : [])" :key="m.id">
+                      <div class="form-check"><input :id="'k-sc-' + m.id" class="form-check-input" type="checkbox" :checked="form.scopes.includes(m.id)" @change="toggleScope(m.id)"><label class="form-check-label small" :for="'k-sc-' + m.id" x-text="m.label"></label></div>
+                    </template>
+                  </div>
+                  <div class="mt-3" x-show="ref && ref.writable.length">
+                    <div class="form-label mb-1">Can also write</div>
+                    <div class="d-flex flex-wrap gap-3">
+                      <template x-for="m in (ref ? ref.writable : [])" :key="m.id">
+                        <div class="form-check"><input :id="'k-wr-' + m.id" class="form-check-input" type="checkbox" :checked="form.writes.includes(m.id)" @change="toggleWrite(m.id)"><label class="form-check-label small" :for="'k-wr-' + m.id" x-text="m.label + ' (create drafts)'"></label></div>
+                      </template>
+                    </div>
+                    <div class="help small muted">Writing is never part of “every module”. Drafts only: publishing stays in the admin.</div>
+                  </div>
+                  <div class="row g-2 mt-1">
+                    <div class="col-md-6"><label class="form-label" for="k-rate">Requests per minute</label><input id="k-rate" type="number" min="1" class="form-control" x-model="form.rateLimit"></div>
+                    <div class="col-md-6"><label class="form-label" for="k-exp">Expires on (optional)</label><input id="k-exp" type="date" class="form-control" x-model="form.expires"></div>
+                  </div>
+                  <div class="form-check mt-3"><input id="k-on" class="form-check-input" type="checkbox" x-model="form.enabled"><label class="form-check-label" for="k-on">Enabled</label></div>
+                  <div class="alert alert-danger mt-3 mb-0" role="alert" x-show="error" x-text="error"></div>
+                  <div class="mt-3 d-flex gap-2">
+                    <button type="button" class="btn btn-primary" :disabled="busy" @click="save()" x-text="form.id ? 'Save key' : 'Create key'"></button>
+                    <button type="button" class="btn btn-outline-secondary" @click="form = null">Cancel</button>
+                  </div>
+                </div>
+              </template>
+            </div>
+
+            <div class="panel">
+              <div class="empty" x-show="loaded && !keys.length">No API keys yet. Create one to let an app read your content.</div>
+              <table class="table" x-show="keys.length"><thead><tr><th>Name</th><th>Key</th><th>Reads</th><th>Limit</th><th>Last used</th><th></th><th></th></tr></thead><tbody>
+                <template x-for="k in keys" :key="k.id"><tr>
+                  <td x-text="k.name"></td>
+                  <td class="mono small" x-text="k.hint"></td>
+                  <td class="muted small" x-text="(k.scopes.includes('*') ? 'Everything' : k.scopes.filter(x => !x.endsWith(':write')).join(', ')) + (k.scopes.some(x => x.endsWith(':write')) ? ' · writes: ' + k.scopes.filter(x => x.endsWith(':write')).map(x => x.slice(0, -6)).join(', ') : '')"></td>
+                  <td class="muted small" x-text="k.rateLimit + '/min'"></td>
+                  <td class="muted small" x-text="k.lastUsedAt ? ago(k.lastUsedAt) : 'Never'"></td>
+                  <td><span class="tag" :class="statusOf(k) === 'Active' ? 'ok' : 'warn'" x-text="statusOf(k)"></span></td>
+                  <td class="text-end text-nowrap" x-show="can('api.keys.manage')">
+                    <button class="btn btn-sm btn-outline-secondary" type="button" @click="edit(k)">Edit</button>
+                    <button class="btn btn-sm btn-outline-secondary" type="button" @click="rotate(k)">Rotate</button>
+                    <button class="btn btn-sm btn-outline-danger" type="button" @click="remove(k)">Delete</button>
+                  </td>
+                </tr></template>
+              </tbody></table>
+            </div>
+          </div>
+        </template>
+
+        <template x-if="tab === 'reference'">
+          <div>
+            <p class="small">
+              OpenAPI documents:
+              <a href="/api/v1/openapi.json" target="_blank" rel="noopener">public API</a> &middot;
+              <a href="/api/admin/api-reference/openapi.json?surface=admin" target="_blank" rel="noopener">admin API (routes and permissions only)</a>.
+              Every success is <span class="mono">{ "data": &hellip;, "meta": &hellip; }</span>; every error is <span class="mono">{ "error": { "code", "message" } }</span>.
+              The older <span class="mono">/api/public</span> address still answers, with the plain body.
+            </p>
+            <div class="panel">
+              <table class="table"><thead><tr><th>Address</th><th>What it returns</th><th>Module</th><th></th></tr></thead><tbody>
+                <template x-for="o in (ref ? ref.operations : [])" :key="o.id">
+                  <tr>
+                    <td class="mono small"><span x-text="o.method"></span> /api/v1<span x-text="o.path"></span><div class="muted" x-show="o.anonymous">no key needed</div></td>
+                    <td class="small"><span x-text="o.summary"></span>
+                      <div class="muted" x-show="Object.keys(o.query).length"><template x-for="(d, q) in o.query" :key="q"><span class="me-2"><span class="mono" x-text="q"></span> &ndash; <span x-text="d"></span></span></template></div>
+                    </td>
+                    <td class="muted small" x-text="o.module"></td>
+                    <td><span class="tag" :class="o.available ? 'ok' : 'warn'" x-text="o.available ? 'Available' : 'Switched off'"></span></td>
+                  </tr>
+                </template>
+              </tbody></table>
+            </div>
+          </div>
+        </template>

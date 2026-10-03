@@ -1,10 +1,12 @@
 import express, { Router } from 'express';
 import { z } from 'zod';
 import { forbidden, parse, HttpError } from '../../core/http/errors.js';
+import { docs } from '../../core/http/docs.js';
 import { actorOf, requirePermission } from '../../core/http/middleware.js';
 import { classify } from './files.js';
 import { parseComponent, parsePage } from './component.js';
 import { siteGlobals } from './public.js';
+import { inferUses, usesIssues, usesOf } from './uses.js';
 
 /**
  * What the page manager and component builder need beyond plain file CRUD (files-routes.js):
@@ -72,7 +74,7 @@ export default function siteBuilderRoutes(ctx) {
       .optional(),
   });
 
-  r.post('/site/preview', async (req, res) => {
+  r.post('/site/preview', docs({ body: previewBody }), async (req, res) => {
     const body = parse(previewBody, req.body);
     const themeId = themes.activeId();
     const locale = settings.get('general.default_locale');
@@ -156,6 +158,41 @@ export default function siteBuilderRoutes(ctx) {
     res.json({ status: out.status, html: out.html });
   });
 
+  // Page ⇄ module binding (D-069): what a page declares in `uses`, what its components would actually read, and the
+  // difference — so the page manager can show it and the author can fix it before a visitor finds a gap.
+  const usesBody = z.object({ content: z.string().max(400_000) });
+  r.post('/site/uses', requireRead('pages'), docs({ body: usesBody }), (req, res) => {
+    const { content } = parse(usesBody, req.body);
+    let page;
+    try {
+      page = parsePage(content);
+    } catch (e) {
+      throw new HttpError(422, 'invalid_input', e.message);
+    }
+    const declared = usesOf(page.front);
+    const inferred = inferUses({
+      source: page.body,
+      ops: ctx.modules.operations(),
+      read: (path) => tryParse(() => siteFiles.get(path).content),
+    });
+    res.json({
+      declared: declared
+        ? {
+            modules: [...declared.modules],
+            services: declared.services ? [...declared.services] : null,
+          }
+        : null,
+      inferred,
+      issues: usesIssues({ declared, inferred, registry: ctx.modules, ctx }),
+      modules: ctx.modules.ids().map((id) => ({
+        id,
+        label: ctx.modules.get(id).label,
+        data: ctx.modules.get(id).provides.api.length > 0,
+        enabled: ctx.modules.isEnabled(id, ctx),
+      })),
+    });
+  });
+
   /** GET /site/pages and /site/components: the two group permissions this screen needs at least one of. */
   function requireRead(group) {
     return (req, res, next) => {
@@ -179,6 +216,7 @@ export default function siteBuilderRoutes(ctx) {
     r.post(
       `/site/${kind}/import`,
       requirePermission(`${kind}.write`),
+      docs({ binary: 'application/zip' }),
       express.raw({ type: () => true, limit: '10mb' }),
       async (req, res) => {
         if (!Buffer.isBuffer(req.body) || !req.body.length)

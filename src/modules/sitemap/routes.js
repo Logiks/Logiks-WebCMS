@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { parse } from '../../core/http/errors.js';
+import { docs } from '../../core/http/docs.js';
 import { actorOf, requirePermission } from '../../core/http/middleware.js';
 
 /**
@@ -22,30 +23,40 @@ export default function sitemapRoutes(ctx) {
     res.json({ ...view(), summary: await sitemap.summary({ q, offset, limit: 100 }) });
   });
 
-  r.put('/sitemap', requirePermission('sitemap.manage'), async (req, res) => {
-    const body = parse(
-      z.object({
-        enabled: z.boolean().optional(),
-        values: z.record(z.string(), z.any()).default({}),
-        versions: z.record(z.string(), z.number()).optional(),
-      }),
-      req.body,
-    );
-    const actor = actorOf(req);
-    const out = await settings.update(
-      'sitemap',
-      { values: body.values, versions: body.versions },
-      actor,
-    );
-    if (body.enabled !== undefined && body.enabled !== settings.get('site.sitemap_enabled'))
-      await settings.update('site', { values: { sitemap_enabled: body.enabled } }, actor);
-    res.json({ changed: out.changed, ...view(), summary: await sitemap.summary() });
-  });
+  r.put(
+    '/sitemap',
+    requirePermission('sitemap.manage'),
+    docs({ freeForm: 'Sitemap settings' }),
+    async (req, res) => {
+      const body = parse(
+        z.object({
+          enabled: z.boolean().optional(),
+          values: z.record(z.string(), z.any()).default({}),
+          versions: z.record(z.string(), z.number()).optional(),
+        }),
+        req.body,
+      );
+      const actor = actorOf(req);
+      const out = await settings.update(
+        'sitemap',
+        { values: body.values, versions: body.versions },
+        actor,
+      );
+      if (body.enabled !== undefined && body.enabled !== settings.get('site.sitemap_enabled'))
+        await settings.update('site', { values: { sitemap_enabled: body.enabled } }, actor);
+      res.json({ changed: out.changed, ...view(), summary: await sitemap.summary() });
+    },
+  );
 
-  r.post('/sitemap/regenerate', requirePermission('sitemap.manage'), async (req, res) => {
-    await sitemap.regenerate(actorOf(req));
-    res.json({ summary: await sitemap.summary() });
-  });
+  r.post(
+    '/sitemap/regenerate',
+    requirePermission('sitemap.manage'),
+    docs({ noBody: true }),
+    async (req, res) => {
+      await sitemap.regenerate(actorOf(req));
+      res.json({ summary: await sitemap.summary() });
+    },
+  );
 
   r.get('/sitemap/download', requirePermission('sitemap.read'), async (_req, res) => {
     res.set({

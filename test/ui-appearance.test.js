@@ -59,13 +59,15 @@ test('the menu: themes and their tools under Appearance; sitemap and libraries u
   );
   b.go('#/sitemap');
   await wait(() => openGroupLinks().includes('Sitemap'));
-  assert.deepEqual(openGroupLinks().slice(-6), [
+  assert.deepEqual(openGroupLinks().slice(-8), [
     'Translations',
     'Redirects',
     'Messages',
     'Sitemap',
     'Libraries',
     'Database',
+    'API',
+    'Modules',
   ]);
 });
 
@@ -166,7 +168,8 @@ test('preview frames keep the site origin (so theme files load) and nothing more
   // Order is just an artifact of which module's directory sorts where — not a meaningful invariant.
   assert.deepEqual(frames.map((m) => m[1]).sort(), [
     'Component preview',
-    'Page preview',
+    'Page preview', // the page editor
+    'Page preview', // the AI Page Designer chat
     'Theme preview',
   ]);
   for (const [, title, sandbox] of frames) assert.equal(sandbox, 'allow-same-origin', title);

@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { forbidden, parse } from '../../core/http/errors.js';
 import { actorOf, requirePermission } from '../../core/http/middleware.js';
+import { docs } from '../../core/http/docs.js';
 
 const menuBody = z.object({
   title: z.string().max(120).optional(),
@@ -21,11 +22,16 @@ export default function siteRoutes(ctx) {
   r.get('/menus', requirePermission('menus.manage'), async (_req, res) => {
     res.json({ menus: await site.menus.list() });
   });
-  r.put('/menus/:name', requirePermission('menus.manage'), async (req, res) => {
-    res.json({
-      menu: await site.menus.save(req.params.name, parse(menuBody, req.body), actorOf(req)),
-    });
-  });
+  r.put(
+    '/menus/:name',
+    requirePermission('menus.manage'),
+    docs({ body: menuBody }),
+    async (req, res) => {
+      res.json({
+        menu: await site.menus.save(req.params.name, parse(menuBody, req.body), actorOf(req)),
+      });
+    },
+  );
   r.delete('/menus/:name', requirePermission('menus.manage'), async (req, res) => {
     await site.menus.remove(req.params.name, actorOf(req));
     res.status(204).end();
@@ -34,11 +40,16 @@ export default function siteRoutes(ctx) {
   r.get('/redirects', requirePermission('redirects.manage'), async (_req, res) => {
     res.json({ redirects: await site.redirects.list() });
   });
-  r.post('/redirects', requirePermission('redirects.manage'), async (req, res) => {
-    res
-      .status(201)
-      .json({ redirect: await site.redirects.create(parse(redirectBody, req.body), actorOf(req)) });
-  });
+  r.post(
+    '/redirects',
+    requirePermission('redirects.manage'),
+    docs({ body: redirectBody }),
+    async (req, res) => {
+      res.status(201).json({
+        redirect: await site.redirects.create(parse(redirectBody, req.body), actorOf(req)),
+      });
+    },
+  );
   r.delete('/redirects/:id', requirePermission('redirects.manage'), async (req, res) => {
     await site.redirects.remove(req.params.id, actorOf(req));
     res.status(204).end();
@@ -55,7 +66,7 @@ export default function siteRoutes(ctx) {
   });
 
   /** A signed link that shows a draft as visitors would see it, for one hour. Needs permission to edit that type. */
-  r.post('/content/entries/:id/preview-link', async (req, res) => {
+  r.post('/content/entries/:id/preview-link', docs({ noBody: true }), async (req, res) => {
     const entry = await content.get(req.params.id, actorOf(req));
     if (!req.user.can(`content.${entry.type}.write`))
       throw forbidden('Previews are for people who can edit this content.');
@@ -67,11 +78,16 @@ export default function siteRoutes(ctx) {
     });
   });
 
-  r.post('/search/reindex', requirePermission('settings.write'), async (req, res) => {
-    await ctx.jobs.enqueue('search.reindex', {});
-    await ctx.audit.log({ actor: actorOf(req), action: 'search.reindex', entity: 'search' });
-    res.status(202).json({ accepted: true });
-  });
+  r.post(
+    '/search/reindex',
+    requirePermission('settings.write'),
+    docs({ noBody: true }),
+    async (req, res) => {
+      await ctx.jobs.enqueue('search.reindex', {});
+      await ctx.audit.log({ actor: actorOf(req), action: 'search.reindex', entity: 'search' });
+      res.status(202).json({ accepted: true });
+    },
+  );
 
   return r;
 }

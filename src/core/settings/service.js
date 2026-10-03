@@ -280,14 +280,20 @@ export class SettingsService {
    *        reset    keys to delete (revert to default)
    * @param {{id?: number, email?: string, ip?: string, can?: (p: string) => boolean} | null} actor  null = system/CLI
    */
-  async update(namespace, { values = {}, versions = {}, reset = [] } = {}, actor = null) {
+  async update(
+    namespace,
+    { values = {}, versions = {}, reset = [] } = {},
+    actor = null,
+    { internal = false } = {},
+  ) {
     const def = this.registry.get(namespace);
     const ops = [];
     for (const [key, raw] of Object.entries(values)) {
-      const f = this._writable(def, key, actor);
+      const f = this._writable(def, key, actor, internal);
       ops.push({ f, kind: 'set', value: f.validator(raw) });
     }
-    for (const key of reset) ops.push({ f: this._writable(def, key, actor), kind: 'reset' });
+    for (const key of reset)
+      ops.push({ f: this._writable(def, key, actor, internal), kind: 'reset' });
     if (!ops.length) return { changed: [], version: this._version };
 
     let newVersion = 0;
@@ -397,9 +403,10 @@ export class SettingsService {
     return { changed: changed.map((c) => c.key), version: newVersion };
   }
 
-  _writable(def, key, actor) {
+  /** `internal`: code (not the settings API) may write a hidden field, e.g. the module registry's switched-off list. */
+  _writable(def, key, actor, internal = false) {
     const f = def.fields[key];
-    if (!f || f.hidden)
+    if (!f || (f.hidden && !internal))
       throw new SettingsError(404, 'unknown_setting', `Unknown setting "${def.namespace}.${key}"`);
     if (this._meta.get(def.namespace)?.[key]?.locked) {
       throw new SettingsError(

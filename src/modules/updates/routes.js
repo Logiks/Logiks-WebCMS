@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { forbidden, parse } from '../../core/http/errors.js';
+import { docs } from '../../core/http/docs.js';
 import { actorOf, requirePermission } from '../../core/http/middleware.js';
 
 const applyBody = z.object({ restart: z.boolean().default(false) });
@@ -35,18 +36,18 @@ export default function updatesRoutes(ctx) {
     res.json({ entries: await ctx.audit.list({ limit: 15, action: 'updates.' }) });
   });
 
-  r.put('/updates/remote', guard, async (req, res) => {
+  r.put('/updates/remote', docs({ body: remoteBody }), guard, async (req, res) => {
     const { remote } = parse(remoteBody, req.body);
     await ctx.updates.setRemote(remote, actorOf(req));
     res.json({ remote });
   });
 
-  r.post('/updates/nodes/:nodeId/check', guard, async (req, res) => {
+  r.post('/updates/nodes/:nodeId/check', docs({ noBody: true }), guard, async (req, res) => {
     await ctx.updates.dispatch(req.params.nodeId, 'check', {}, actorOf(req));
     res.status(202).json({ accepted: true });
   });
 
-  r.post('/updates/nodes/:nodeId/apply', guard, async (req, res) => {
+  r.post('/updates/nodes/:nodeId/apply', docs({ body: applyBody }), guard, async (req, res) => {
     const { restart } = parse(applyBody, req.body);
     if (restart && !req.user.can('system.restart'))
       throw forbidden(
@@ -59,6 +60,7 @@ export default function updatesRoutes(ctx) {
   r.post(
     '/updates/nodes/:nodeId/restart',
     requirePermission('system.restart'),
+    docs({ noBody: true }),
     async (req, res) => {
       await ctx.updates.dispatch(req.params.nodeId, 'restart', {}, actorOf(req));
       res.status(202).json({ accepted: true });

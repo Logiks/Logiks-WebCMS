@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { forbidden } from '../../core/http/errors.js';
+import { docs } from '../../core/http/docs.js';
 import { parse } from '../../core/http/errors.js';
 import { actorOf, requirePermission } from '../../core/http/middleware.js';
 import { classify } from './files.js';
@@ -48,7 +49,7 @@ export default function siteFilesRoutes(ctx) {
     res.json(siteFiles.get(path));
   });
 
-  r.put('/site/file', async (req, res) => {
+  r.put('/site/file', docs({ body: putBody }), async (req, res) => {
     const body = parse(putBody, req.body);
     need(req, body.path, 'write');
     res.json(await siteFiles.put(body.path, body.content, actorOf(req), body.expectedHash));

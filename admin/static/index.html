@@ -273,6 +273,16 @@
       <section x-data="updatesPage"></section>
     </template>
 
+    <!-- System: API -->
+    <template x-if="route === 'api'">
+      <section x-data="apiPage"></section>
+    </template>
+
+    <!-- System: Modules -->
+    <template x-if="route === 'modules'">
+      <section x-data="modulesPage"></section>
+    </template>
+
     <!-- Automation: Events -->
     <template x-if="route === 'events'">
       <section x-data="eventsPage"></section>

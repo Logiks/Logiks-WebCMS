@@ -471,6 +471,8 @@ document.addEventListener('alpine:init', () => {
     sidebarOpen: false,
     contentTypes: [],
     pluginNav: [],
+    // Optional modules an administrator switched off (System → Modules): their menu entries are hidden.
+    disabledModules: [],
     path: 'overview',
     picker: { open: false, items: [], busy: false, error: '', q: '', resolve: null },
     _seq: 0,
@@ -510,9 +512,14 @@ document.addEventListener('alpine:init', () => {
             // "Site pages", not "Pages": Content already has a content type called Pages, and the two are different things.
             { id: 'pages', label: 'Site pages', perm: 'pages.read' },
             { id: 'components', label: 'Components', perm: 'components.read' },
-            { id: 'pageDesigner', label: 'AI Page Designer', perm: 'pages.write' },
-            { id: 'services', label: 'Services', perm: 'services.read' },
-            { id: 'seo', label: 'SEO Manager', perm: 'seo.read' },
+            {
+              id: 'pageDesigner',
+              label: 'AI Page Designer',
+              module: 'page-designer',
+              perm: 'pages.write',
+            },
+            { id: 'services', label: 'Services', module: 'services', perm: 'services.read' },
+            { id: 'seo', label: 'SEO Manager', module: 'seo', perm: 'seo.read' },
           ],
         },
         {
@@ -536,7 +543,12 @@ document.addEventListener('alpine:init', () => {
           icon: 'bi-images',
           items: [
             { id: 'media', label: 'Media Library', perm: 'media.read' },
-            { id: 'media-generator', label: 'Media Generator', perm: 'media.upload' },
+            {
+              id: 'media-generator',
+              label: 'Media Generator',
+              module: 'media-generator',
+              perm: 'media.upload',
+            },
             { id: 'media-analytics', label: 'Media Analytics', perm: 'media.read' },
           ],
         },
@@ -563,11 +575,36 @@ document.addEventListener('alpine:init', () => {
           label: 'Analytics',
           icon: 'bi-graph-up',
           items: [
-            { id: 'analytics-overview', label: 'Overview', perm: 'analytics.read' },
-            { id: 'analytics-active', label: 'Active Now', perm: 'analytics.read' },
-            { id: 'analytics-pages', label: 'Page Analytics', perm: 'analytics.read' },
-            { id: 'analytics-sessions', label: 'Sessions', perm: 'analytics.read' },
-            { id: 'analytics-users', label: 'User-wise Analytics', perm: 'analytics.read' },
+            {
+              id: 'analytics-overview',
+              label: 'Overview',
+              perm: 'analytics.read',
+              module: 'analytics',
+            },
+            {
+              id: 'analytics-active',
+              label: 'Active Now',
+              perm: 'analytics.read',
+              module: 'analytics',
+            },
+            {
+              id: 'analytics-pages',
+              label: 'Page Analytics',
+              perm: 'analytics.read',
+              module: 'analytics',
+            },
+            {
+              id: 'analytics-sessions',
+              label: 'Sessions',
+              perm: 'analytics.read',
+              module: 'analytics',
+            },
+            {
+              id: 'analytics-users',
+              label: 'User-wise Analytics',
+              perm: 'analytics.read',
+              module: 'analytics',
+            },
           ],
         },
         {
@@ -581,7 +618,7 @@ document.addEventListener('alpine:init', () => {
           items: [
             { id: 'audit', label: 'Audit log', perm: 'audit.read' },
             { id: 'content-activity', label: 'Activity', perm: 'content.activity' },
-            { id: 'events', label: 'Events', perm: 'events.read' },
+            { id: 'events', label: 'Events', module: 'events', perm: 'events.read' },
           ],
         },
         {
@@ -605,9 +642,11 @@ document.addEventListener('alpine:init', () => {
             { id: 'locales', label: 'Translations', perm: 'locales.read' },
             { id: 'redirects', label: 'Redirects', perm: 'redirects.manage' },
             { id: 'messages', label: 'Messages', perm: 'site.messages' },
-            { id: 'sitemap', label: 'Sitemap', perm: 'sitemap.read' },
+            { id: 'sitemap', label: 'Sitemap', module: 'sitemap', perm: 'sitemap.read' },
             { id: 'libraries', label: 'Libraries', perm: 'libraries.read' },
-            { id: 'dbms', label: 'Database', perm: 'dbms.read' },
+            { id: 'dbms', label: 'Database', module: 'dbms', perm: 'dbms.read' },
+            { id: 'api', label: 'API', perm: 'api.read' },
+            { id: 'modules', label: 'Modules', perm: 'cluster.read' },
           ],
         },
         { id: 'settings', label: 'Settings', icon: 'bi-sliders', perm: 'settings.read' },
@@ -635,13 +674,15 @@ document.addEventListener('alpine:init', () => {
           label: 'Automation',
           icon: 'bi-lightning-charge',
           items: [
-            { id: 'webhooks', label: 'Webhooks', perm: 'webhooks.read' },
-            { id: 'scheduler', label: 'Scheduler', perm: 'scheduler.read' },
+            { id: 'webhooks', label: 'Webhooks', module: 'webhooks', perm: 'webhooks.read' },
+            { id: 'scheduler', label: 'Scheduler', module: 'scheduler', perm: 'scheduler.read' },
           ],
         },
       ];
       if (!this.user) return [];
-      const allowed = (n) => this.can(n.perm);
+      // `module` ties an entry to an optional module; while that is switched off the entry is not offered.
+      const allowed = (n) =>
+        this.can(n.perm) && !(n.module && this.disabledModules.includes(n.module));
       return entries
         .map((n) => (n.items ? { ...n, items: n.items.filter(allowed) } : n))
         .filter((n) => (n.items ? n.items.length : allowed(n)));
@@ -757,7 +798,16 @@ document.addEventListener('alpine:init', () => {
       }
     },
 
+    async loadModuleState() {
+      try {
+        this.disabledModules = (await api('GET', '/admin/system/modules/state')).disabled;
+      } catch {
+        this.disabledModules = [];
+      }
+    },
+
     async init() {
+      window.addEventListener('modules-changed', () => this.loadModuleState());
       window.addEventListener('pick-media', (e) => this.openPicker(e.detail.resolve));
       window.addEventListener('hashchange', () => {
         this.hash = location.hash;
@@ -785,6 +835,7 @@ document.addEventListener('alpine:init', () => {
         this.setUser(me.user);
         await this.loadTypes();
         await this.loadPlugins();
+        await this.loadModuleState();
       } catch {
         /* not signed in */
       }
@@ -890,6 +941,7 @@ document.addEventListener('alpine:init', () => {
         // content KPI). The session cookie from the login response above already authenticates this call.
         await this.loadTypes();
         await this.loadPlugins();
+        await this.loadModuleState();
         this.setUser(out.user);
         this.syncRoute();
       } catch (e) {
@@ -2587,7 +2639,12 @@ document.addEventListener('alpine:init', () => {
       seoImage: null,
       seoType: '',
       twitterCard: '',
+      // Page ⇄ module binding (D-069): 'any' writes no "uses" line, 'listed' holds the page to the modules chosen.
+      usesMode: 'any',
+      usesModules: [],
+      usesServices: '',
     },
+    usesInfo: { inferred: { modules: [], services: [] }, issues: [], modules: [] },
     seoImageMeta: null,
     thumb,
     shows: 'none',
@@ -2645,6 +2702,15 @@ document.addEventListener('alpine:init', () => {
         seoImage: front.seo_image || null,
         seoType: front.seo_type || '',
         twitterCard: front.twitter_card || '',
+        usesMode: front.uses === undefined ? 'any' : 'listed',
+        usesModules:
+          front.uses === undefined || front.uses === 'none'
+            ? []
+            : String(front.uses)
+                .split(',')
+                .map((x) => x.trim())
+                .filter(Boolean),
+        usesServices: front.uses_services ? String(front.uses_services) : '',
       };
       this.seoImageMeta = null;
       if (this.front.seoImage) this.loadSeoImageMeta();
@@ -2756,6 +2822,11 @@ document.addEventListener('alpine:init', () => {
       if (this.front.seoImage) f.seo_image = this.front.seoImage;
       if (this.front.seoType) f.seo_type = this.front.seoType;
       if (this.front.twitterCard) f.twitter_card = this.front.twitterCard;
+      if (this.front.usesMode === 'listed') {
+        f.uses = this.front.usesModules.length ? this.front.usesModules.join(', ') : 'none';
+        if (this.front.usesServices.trim() && this.front.usesModules.includes('services'))
+          f.uses_services = this.front.usesServices.trim();
+      }
       if (this.shows === 'type' && this.showsType) f.entry = this.showsType;
       else if (this.shows === 'own') f.entry = 'own';
       else if (this.shows === 'fixed' && this.showsType && this.showsPath.trim())
@@ -2774,7 +2845,27 @@ document.addEventListener('alpine:init', () => {
 
     schedulePreview() {
       clearTimeout(this._previewTimer);
-      this._previewTimer = setTimeout(() => this.runPreview(), 700);
+      this._previewTimer = setTimeout(() => {
+        this.runPreview();
+        this.checkUses();
+      }, 700);
+    },
+    /** What this page's components would read, against what the page lists in "uses" (D-069). */
+    async checkUses() {
+      try {
+        this.usesInfo = await api('POST', '/admin/site/uses', { content: this.content() });
+      } catch {
+        /* an invalid draft is reported by the preview; keep the last good answer */
+      }
+    },
+    /** One click: list exactly the modules the page's components read. */
+    useWhatItNeeds() {
+      this.front.usesMode = 'listed';
+      this.front.usesModules = [...this.usesInfo.inferred.modules];
+    },
+    toggleUses(id) {
+      const m = this.front.usesModules;
+      this.front.usesModules = m.includes(id) ? m.filter((x) => x !== id) : [...m, id];
     },
     async runPreview() {
       if (!this.cleanName) return;
@@ -3511,6 +3602,154 @@ document.addEventListener('alpine:init', () => {
         this.error = e.message;
       } finally {
         this.busy = false;
+      }
+    },
+  }));
+
+  // ───────── System → API (docs/DECISIONS.md D-068): the reference, the OpenAPI links, and API keys ─────────
+  Alpine.data('apiPage', () => ({
+    ...H,
+    tab: 'keys', // 'keys' | 'reference'
+    keys: [],
+    ref: null,
+    loaded: false,
+    form: null, // the key being created or edited
+    secret: '', // shown once, right after create or rotate
+    error: '',
+    busy: false,
+
+    async init() {
+      if (!(await this.mountFragment('api', 'page'))) return;
+      await this.load();
+    },
+    async load() {
+      this.ref = await api('GET', '/admin/api-reference');
+      this.keys = (await api('GET', '/admin/api-keys')).keys;
+      this.loaded = true;
+    },
+    blank() {
+      return {
+        id: null,
+        name: '',
+        allModules: true,
+        scopes: [],
+        writes: [], // modules this key may also write to ("content" means content:write)
+        rateLimit: 600,
+        enabled: true,
+        expires: '',
+      };
+    },
+    startNew() {
+      this.secret = '';
+      this.error = '';
+      this.form = this.blank();
+    },
+    edit(k) {
+      this.secret = '';
+      this.error = '';
+      this.form = {
+        id: k.id,
+        name: k.name,
+        allModules: k.scopes.includes('*'),
+        scopes: k.scopes.filter((x) => x !== '*' && !x.endsWith(':write')),
+        writes: k.scopes.filter((x) => x.endsWith(':write')).map((x) => x.slice(0, -6)),
+        rateLimit: k.rateLimit,
+        enabled: k.enabled,
+        expires: k.expiresAt ? new Date(k.expiresAt).toISOString().slice(0, 10) : '',
+      };
+    },
+    toggleScope(id) {
+      const s = this.form.scopes;
+      this.form.scopes = s.includes(id) ? s.filter((x) => x !== id) : [...s, id];
+    },
+    toggleWrite(id) {
+      const s = this.form.writes;
+      this.form.writes = s.includes(id) ? s.filter((x) => x !== id) : [...s, id];
+    },
+    body() {
+      const f = this.form;
+      return {
+        name: f.name.trim(),
+        scopes: [...(f.allModules ? ['*'] : f.scopes), ...f.writes.map((m) => `${m}:write`)],
+        rateLimit: Number(f.rateLimit) || 600,
+        enabled: f.enabled,
+        expiresAt: f.expires ? new Date(`${f.expires}T23:59:59`).getTime() : null,
+      };
+    },
+    async save() {
+      this.error = '';
+      this.busy = true;
+      try {
+        if (this.form.id) {
+          await api('PUT', `/admin/api-keys/${this.form.id}`, this.body());
+          toast('Key saved.');
+        } else {
+          const r = await api('POST', '/admin/api-keys', this.body());
+          this.secret = r.secret;
+        }
+        this.form = null;
+        await this.load();
+      } catch (e) {
+        this.error = e.message;
+      } finally {
+        this.busy = false;
+      }
+    },
+    async rotate(k) {
+      if (!confirm(`Rotate “${k.name}”? The current key stops working immediately.`)) return;
+      this.secret = (await api('POST', `/admin/api-keys/${k.id}/rotate`, {})).secret;
+      await this.load();
+    },
+    async remove(k) {
+      if (!confirm(`Delete “${k.name}”? Anything using it stops working immediately.`)) return;
+      await api('DELETE', `/admin/api-keys/${k.id}`);
+      await this.load();
+    },
+    async copy(text) {
+      try {
+        await window.navigator.clipboard.writeText(text);
+        toast('Copied.');
+      } catch {
+        toast('Copy failed. Select the text and copy it by hand.', 'error');
+      }
+    },
+    statusOf(k) {
+      return !k.enabled ? 'Disabled' : k.expired ? 'Expired' : 'Active';
+    },
+  }));
+
+  // ───────── System → Modules (docs/DECISIONS.md D-067): what the platform is made of ─────────
+  Alpine.data('modulesPage', () => ({
+    ...H,
+    modules: [],
+    loaded: false,
+    open: '',
+    async init() {
+      if (!(await this.mountFragment('system', 'modules'))) return;
+      this.modules = (await api('GET', '/admin/system/modules')).modules;
+      this.loaded = true;
+    },
+    toggle(id) {
+      this.open = this.open === id ? '' : id;
+    },
+    error: '',
+    busy: '',
+    /** Flip a module from what the list says now. The server says what to do first if others need it. */
+    async toggleModule(id) {
+      const m = this.modules.find((x) => x.id === id);
+      if (!m) return;
+      const enabled = m.switchedOff;
+      this.error = '';
+      this.busy = id;
+      try {
+        await api('PUT', `/admin/system/modules/${id}`, { enabled });
+        toast(`${m.label} is ${enabled ? 'on' : 'off'}.`);
+        this.modules = (await api('GET', '/admin/system/modules')).modules;
+        window.dispatchEvent(new window.Event('modules-changed'));
+      } catch (e) {
+        this.error = e.message;
+      } finally {
+        this.busy = '';
       }
     },
   }));

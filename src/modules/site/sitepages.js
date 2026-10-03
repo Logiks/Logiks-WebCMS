@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { HttpError } from '../../core/http/errors.js';
 import { SITE_DIRS, Safe, createEngine } from '../themes/sandbox.js';
+import { usesOf } from './uses.js';
 import { WRAPPER_CSS, compileComponent, parsePage, scopeIdsIn } from './component.js';
 import { buildHead } from './seo.js';
 import { classify } from './files.js';
@@ -241,7 +242,7 @@ export function createSitePages(ctx) {
       const attempt = async (file, status) => {
         const page = b.pages.get(file);
         if (!page) throw new HttpError(404, 'not_found', 'That page no longer exists.');
-        const state = makeState(b, req);
+        const state = makeState(b, req, page.front);
         const layoutName = b.rt.text.has(`layouts/${page.front.layout}.html`)
           ? page.front.layout
           : 'default';
@@ -351,12 +352,15 @@ export function createSitePages(ctx) {
     const css = new Map();
     /** @type {Map<string, any[]>} scope id → declared endpoints */
     const apis = new Map();
+    /** Scope ids of the theme's own components: the frame around the site, not held to a page's `uses` (D-069). */
+    const frame = new Set();
     const add = (target, ck, src, what) => {
       try {
         const c = compileComponent(ck, src);
         files.set(target, c.template);
         if (c.css) css.set(c.id, c.css);
         if (c.apis.length) apis.set(c.id, c.apis);
+        if (c.apis.length && ck.startsWith('theme:')) frame.add(c.id);
       } catch (e) {
         // Saving validates every file, so this only happens if a row was changed behind our back. One bad file must not
         // take the site down: it is skipped, and rendering anything that uses it reports the missing component.
@@ -413,6 +417,7 @@ export function createSitePages(ctx) {
       engine,
       css,
       apis,
+      frame,
       pages,
       parsed: new Map(),
       styles: listed('styles', '.css', rt.manifest.styles).map(
@@ -440,7 +445,8 @@ export function createSitePages(ctx) {
 
   // ───────── one render's state: the data it read, and what the page said about itself ─────────
 
-  function makeState(b, req) {
+  function makeState(b, req, front) {
+    const uses = usesOf(front ?? {});
     const tags = new Set();
     const entries = [];
     const seo = {};
@@ -453,7 +459,7 @@ export function createSitePages(ctx) {
       redirectTo: null,
       api: {
         declared: (id) => b.apis.get(id) ?? [],
-        async load(decl, url) {
+        async load(decl, url, componentId) {
           if (++calls > MAX_API_CALLS)
             throw new Error(`A page can read data ${MAX_API_CALLS} times at most.`);
           try {
@@ -461,6 +467,7 @@ export function createSitePages(ctx) {
               safe: true,
               locale: req.request.locale,
               previewId: req.request.previewId,
+              allow: b.frame.has(componentId) ? null : uses,
             });
             for (const t of out.tags) tags.add(t);
             entries.push(...out.entries);
@@ -522,7 +529,10 @@ export function createSitePages(ctx) {
     }
     // The SEO Manager rule for this exact live URL (docs/DECISIONS.md D-049), if any — it outranks everything
     // below: the entry's own fields, the template's {% seo %} tag, and the page's own SEO-section defaults.
-    const rule = status === 404 ? null : await ctx.seo.resolve(req.request.path);
+    const rule =
+      status === 404 || !ctx.modules.isOn('seo', ctx)
+        ? null
+        : await ctx.seo.resolve(req.request.path);
     const name = site.name;
     const titled = (t) =>
       t ? `${t} | ${name}` : site.tagline ? `${name} — ${site.tagline}` : name;

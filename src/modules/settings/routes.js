@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { parse } from '../../core/http/errors.js';
 import { actorOf, requirePermission } from '../../core/http/middleware.js';
+import { docs } from '../../core/http/docs.js';
 
 const writeBody = z.object({
   values: z.record(z.string(), z.any()).optional(),
@@ -24,32 +25,47 @@ export default function settingsRoutes(ctx) {
     });
   });
 
-  r.post('/settings/history/:id/restore', requirePermission('settings.write'), async (req, res) => {
-    const out = await settings.rollback(Number(req.params.id), actorOf(req));
-    res.json(out);
-  });
+  r.post(
+    '/settings/history/:id/restore',
+    requirePermission('settings.write'),
+    docs({ noBody: true }),
+    async (req, res) => {
+      const out = await settings.rollback(Number(req.params.id), actorOf(req));
+      res.json(out);
+    },
+  );
 
   r.get('/settings/:ns', requirePermission('settings.read'), (req, res) => {
     res.json(settings.describe(req.params.ns));
   });
 
-  r.put('/settings/:ns', requirePermission('settings.write'), async (req, res) => {
-    const body = parse(writeBody, req.body);
-    const out = await settings.update(req.params.ns, body, actorOf(req));
-    const view = settings.describe(req.params.ns);
-    const restartRequired = view.fields
-      .filter((f) => f.restartRequired && out.changed.includes(f.key))
-      .map((f) => f.label);
-    res.json({ ...out, restartRequired, settings: view });
-  });
+  r.put(
+    '/settings/:ns',
+    requirePermission('settings.write'),
+    docs({ body: writeBody }),
+    async (req, res) => {
+      const body = parse(writeBody, req.body);
+      const out = await settings.update(req.params.ns, body, actorOf(req));
+      const view = settings.describe(req.params.ns);
+      const restartRequired = view.fields
+        .filter((f) => f.restartRequired && out.changed.includes(f.key))
+        .map((f) => f.label);
+      res.json({ ...out, restartRequired, settings: view });
+    },
+  );
 
-  r.post('/settings/:ns/tests/:test', requirePermission('settings.write'), async (req, res) => {
-    const { values } = parse(
-      z.object({ values: z.record(z.string(), z.any()).optional() }),
-      req.body,
-    );
-    res.json(await settings.runTest(req.params.ns, req.params.test, values, actorOf(req)));
-  });
+  r.post(
+    '/settings/:ns/tests/:test',
+    requirePermission('settings.write'),
+    docs({ freeForm: 'The unsaved values to test with' }),
+    async (req, res) => {
+      const { values } = parse(
+        z.object({ values: z.record(z.string(), z.any()).optional() }),
+        req.body,
+      );
+      res.json(await settings.runTest(req.params.ns, req.params.test, values, actorOf(req)));
+    },
+  );
 
   return r;
 }

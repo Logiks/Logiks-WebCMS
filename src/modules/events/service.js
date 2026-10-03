@@ -7,9 +7,9 @@ import { now } from '../../core/db/index.js';
  * wildcard pattern (`src/modules/webhooks/service.js`). This is deliberate: a script-mode Service (D-046) already
  * has the full platform `ctx`, so `ctx.events.emit('my.custom.event', {...})` IS the custom-event feature — no
  * separate "define an event type" form is needed.
- * @param {{db: import('knex').Knex, dialect: any, jobs: any, log: import('pino').Logger}} deps
+ * @param {{db: import('knex').Knex, dialect: any, jobs: any, log: import('pino').Logger, enabled?: () => boolean}} deps
  */
-export function createEvents({ db, dialect, jobs, log }) {
+export function createEvents({ db, dialect, jobs, log, enabled = () => true }) {
   return {
     /**
      * Records the event, then hands it to the job queue to dispatch to matching webhooks — never inline, so
@@ -17,6 +17,7 @@ export function createEvents({ db, dialect, jobs, log }) {
      * @param {string} name @param {object} [payload]
      */
     async emit(name, payload = {}) {
+      if (!enabled()) return; // the Events module is switched off (D-070): nothing is logged or dispatched
       const clean = String(name ?? '').trim();
       if (!clean || clean.length > 191)
         throw new HttpError(

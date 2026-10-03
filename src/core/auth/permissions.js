@@ -104,6 +104,12 @@ export function defineCorePermissions(permissions) {
     // Services and Webhooks already rely on.
     'scheduler.write': 'Create, edit and delete scheduled tasks',
   });
+  permissions.define('API', {
+    'api.read': 'View the API reference and API keys',
+    // A key lets a machine read the site's public data without the public API being switched on. It cannot write,
+    // and only reaches the modules it is scoped to, but handing one out is still an access decision.
+    'api.keys.manage': 'Create, edit, rotate and delete API keys',
+  });
   permissions.define('Analytics', {
     'analytics.read': 'View site and admin activity: page views, sessions and user activity',
   });
@@ -126,6 +132,7 @@ export function defineCorePermissions(permissions) {
     'audit.read': 'View the audit log',
     'cluster.read': 'View cluster, queue and cache status',
     'cache.flush': 'Flush the cache',
+    'modules.manage': 'Switch optional modules on or off',
     'jobs.manage': 'Retry or discard failed background jobs',
     'system.update': 'Check for and install application updates (git pull)',
     'system.restart': 'Restart servers',

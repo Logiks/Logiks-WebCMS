@@ -80,7 +80,13 @@ export const manifestSchema = z.object({
   // `settings` becomes `theme_<id>` (D-031/D-052) — editable on the generic Settings screen with no new UI code,
   // plus a curated GET/PUT /admin/plugins/:slug/config pair gated by plugins.manage.
   config: z.record(z.string().regex(/^[a-z][a-z0-9_]*$/), configField).default({}),
+  // Other plugins this one needs: they must be installed and on, or this one doesn't load (D-070).
   depends: z.array(z.string().regex(PLUGIN_SLUG)).max(20).default([]),
+  // Built-in modules this one needs (ids as shown at System → Modules), e.g. ["services"]. Same rule.
+  requires: z
+    .array(z.string().regex(/^[a-z][a-z0-9-]{0,79}$/))
+    .max(20)
+    .default([]),
 });
 
 const bad = (msg) => new HttpError(422, 'invalid_plugin', msg);

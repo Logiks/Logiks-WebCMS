@@ -2,6 +2,7 @@ import express, { Router } from 'express';
 import { z } from 'zod';
 import { HttpError, parse } from '../../core/http/errors.js';
 import { actorOf, requirePermission } from '../../core/http/middleware.js';
+import { docs } from '../../core/http/docs.js';
 
 const patch = z.object({
   alt: z.string().max(500).optional(),
@@ -24,6 +25,7 @@ export default function mediaRoutes(ctx) {
   r.post(
     '/media',
     requirePermission('media.upload'),
+    docs({ binary: 'application/octet-stream' }),
     // The body limit is a hard ceiling; the real, adjustable limit (Settings → Media) is enforced by the service.
     express.raw({ type: () => true, limit: '55mb' }),
     async (req, res) => {
@@ -53,9 +55,14 @@ export default function mediaRoutes(ctx) {
     const item = await media.get(req.params.id);
     res.json({ item, usage: await media.usage(item.id) });
   });
-  r.put('/media/:id', requirePermission('media.upload'), async (req, res) => {
-    res.json({ item: await media.update(req.params.id, parse(patch, req.body), actorOf(req)) });
-  });
+  r.put(
+    '/media/:id',
+    requirePermission('media.upload'),
+    docs({ body: patch }),
+    async (req, res) => {
+      res.json({ item: await media.update(req.params.id, parse(patch, req.body), actorOf(req)) });
+    },
+  );
   r.delete('/media/:id', requirePermission('media.delete'), async (req, res) => {
     await media.remove(req.params.id, { force: req.query.force === 'true' }, actorOf(req));
     res.status(204).end();
