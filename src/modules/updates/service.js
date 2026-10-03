@@ -134,6 +134,11 @@ export function createUpdatesService({
     const [short, subject, author, at] = (meta ?? '').split('\x1f');
     const dirty = (await git('status', '--porcelain', '--untracked-files=no')).out !== '';
     const url = await git('remote', 'get-url', remote);
+    const remotes = [];
+    for (const name of (await git('remote')).out.split('\n').filter(Boolean)) {
+      const u = await git('remote', 'get-url', name);
+      remotes.push({ name, url: u.code === 0 ? u.out : null });
+    }
 
     const info = {
       supported: true,
@@ -145,6 +150,7 @@ export function createUpdatesService({
       branch,
       remote,
       remoteUrl: url.code === 0 ? url.out : null,
+      remotes,
       dirty,
       ahead: null,
       behind: null,
@@ -410,6 +416,41 @@ export function createUpdatesService({
     }
   }
 
+  /**
+   * Switches which git remote updates come from. It is the cluster-wide `updates.remote` setting, so every server follows;
+   * a server that has no remote of that name says so on its next check. The name must exist in THIS checkout.
+   */
+  async function setRemote(name, actor) {
+    if (st.status === 'running')
+      throw new HttpError(
+        409,
+        'busy',
+        'An update is already running on this server. Wait for it to finish.',
+      );
+    const g = await readGit();
+    if (!g.supported) throw new HttpError(409, 'unsupported', g.message);
+    if (!g.remotes.some((r) => r.name === name))
+      throw new HttpError(
+        400,
+        'unknown_remote',
+        `This checkout has no git remote named "${name}". Add it with "git remote add ${name} <url>" first.`,
+      );
+    const from = settings.get('updates.remote');
+    if (from === name) return;
+    await settings.update('updates', { values: { remote: name } }, actor);
+    await audit.log({
+      actor: actorInfo(actor),
+      action: 'updates.remote',
+      entity: 'server',
+      entityId: env.nodeId,
+      meta: { host: hostName(), from, to: name },
+    });
+    set({
+      git: await readGit(),
+      message: `Updates now come from "${name}". Check for updates to refresh.`,
+    });
+  }
+
   /** Validates and launches an action on THIS server; the work continues in the background. */
   function begin(action, opts, actor) {
     if (!['check', 'apply', 'restart'].includes(action))
@@ -450,6 +491,7 @@ export function createUpdatesService({
       stopped = true;
     },
     snapshot: () => st,
+    setRemote,
     bootCommit: () => bootCommit,
     restartMode: () => resolveRestartMode(settings.get('updates.restart_mode'), env.supervised),
 

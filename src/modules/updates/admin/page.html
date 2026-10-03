@@ -5,6 +5,17 @@
           <span x-show="data?.restartMode === 'self'">Restart starts a new copy of the process by itself. Under a supervisor, set the restart method in <a href="#/settings/updates">Settings</a>.</span>
         </div>
 
+        <div class="panel mb-3" x-show="remotes().length > 1">
+          <div class="panel-h">Update source</div>
+          <div class="p-3 d-flex flex-wrap align-items-center gap-2">
+            <label class="small mb-0" for="upd-remote">Pull updates from</label>
+            <select class="form-select form-select-sm w-auto" id="upd-remote" :value="data?.remote" @change="setRemote($event.target.value)" :disabled="!actionable(self())">
+              <template x-for="r in remotes()" :key="r.name"><option :value="r.name" :selected="r.name === data?.remote" x-text="r.name + (r.url ? ' — ' + r.url : '')"></option></template>
+            </select>
+            <span class="small muted">Applies to every server. Each server needs access to the remote.</span>
+          </div>
+        </div>
+
         <div class="panel mb-3">
           <div class="panel-h">Servers <label class="form-check mb-0 fw-normal small" x-show="can('system.restart')"><input class="form-check-input" type="checkbox" id="restart-after" x-model="restartAfter"> <span class="form-check-label" for="restart-after">Restart a server after updating it</span></label></div>
           <div class="empty" x-show="!data">Loading…</div>

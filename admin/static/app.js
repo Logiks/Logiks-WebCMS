@@ -1028,6 +1028,23 @@ document.addEventListener('alpine:init', () => {
     git(n) {
       return n.update?.git || null;
     },
+    self() {
+      return this.data?.nodes.find((n) => n.self) || {};
+    },
+    /** Remotes of the server answering this page (the one the switch is validated against). */
+    remotes() {
+      return this.git(this.self())?.remotes || [];
+    },
+    async setRemote(remote) {
+      try {
+        await api('PUT', '/admin/updates/remote', { remote });
+        toast(`Updates now come from "${remote}".`);
+        await this.refresh(true);
+      } catch (e) {
+        toast(e.message, 'error');
+        await this.refresh();
+      }
+    },
     working(n) {
       return n.update?.status === 'running' || !!this.restarting[n.id];
     },
@@ -1131,6 +1148,8 @@ document.addEventListener('alpine:init', () => {
           return m.from === m.to
             ? `${host} was already at ${m.to}${m.restart ? ' and was restarted' : ''}`
             : `${host} updated ${m.from} → ${m.to}${m.restart ? ' and restarted' : ''}`;
+        case 'updates.remote':
+          return `Switched the update source from ${m.from} to ${m.to}`;
         case 'updates.check':
           return `Checked ${host} for updates` + (m.behind ? ` (${m.behind} available)` : '');
         case 'updates.restart':

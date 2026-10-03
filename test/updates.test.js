@@ -564,3 +564,39 @@ test('helpers: credentials are redacted, changed files are classified, the resta
   assert.equal(env.childEnv().GIT_TERMINAL_PROMPT, '0', 'git must never wait for a password');
   assert.ok(!JSON.stringify(env).includes('APP_MASTER_KEY=') && typeof env.childEnv === 'function');
 });
+
+test('the update source can be switched to another remote of the checkout, and updates then come from it', async () => {
+  const repos = makeRepos();
+  // A second remote that is a clone of origin with one extra commit only it has.
+  const mirror = path.join(path.dirname(repos.origin), 'mirror.git');
+  git(path.dirname(repos.origin), 'clone', '--bare', repos.origin, mirror);
+  const extra = path.join(path.dirname(repos.origin), 'extra');
+  git(path.dirname(repos.origin), 'clone', mirror, extra);
+  fs.writeFileSync(path.join(extra, 'mirror-only.txt'), 'x');
+  git(extra, 'add', '.');
+  git(extra, 'commit', '-m', 'mirror only');
+  git(extra, 'push', 'origin', 'HEAD:main');
+  git(repos.server, 'remote', 'add', 'mirror', mirror);
+  const node = await nodeFor(repos.server);
+  try {
+    await until(() => node.ctx.updates.snapshot().git?.remotes);
+    assert.deepEqual(
+      node.ctx.updates
+        .snapshot()
+        .git.remotes.map((r) => r.name)
+        .sort(),
+      ['mirror', 'origin'],
+    );
+    await assert.rejects(node.ctx.updates.setRemote('nope', null), { code: 'unknown_remote' });
+    await node.ctx.updates.setRemote('mirror', null);
+    assert.equal(node.ctx.settings.get('updates.remote'), 'mirror');
+    assert.equal(node.ctx.updates.snapshot().git.remote, 'mirror');
+
+    await node.ctx.updates.dispatch(self(node), 'check', {}, null);
+    await finished(node);
+    assert.equal(node.ctx.updates.snapshot().git.behind, 1);
+  } finally {
+    await node.close();
+    repos.cleanup();
+  }
+});
