@@ -377,6 +377,22 @@ function loadEditor() {
 }
 
 document.addEventListener('alpine:init', () => {
+  // An effect that was already queued when its element left the page (navigating away from a screen) still runs once,
+  // after the screen's data is gone, and fails with "x is not defined". That error is about something nobody can see,
+  // so it is not reported; an expression error on an element that is on the page is reported exactly as before.
+  Alpine.setErrorHandler((error, el, expression) => {
+    if (el && !el.isConnected) return;
+    Object.assign(error ?? {}, { el, expression });
+    console.warn(
+      `Alpine Expression Error: ${error?.message}`,
+      expression ? `Expression: "${expression}"` : '',
+      el,
+    );
+    setTimeout(() => {
+      throw error;
+    }, 0);
+  });
+
   // x-codejar="{ mode: 'htmlmixed', get: template, set: (v) => (template = v), readOnly: false, placeholder: '' }"
   // get/set run through Alpine's own expression scope, so whatever reactive property they touch stays exactly what
   // it was when the field was a plain textarea (x-model, a computed prop, …) — this only changes how it's drawn.

@@ -443,10 +443,15 @@ export function createPlugins(ctx, { pluginsDir }) {
     if (typeof mod.default !== 'function') return;
     await db.transaction(async (trx) => {
       await mod.default(trx, ctx.dialect);
+      // `batch` is a 32-bit integer column: the plugin's migration count (not a timestamp — epoch milliseconds overflow it on
+      // PostgreSQL and MySQL strict mode; SQLite never noticed).
+      const [{ n }] = await trx('plugin_migrations')
+        .where({ plugin_slug: p.slug })
+        .count({ n: '*' });
       await trx('plugin_migrations').insert({
         plugin_slug: p.slug,
         name: p.version,
-        batch: now(),
+        batch: Number(n) + 1,
         applied_at: now(),
       });
     });

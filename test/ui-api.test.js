@@ -158,3 +158,25 @@ test('Modules: switch an optional module off from the screen; its menu entry goe
   await wait(() => !node.ctx.settings.get('modules.disabled').includes('seo'));
   await wait(() => /SEO Manager/.test(navText()));
 });
+
+test('an expression that fails after its screen was left is not reported; one on the page still is', async () => {
+  // Alpine runs an effect that was queued before its element was removed once more, with the screen's data gone.
+  const host = b.win.document.createElement('div');
+  host.innerHTML = '<div x-data="{ v: { x: { y: 1 } } }"><span x-text="v.x.y"></span></div>';
+  b.win.document.body.appendChild(host);
+  const scope = host.firstElementChild;
+  await wait(() => scope.querySelector('span').textContent === '1');
+  const before_ = b.errors.length;
+  host.remove(); // gone from the page, but its effect is still alive
+  b.win.Alpine.$data(scope).v = null; // the effect re-runs and its expression throws
+  await new Promise((r) => setTimeout(r, 100));
+  assert.equal(b.errors.length, before_, 'a removed screen must not report');
+
+  const live = b.win.document.createElement('div');
+  live.innerHTML = '<div x-data="{ v: { x: null } }"><span x-text="v.x.y"></span></div>';
+  b.win.document.body.appendChild(live);
+  await wait(() => b.errors.length > before_);
+  assert.match(b.errors.at(-1), /Cannot read properties of null/);
+  b.errors.length = 0; // this deliberate error is not part of the tour
+  live.remove();
+});
