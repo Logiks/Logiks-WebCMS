@@ -55,8 +55,8 @@ test('the chat shows each file it touched with its kind, and a "Working on" stri
   const wait = (fn) => until(fn, { timeout: 8000, every: 50 });
   b.click(b.$('.chat-fab'));
   const dock = () => b.$('aside.chat-dock');
-  await wait(() => dock() && dock().querySelectorAll('.ac-chip').length === 3);
-  const chips = [...dock().querySelectorAll('.ac-chip')].map((c) =>
+  await wait(() => dock() && dock().querySelectorAll('.ac-working .ac-chip').length === 3);
+  const chips = [...dock().querySelectorAll('.ac-working .ac-chip')].map((c) =>
     c.textContent.replace(/\s+/g, ' ').trim(),
   );
   assert.ok(
@@ -73,5 +73,20 @@ test('the chat shows each file it touched with its kind, and a "Working on" stri
   );
   const lines = [...dock().querySelectorAll('.ac-tool')].map((t) => t.textContent);
   assert.ok(lines.some((t) => /Wrote a file.*Plugin.*plugins\/ui-demo\/plugin\.json/.test(t)));
-  assert.equal(dock().querySelector('.ac-chip[href="#/plugins"]') !== null, true);
+  assert.equal(dock().querySelector('.ac-working .ac-chip[href="#/plugins"]') !== null, true);
+});
+
+test('the "Working on" strip folds away to its title and count, and opens again', async () => {
+  const wait = (fn) => until(fn, { timeout: 8000, every: 50 });
+  const dock = () => b.$('aside.chat-dock');
+  const chipCount = () => dock().querySelectorAll('.ac-working .ac-chip').length;
+  if (!dock()) b.click(b.$('.chat-fab'));
+  await wait(() => dock() && chipCount() === 3);
+  const toggle = () => dock().querySelector('.ac-working-toggle');
+  assert.equal(toggle().textContent.replace(/\s+/g, ' ').trim(), 'Working on 3');
+  b.click(toggle());
+  await wait(() => chipCount() === 0);
+  assert.equal(toggle().getAttribute('aria-expanded'), 'false');
+  b.click(toggle());
+  await wait(() => chipCount() === 3);
 });

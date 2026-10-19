@@ -801,6 +801,7 @@ document.addEventListener('alpine:init', () => {
           items: [
             { id: 'webhooks', label: 'Webhooks', module: 'webhooks', perm: 'webhooks.read' },
             { id: 'scheduler', label: 'Scheduler', module: 'scheduler', perm: 'scheduler.read' },
+            { id: 'testing', label: 'Testing', module: 'testing', perm: 'testing.read' },
           ],
         },
       ];
@@ -4550,6 +4551,22 @@ document.addEventListener('alpine:init', () => {
     focus: null,
     attachments: [],
     showChanges: false, // collapsed until there is something new to look at
+    // The strip lists only files this chat WROTE (never ones it merely read); it can be folded away to save room.
+    workingOpen: (() => {
+      try {
+        return localStorage.getItem('cms.assistant.workingOpen') !== '0';
+      } catch {
+        return true;
+      }
+    })(),
+    toggleWorking() {
+      this.workingOpen = !this.workingOpen;
+      try {
+        localStorage.setItem('cms.assistant.workingOpen', this.workingOpen ? '1' : '0');
+      } catch {
+        /* private window: the choice just lasts until the page reloads */
+      }
+    },
     models: { default: '', options: [] },
     details: {},
     openDiff: null,
@@ -5181,6 +5198,190 @@ document.addEventListener('alpine:init', () => {
     },
   }));
 
+  // ───────── Automation → Testing (docs/DECISIONS.md D-086) ─────────
+  Alpine.data('testingPage', () => ({
+    ...H,
+    runs: [],
+    current: null, // { run, findings, total, shots }
+    browser: { ok: true, reason: '' },
+    running: null,
+    form: { viewports: ['mobile', 'tablet', 'desktop'], maxPages: 40, spelling: true },
+    filter: { severity: '', category: '', viewport: '', q: '' },
+    limit: 500,
+    loaded: false,
+    busy: false,
+    error: '',
+    timer: null,
+    async init() {
+      if (!(await this.mountFragment('testing', 'page'))) return;
+      await this.refresh();
+      this.loaded = true;
+      if (this.runs[0]) await this.open(this.runs[0].id);
+      // Progress and the list stay current while a check is running; the timer stops with the screen.
+      this.timer = setInterval(() => {
+        if (!this.$root?.isConnected) return clearInterval(this.timer);
+        if (this.running) this.refresh(true);
+      }, 2500);
+    },
+    async refresh(keepOpen = false) {
+      try {
+        const [st, rs] = await Promise.all([
+          api('GET', '/admin/testing/status'),
+          api('GET', '/admin/testing/runs'),
+        ]);
+        this.browser = st.browser;
+        this.runs = rs.runs;
+        const was = this.running;
+        this.running = st.running;
+        if (keepOpen && was && !st.running && this.current?.run.id === was.id)
+          await this.open(was.id);
+      } catch (e) {
+        this.error = e.message;
+      }
+    },
+    get progress() {
+      return this.running && this.running.unitsTotal
+        ? Math.round((100 * this.running.unitsDone) / this.running.unitsTotal)
+        : 0;
+    },
+    statusText(r) {
+      return (
+        {
+          queued: 'Waiting',
+          running: 'Running',
+          done: 'Finished',
+          failed: 'Failed',
+          cancelled: 'Cancelled',
+        }[r.status] || r.status
+      );
+    },
+    get categories() {
+      return Object.keys(this.current?.run.summary?.byCategory || {}).sort();
+    },
+    get compare() {
+      const c = this.current?.run.summary?.comparison;
+      return c
+        ? `Since check #${c.previousRunId}: ${c.newCount} new problem${c.newCount === 1 ? '' : 's'}, ${c.resolvedCount} fixed.`
+        : '';
+    },
+    get notes() {
+      const s = this.current?.run.summary;
+      if (!s) return '';
+      return [
+        s.mode === 'basic'
+          ? 'Run without a browser: page HTML only. Not checked: layout, sideways scrolling, colour contrast, cut-off text, phone tap targets, picture sizes, browser errors.'
+          : '',
+        s.spellingUnavailable
+          ? 'Spelling was skipped: the dictionary is not installed on this server.'
+          : '',
+        s.skippedLanguages?.length
+          ? `Spelling was skipped for pages in: ${s.skippedLanguages.join(', ')}.`
+          : '',
+        s.linksSkipped > 0 ? `${s.linksSkipped} links were not followed (limit reached).` : '',
+        `${s.linksChecked} links followed. Took ${Math.round(s.durationMs / 1000)} seconds.`,
+      ]
+        .filter(Boolean)
+        .join(' ');
+    },
+    /** The findings grouped by page, worst first. */
+    get groups() {
+      if (!this.current) return [];
+      const by = new Map();
+      for (const f of this.current.findings) {
+        if (!by.has(f.path))
+          by.set(f.path, {
+            path: f.path,
+            items: [],
+            errors: 0,
+            warns: 0,
+            infos: 0,
+            shots: [],
+            open: false,
+          });
+        const g = by.get(f.path);
+        g.items.push(f);
+        if (f.severity === 'error') g.errors++;
+        else if (f.severity === 'warn') g.warns++;
+        else g.infos++;
+      }
+      for (const s of this.current.shots) {
+        const [vp, ...rest] = s.split('|');
+        by.get(rest.join('|'))?.shots.push(vp);
+      }
+      return [...by.values()]
+        .sort((a, b) => b.errors - a.errors || b.warns - a.warns || a.path.localeCompare(b.path))
+        .map((g, i) => ({ ...g, open: i < 2 }));
+    },
+    shotUrl(viewport, path) {
+      return `/api/admin/testing/runs/${this.current.run.id}/shot?viewport=${viewport}&path=${encodeURIComponent(path)}`;
+    },
+    async open(id) {
+      this.error = '';
+      this.filter = { severity: '', category: '', viewport: '', q: '' };
+      this.limit = 500;
+      await this.loadRun(id);
+    },
+    async loadRun(id) {
+      const p = new URLSearchParams({ limit: String(this.limit) });
+      for (const [k, v] of Object.entries(this.filter)) if (v) p.set(k, v);
+      try {
+        this.current = await api('GET', `/admin/testing/runs/${id}?${p}`);
+      } catch (e) {
+        this.error = e.message;
+      }
+    },
+    reload() {
+      return this.current ? this.loadRun(this.current.run.id) : null;
+    },
+    more() {
+      this.limit += 500;
+      return this.reload();
+    },
+    async start() {
+      this.busy = true;
+      this.error = '';
+      try {
+        const { run } = await api('POST', '/admin/testing/runs', {
+          viewports: this.form.viewports,
+          maxPages: this.form.maxPages,
+          spelling: this.form.spelling,
+        });
+        this.running = run;
+        await this.refresh();
+        toast('Check started.');
+      } catch (e) {
+        this.error = e.message;
+      } finally {
+        this.busy = false;
+      }
+    },
+    async cancel(id) {
+      this.busy = true;
+      try {
+        await api('POST', `/admin/testing/runs/${id}/cancel`);
+        await this.refresh();
+      } catch (e) {
+        this.error = e.message;
+      } finally {
+        this.busy = false;
+      }
+    },
+    async remove(id) {
+      if (!window.confirm('Delete this report and its pictures?')) return;
+      this.busy = true;
+      try {
+        await api('DELETE', `/admin/testing/runs/${id}`);
+        this.current = null;
+        await this.refresh();
+        toast('Report deleted.');
+      } catch (e) {
+        this.error = e.message;
+      } finally {
+        this.busy = false;
+      }
+    },
+  }));
+
   // ───────── System → Prompts (docs/DECISIONS.md D-082) ─────────
   Alpine.data('promptsPage', () => ({
     ...H,
@@ -5680,6 +5881,9 @@ document.addEventListener('alpine:init', () => {
     filter: '',
     onlyMissing: false,
     newCode: '',
+    scope: 'missing',
+    translating: false,
+    aiNotes: '',
     error: '',
     busy: false,
     loaded: false,
@@ -5718,6 +5922,60 @@ document.addEventListener('alpine:init', () => {
     },
     get missing() {
       return this.entries.filter((e) => e.value === null && !e.edit.trim()).length;
+    },
+    /** Written by the AI and still as it wrote it (typing over it makes it the person's own). */
+    isAi(e) {
+      return !!e.ai && e.edit.trim() === (e.site ?? '');
+    },
+    get reviewCount() {
+      return this.entries.filter((e) => this.isAi(e)).length;
+    },
+    async translate() {
+      this.error = '';
+      this.aiNotes = '';
+      if (this.dirty) {
+        this.error = 'Save your changes first, then translate.';
+        return;
+      }
+      this.translating = true;
+      try {
+        const r = await api(
+          'POST',
+          `/admin/site/locales/${encodeURIComponent(this.code)}/translate`,
+          {
+            scope: this.scope,
+          },
+        );
+        await this.open(this.code);
+        this.languages = (await api('GET', '/admin/site/locales')).languages;
+        this.aiNotes = r.translated
+          ? `Translated ${r.translated} text${r.translated === 1 ? '' : 's'}. They are marked AI until you check them.`
+          : 'Nothing needed translating.';
+        if (r.skipped.length)
+          this.aiNotes += ` ${r.skipped.length} left out: ${r.skipped
+            .slice(0, 3)
+            .map((s) => `${s.key} (${s.reason})`)
+            .join('; ')}${r.skipped.length > 3 ? '…' : ''}`;
+      } catch (e) {
+        this.error = e.message;
+      } finally {
+        this.translating = false;
+      }
+    },
+    /** Confirm AI translations read well: the given keys, or every unchecked one in this language. */
+    async markChecked(keys) {
+      this.busy = true;
+      this.error = '';
+      try {
+        await api('POST', `/admin/site/locales/${encodeURIComponent(this.code)}/review`, {
+          keys: keys ?? this.entries.filter((e) => e.ai).map((e) => e.key),
+        });
+        await this.open(this.code);
+      } catch (e) {
+        this.error = e.message;
+      } finally {
+        this.busy = false;
+      }
     },
     async addLanguage() {
       this.error = '';
@@ -6289,6 +6547,8 @@ document.addEventListener('alpine:init', () => {
     'theme-editor': 'theme files layout template css edit code header footer',
     menus: 'navigation menu header footer links nav',
     requirements: 'requirements documentation readme spec brief project',
+    testing:
+      'testing tests check qa layout responsive mobile spelling accessibility links broken report audit seo',
     prompts: 'prompts project type system prompt instructions ai assistant master quality',
     history: 'change history git commit diff revert undo push versions',
     locales: 'translations languages wording text locale i18n',
@@ -6451,6 +6711,12 @@ document.addEventListener('alpine:init', () => {
       'Review or undo what the assistant changed',
       'history',
       'assistant changes diff revert undo git commit history push',
+      '',
+    ],
+    [
+      'Check the whole site for problems (layout, spelling, links)',
+      'testing',
+      'testing tests check qa layout responsive mobile spelling accessibility links broken report audit',
       '',
     ],
     [

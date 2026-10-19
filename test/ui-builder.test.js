@@ -81,7 +81,7 @@ test('Pages: the list shows the starter site, in a new page you can add componen
   const row = [...list().querySelectorAll('tbody tr')].find((r) =>
     /ui-test-page/.test(r.textContent),
   );
-  b.click(row.querySelector('button'));
+  b.click(row.querySelector('button.btn-outline-danger'));
   await wait(() => !node.ctx.siteFiles.list().some((f) => f.path === 'pages/ui-test-page.html'));
 });
 

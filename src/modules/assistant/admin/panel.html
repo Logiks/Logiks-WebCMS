@@ -19,8 +19,12 @@
   <button type="button" class="btn btn-sm btn-link p-0 ms-1" :disabled="busy" @click="pin('')" aria-label="Stop focusing on this" title="Stop focusing on this"><i class="bi bi-x-lg"></i></button>
 </div>
 <div class="ac-working" x-show="working.length" aria-label="What this chat has changed">
-  <span class="ac-working-title">Working on</span>
-  <template x-for="w in working" :key="w.path">
+  <button type="button" class="ac-working-toggle" @click="toggleWorking()" :aria-expanded="workingOpen" title="Show or hide the files this chat has changed">
+    <i class="bi" :class="workingOpen ? 'bi-chevron-down' : 'bi-chevron-right'"></i>
+    <span class="ac-working-title">Working on</span>
+    <span class="ac-working-count" x-text="working.length"></span>
+  </button>
+  <template x-for="w in (workingOpen ? working : [])" :key="w.path">
     <a class="ac-chip" :class="{deleted: w.deleted}" :href="w.href" :title="w.path + ' — open the screen for it'">
       <span class="ac-chip-kind" x-text="w.label"></span> <span class="ac-chip-name" x-text="w.name"></span>
     </a>

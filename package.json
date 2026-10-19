@@ -31,6 +31,7 @@
     "bootstrap": "^5.3.8",
     "bootstrap-icons": "^1.13.1",
     "bullmq": "^6.3.8",
+    "cheerio": "^1.1.2",
     "codejar": "^4.3.0",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.6",
@@ -75,6 +76,8 @@
   },
   "optionalDependencies": {
     "better-sqlite3": "^13.0.3",
+    "dictionary-en": "^4.0.0",
+    "nspell": "^2.1.5",
     "playwright-core": "^1.64.1",
     "sharp": "^0.35.4"
   }

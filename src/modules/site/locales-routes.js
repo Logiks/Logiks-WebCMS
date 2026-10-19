@@ -32,6 +32,22 @@ export default function siteLocalesRoutes(ctx) {
   };
   const fileOf = (code) => `locales/${code}.json`;
 
+  // Which strings the AI wrote and nobody has checked yet: { fr: { key: { text, source } } }. `source` is the default-language
+  // text it was translated from, so a later change to that text shows the translation as out of date.
+  const marksOf = () => settings.get('site.ai_translated') ?? {};
+  async function saveMarks(code, marks) {
+    const all = { ...marksOf() };
+    if (Object.keys(marks).length) all[code] = marks;
+    else delete all[code];
+    await settings.update('site', { values: { ai_translated: all } }, null, { internal: true });
+  }
+  /** A person who changes or removes an AI string has checked it: the mark goes. Unchanged ones keep it. */
+  async function pruneMarks(code, clean) {
+    const marks = marksOf()[code] ?? {};
+    const kept = Object.fromEntries(Object.entries(marks).filter(([k, m]) => clean[k] === m.text));
+    if (Object.keys(kept).length !== Object.keys(marks).length) await saveMarks(code, kept);
+  }
+
   /** Shared by the PUT route and the zip importer: clean + nest + save one language's overrides. */
   async function saveOverrides(code, strings, actor, expectedHash) {
     const clean = Object.fromEntries(
@@ -40,6 +56,7 @@ export default function siteLocalesRoutes(ctx) {
         .filter(([k, v]) => k && v),
     );
     const keys = Object.keys(clean).sort();
+    await pruneMarks(code, clean);
     for (let i = 1; i < keys.length; i++)
       if (keys[i].startsWith(`${keys[i - 1]}.`))
         throw new HttpError(
@@ -147,6 +164,7 @@ export default function siteLocalesRoutes(ctx) {
     const P = flatten(shipped[code]);
     const T = flatten(theme[code]);
     const R = { ...flatten(theme[def]), ...flatten(shipped[def]), ...flatten(edited[def]) };
+    const marks = marksOf()[code] ?? {};
     res.json({
       code,
       name: languageName(code),
@@ -157,6 +175,13 @@ export default function siteLocalesRoutes(ctx) {
         theme: T[key] ?? null,
         shipped: P[key] ?? null,
         site: S[key] ?? null,
+        // 'review' = written by the AI and not yet checked; 'outdated' = the text it translated has changed since
+        ai:
+          marks[key] && S[key] === marks[key].text
+            ? marks[key].source === R[key]
+              ? 'review'
+              : 'outdated'
+            : null,
         value: S[key] ?? P[key] ?? T[key] ?? null,
       })),
     });
@@ -173,8 +198,94 @@ export default function siteLocalesRoutes(ctx) {
     },
   );
 
+  const translateBody = z.object({
+    // missing: strings with no wording in this language yet. outdated: AI strings whose source text has changed.
+    // all: also re-translate theme/shipped wording and unchecked AI strings. A person's own wording is never replaced.
+    scope: z.enum(['missing', 'outdated', 'all']).default('missing'),
+    keys: z.array(z.string().max(200)).max(500).optional(),
+  });
+
+  r.post(
+    '/site/locales/:code/translate',
+    requirePermission('locales.write'),
+    docs({ body: translateBody }),
+    async (req, res) => {
+      const code = codeOf(req);
+      const def = settings.get('general.default_locale');
+      if (code === def)
+        throw new HttpError(
+          422,
+          'invalid_input',
+          `${languageName(def)} is the default language, the one everything else is translated from. Pick another language.`,
+        );
+      const { scope, keys } = parse(translateBody, req.body);
+      const edited = i18n.siteLocales();
+      const shipped = i18n.shippedLocales();
+      const theme = await i18n.themeLocales();
+      const R = { ...flatten(theme[def]), ...flatten(shipped[def]), ...flatten(edited[def]) };
+      const S = flatten(edited[code]);
+      const other = { ...flatten(theme[code]), ...flatten(shipped[code]) };
+      const marks = marksOf()[code] ?? {};
+      const aiOwned = (k) => marks[k] && S[k] === marks[k].text;
+      const wanted = new Set(keys);
+      const todo = Object.entries(R)
+        .filter(([k]) => !keys || wanted.has(k))
+        .filter(([k]) => {
+          if (S[k] !== undefined && !aiOwned(k)) return false; // a person's wording
+          if (scope === 'missing') return S[k] === undefined && other[k] === undefined;
+          if (scope === 'outdated') return aiOwned(k) && marks[k].source !== R[k];
+          return true;
+        })
+        .map(([key, text]) => ({ key, text }));
+      if (!todo.length) return res.json({ translated: 0, skipped: [] });
+      const { translated, skipped } = await ctx.aiTranslator.translate({
+        from: def,
+        to: code,
+        entries: todo,
+      });
+      const got = Object.keys(translated);
+      if (got.length) {
+        const nextMarks = { ...marks };
+        for (const k of got) nextMarks[k] = { text: translated[k], source: R[k] };
+        const kept = { ...S, ...translated };
+        const out = await siteFiles.put(
+          fileOf(code),
+          `${JSON.stringify(nest(kept), null, 2)}\n`,
+          actorOf(req),
+          siteFiles.snapshot().files.get(fileOf(code))?.hash,
+        );
+        await saveMarks(code, nextMarks);
+        await ctx.audit.log({
+          actor: actorOf(req),
+          action: 'locales.ai_translate',
+          entity: 'locale',
+          entityId: code,
+          meta: { count: got.length, scope },
+        });
+        return res.json({ translated: got.length, skipped, hash: out.hash });
+      }
+      res.json({ translated: 0, skipped });
+    },
+  );
+
+  r.post(
+    '/site/locales/:code/review',
+    requirePermission('locales.write'),
+    docs({ body: z.object({ keys: z.array(z.string().max(200)).max(1000) }) }),
+    async (req, res) => {
+      const code = codeOf(req);
+      const { keys } = parse(z.object({ keys: z.array(z.string().max(200)).max(1000) }), req.body);
+      const marks = { ...(marksOf()[code] ?? {}) };
+      for (const k of keys) delete marks[k];
+      await saveMarks(code, marks);
+      res.json({ code, remaining: Object.keys(marks).length });
+    },
+  );
+
   r.delete('/site/locales/:code', requirePermission('locales.write'), async (req, res) => {
-    await siteFiles.remove(fileOf(codeOf(req)), actorOf(req));
+    const code = codeOf(req);
+    await siteFiles.remove(fileOf(code), actorOf(req));
+    await saveMarks(code, {});
     res.status(204).end();
   });
 

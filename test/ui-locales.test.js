@@ -2,6 +2,7 @@ import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { makeNode, ADMIN, until } from './helpers.js';
 import { openAdmin } from './ui-harness.js';
+import { createAiTranslator } from '../src/modules/site/translate.js';
 
 let node;
 before(async () => {
@@ -56,6 +57,45 @@ test('Translations: edit wording in the default language, add a language, and th
   b.type(page().querySelector('input[aria-label="New language code"]'), 'Bad Code');
   b.click(b.button('Add language'));
   await until(() => /looks like fr, hi or en-IN/.test(page().textContent));
+  assert.deepEqual(b.errors, []);
+  b.close();
+});
+
+test('Translations: "Translate with AI" fills a new language, flags it as AI, and "Mark all as checked" clears the flag', async () => {
+  node.ctx.aiTranslator = createAiTranslator(node.ctx, {
+    client: {
+      messages: {
+        async create({ messages }) {
+          const input = JSON.parse(messages[0].content.slice(messages[0].content.indexOf('{')));
+          const out = Object.fromEntries(Object.entries(input).map(([k, v]) => [k, `de:${v}`]));
+          return { content: [{ type: 'text', text: JSON.stringify(out) }] };
+        },
+      },
+    },
+  });
+  const b = await openAdmin(node.url);
+  await b.signIn(ADMIN.email, ADMIN.password);
+  b.go('#/locales');
+  const page = () => b.$('section[x-data="localesPage"]');
+  await until(() => page() && page().querySelectorAll('tbody tr').length > 5);
+  const shown = (el) => {
+    for (let n = el; n && n !== page().parentNode; n = n.parentNode)
+      if (n.style?.display === 'none') return false;
+    return true;
+  };
+  const visible = (sel) => [...page().querySelectorAll(sel)].filter(shown);
+  assert.equal(visible('button').filter((x) => /Translate with AI/.test(x.textContent)).length, 0);
+
+  b.type(page().querySelector('input[aria-label="New language code"]'), 'de');
+  b.click(b.button('Add language'));
+  await until(() => visible('button').some((x) => /Translate with AI/.test(x.textContent)));
+  b.click(visible('button').find((x) => /Translate with AI/.test(x.textContent)));
+  await until(() => /marked AI until you check/.test(page().textContent));
+  await until(() => visible('tbody .badge').length > 0);
+  assert.ok(node.ctx.siteFiles.snapshot().files.has('locales/de.json'));
+
+  b.click(b.button('Mark all as checked'));
+  await until(() => visible('tbody .badge').length === 0);
   assert.deepEqual(b.errors, []);
   b.close();
 });

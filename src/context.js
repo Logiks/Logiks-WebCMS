@@ -39,6 +39,7 @@ import { defineAiSettings } from './modules/plugin-editor/service.js';
 import { defineAssistantSettings } from './modules/assistant/settings.js';
 import { definePromptSettings } from './modules/prompts/settings.js';
 import { defineVisualSettings } from './modules/visual/settings.js';
+import { defineTestingSettings } from './modules/testing/settings.js';
 import { createModuleRegistry } from './core/modules/registry.js';
 import { builtinModules } from './modules/index.js';
 import { createAnalyticsService } from './modules/analytics/service.js';
@@ -83,6 +84,7 @@ export async function createContext({ env, bus: busOverride, log: logOverride, a
   defineAssistantSettings(registry);
   definePromptSettings(registry);
   defineVisualSettings(registry);
+  defineTestingSettings(registry);
   defineMediaGeneratorSettings(registry);
   defineResearchSettings(registry);
   const permissions = createPermissions();

@@ -3,6 +3,7 @@ import siteFilesRoutes from './files-routes.js';
 import siteBuilderRoutes from './builder-routes.js';
 import siteLocalesRoutes from './locales-routes.js';
 import { createI18n } from './i18n.js';
+import { createAiTranslator } from './translate.js';
 import { createPublicData } from './data.js';
 import { createSitePages } from './sitepages.js';
 import { fileURLToPath } from 'node:url';
@@ -58,6 +59,7 @@ export default {
     ctx.i18n = createI18n(ctx, {
       shippedDir: fileURLToPath(new URL('../../../site/locales', import.meta.url)),
     });
+    ctx.aiTranslator = createAiTranslator(ctx);
     ctx.publicData = createPublicData(ctx);
     ctx.publicData.verify(); // every declared API operation has a handler, and the other way round (D-068)
     ctx.sitePages = createSitePages(ctx);

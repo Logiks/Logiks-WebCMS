@@ -2,10 +2,11 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { HttpError } from '../../core/http/errors.js';
-import { fontsReady, pageReport, referenceTokens, sweepScroll } from './inspect.js';
+import { auditPage, fontsReady, pageReport, referenceTokens, sweepScroll } from './inspect.js';
 
 const VIEWPORTS = {
   desktop: { width: 1280, height: 800, mobile: false },
+  tablet: { width: 768, height: 1024, mobile: true },
   mobile: { width: 390, height: 844, mobile: true },
 };
 const MAX_HEIGHT = 4200; // taller pages are cut here: the model gets the top, and is told
@@ -266,6 +267,8 @@ export function createVisual({ settings, log, web, launch, origin }) {
 
   const svc = {
     enabled,
+    /** The address of this server's own public site, for checks that call it. */
+    baseUrl: () => origin(),
 
     /** Can screenshots work here, and if not, why? For the Settings screen and the assistant's first call. */
     async status() {
@@ -286,11 +289,19 @@ export function createVisual({ settings, log, web, launch, origin }) {
     /**
      * A screenshot of one page of THIS site, plus what is mechanically wrong with it. Pass `path` for a live page, or
      * `html` (a rendered draft) to look at something not saved yet. Everything outside this site is blocked.
-     * @param {{ path?: string, html?: string, viewport?: 'desktop'|'mobile' }} o
+     * @param {{ path?: string, html?: string, viewport?: 'desktop'|'tablet'|'mobile', origin?: string, audit?: {text: boolean}, shot?: 'full'|'top'|false, quality?: number }} o
      */
-    async capture({ path: pagePath, html, viewport = 'desktop' }) {
+    async capture({
+      path: pagePath,
+      html,
+      viewport = 'desktop',
+      origin: from,
+      audit,
+      shot = 'full',
+      quality = 72,
+    }) {
       const vp = VIEWPORTS[viewport] ?? VIEWPORTS.desktop;
-      const base = origin();
+      const base = from || origin();
       const site = new URL(base).origin;
       if (html == null && !/^\/[^\s]*$/.test(pagePath ?? ''))
         throw new HttpError(
@@ -309,6 +320,7 @@ export function createVisual({ settings, log, web, launch, origin }) {
         const consoleErrors = [];
         const failed = [];
         const blocked = new Set();
+        let status = null;
         try {
           const page = await ctx.newPage();
           page.setDefaultTimeout(NAV_TIMEOUT);
@@ -338,21 +350,31 @@ export function createVisual({ settings, log, web, launch, origin }) {
             await page.goto(`${site}/__draft__`, { waitUntil: 'load' });
           } else {
             const res = await page.goto(site + pagePath, { waitUntil: 'load' });
-            if (res && res.status() >= 400)
+            status = res ? res.status() : null;
+            // A site-wide check wants to report an error page, not stop at it.
+            if (!audit && res && res.status() >= 400)
               throw new HttpError(422, 'page_failed', `${pagePath} answered ${res.status()}.`);
           }
           await page.evaluate(fontsReady).catch(() => {});
           await page.evaluate(sweepScroll).catch(() => {});
           const report = await page.evaluate(pageReport);
-          const truncated = report.pageHeight > MAX_HEIGHT;
-          const jpeg = await page.screenshot({
-            type: 'jpeg',
-            quality: 72,
-            fullPage: !truncated,
-            ...(truncated ? { clip: { x: 0, y: 0, width: vp.width, height: MAX_HEIGHT } } : {}),
-          });
+          const audited = audit ? await page.evaluate(auditPage, audit) : null;
+          const top = shot === 'top';
+          const truncated = !top && report.pageHeight > MAX_HEIGHT;
+          const jpeg = shot
+            ? await page.screenshot({
+                type: 'jpeg',
+                quality,
+                fullPage: !truncated && !top,
+                ...(truncated || top
+                  ? { clip: { x: 0, y: 0, width: vp.width, height: top ? 1400 : MAX_HEIGHT } }
+                  : {}),
+              })
+            : null;
           return {
             jpeg,
+            status,
+            audit: audited,
             viewport,
             width: vp.width,
             shownHeight: Math.min(report.pageHeight, MAX_HEIGHT),

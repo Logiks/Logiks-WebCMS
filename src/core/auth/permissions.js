@@ -62,6 +62,11 @@ export function defineCorePermissions(permissions) {
     'research.write': 'Research on the web and save the findings',
     'research.delete': 'Delete saved AI research',
   });
+  permissions.define('Site testing', {
+    'testing.read': 'View site check reports',
+    // A run opens every page of the site in a browser on the server, so it is not free.
+    'testing.run': 'Start, cancel and delete site checks',
+  });
   permissions.define('Prompts', {
     'prompts.read': 'View the AI prompts and project types',
     // Prompts steer an AI that can edit the whole site as the person using it, so treat this like a Webmaster permission.

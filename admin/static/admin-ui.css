@@ -887,6 +887,22 @@ a {
   padding: 0.4rem 0.75rem;
   border-bottom: 1px solid var(--line, #d9dde3);
 }
+.ac-working-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+}
+.ac-working-count {
+  font-size: 0.7rem;
+  padding: 0 0.4rem;
+  border-radius: 999px;
+  background: var(--panel-2, #f1f3f6);
+}
 .ac-working-title {
   font-size: 0.75rem;
   text-transform: uppercase;
@@ -936,4 +952,28 @@ a {
 }
 .ac-chip-focus {
   border-color: var(--accent, #2f6f4f);
+}
+
+/* Automation → Testing (D-086) */
+.tag.err {
+  background: #fbe3e1;
+  color: #9b2c22;
+}
+.stat {
+  border: 1px solid var(--line, #d9dde3);
+  border-radius: 10px;
+  padding: 0.6rem 0.8rem;
+}
+.stat-n {
+  font-size: 1.6rem;
+  font-weight: 700;
+  line-height: 1.1;
+}
+.stat-l {
+  font-size: 0.78rem;
+  opacity: 0.75;
+}
+.t-page > summary {
+  cursor: pointer;
+  padding: 0.3rem 0;
 }

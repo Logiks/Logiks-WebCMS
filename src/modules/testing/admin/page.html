@@ -1,0 +1,134 @@
+<div class="page-head d-flex justify-content-between align-items-end flex-wrap gap-2">
+  <div><h1>Testing</h1><p>Opens the site's pages in a real browser at phone, tablet and desktop sizes and checks layout, responsiveness, accessibility, SEO, content, spelling and links. Each run is kept as a report you can come back to.</p></div>
+</div>
+<div class="alert alert-danger" role="alert" x-show="error" x-text="error"></div>
+<div class="alert alert-info" x-show="loaded && !browser.ok">
+  <strong>Basic checks only.</strong> No browser was found on this server, so each page's HTML is checked (titles, headings, pictures, links, forms, spelling, placeholder text, broken links) but not how it looks: layout, sideways scrolling, colour contrast, phone tap targets and pictures of pages need Chrome or Chromium. <span class="d-block small mt-1" x-text="browser.reason"></span>
+</div>
+
+<section class="panel p-3 mb-3" x-show="can('testing.run')" aria-labelledby="t-run-h">
+  <h2 class="h6" id="t-run-h">Run a check</h2>
+  <form class="row g-3 align-items-end" @submit.prevent="start()">
+    <div class="col-auto" x-show="browser.ok">
+      <div class="form-label mb-1">Screen sizes</div>
+      <div class="d-flex gap-3">
+        <template x-for="v in ['mobile','tablet','desktop']" :key="v">
+          <div class="form-check"><input class="form-check-input" type="checkbox" :id="'t-vp-' + v" :value="v" x-model="form.viewports"><label class="form-check-label" :for="'t-vp-' + v" x-text="v === 'mobile' ? 'Phone' : v === 'tablet' ? 'Tablet' : 'Desktop'"></label></div>
+        </template>
+      </div>
+    </div>
+    <div class="col-auto">
+      <label class="form-label mb-1" for="t-max">Most pages</label>
+      <input id="t-max" type="number" min="1" max="300" class="form-control" style="width:6rem" x-model.number="form.maxPages">
+    </div>
+    <div class="col-auto">
+      <div class="form-check mb-2"><input id="t-spell" class="form-check-input" type="checkbox" x-model="form.spelling"><label class="form-check-label" for="t-spell">Check spelling</label></div>
+    </div>
+    <div class="col-auto">
+      <button class="btn btn-primary" :disabled="busy || !!running || (browser.ok && !form.viewports.length)" x-text="running ? 'A check is running…' : 'Run check now'"></button>
+    </div>
+  </form>
+  <p class="small muted mt-2 mb-0">Settings such as the default screen sizes, ignored words and a nightly schedule are under <a href="#/settings/testing">Settings → Testing</a>.</p>
+</section>
+
+<section class="panel p-3 mb-3" x-show="running" aria-live="polite">
+  <div class="d-flex justify-content-between align-items-center gap-2 mb-2">
+    <strong>Checking the site…</strong>
+    <button type="button" class="btn btn-sm btn-outline-danger" x-show="can('testing.run')" :disabled="busy" @click="cancel(running.id)">Cancel</button>
+  </div>
+  <div class="progress" role="progressbar" :aria-valuenow="progress" aria-valuemin="0" aria-valuemax="100"><div class="progress-bar" :style="'width:' + progress + '%'"></div></div>
+  <div class="small muted mt-1" x-text="running ? running.unitsDone + ' of ' + running.unitsTotal + ' page views checked' : ''"></div>
+</section>
+
+<div class="row g-3">
+  <div class="col-lg-4">
+    <div class="panel">
+      <div class="empty" x-show="loaded && !runs.length">No reports yet. Run a check above.</div>
+      <div class="list-group list-group-flush">
+        <template x-for="r in runs" :key="r.id">
+          <button type="button" class="list-group-item list-group-item-action" :class="{active: current && current.run.id === r.id}" @click="open(r.id)">
+            <div class="d-flex justify-content-between gap-2">
+              <span class="fw-semibold" x-text="'Check #' + r.id"></span>
+              <span class="small" x-text="statusText(r)"></span>
+            </div>
+            <div class="small" x-text="ago(r.createdAt) + (r.trigger === 'schedule' ? ' · automatic' : '')"></div>
+            <div class="small" x-show="r.summary">
+              <span class="tag err" x-text="r.summary ? r.summary.counts.error + ' errors' : ''"></span>
+              <span class="tag warn" x-text="r.summary ? r.summary.counts.warn + ' warnings' : ''"></span>
+              <span class="small" x-show="r.summary && r.summary.comparison" x-text="r.summary && r.summary.comparison ? ' · ' + r.summary.comparison.newCount + ' new, ' + r.summary.comparison.resolvedCount + ' fixed' : ''"></span>
+            </div>
+          </button>
+        </template>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-lg-8">
+    <article class="panel p-3" x-show="current">
+      <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-2">
+        <div>
+          <h2 class="h5 mb-0" x-text="current ? 'Check #' + current.run.id : ''"></h2>
+          <div class="small muted" x-text="current ? statusText(current.run) + ' · ' + new Date(current.run.createdAt).toLocaleString() : ''"></div>
+        </div>
+        <div class="d-flex gap-2">
+          <a class="btn btn-sm btn-outline-secondary" :href="current ? '/api/admin/testing/runs/' + current.run.id + '/export' : '#'">Download CSV</a>
+          <button type="button" class="btn btn-sm btn-outline-danger" x-show="can('testing.run') && current && !['queued','running'].includes(current.run.status)" :disabled="busy" @click="remove(current.run.id)">Delete</button>
+        </div>
+      </div>
+      <div class="alert alert-danger py-1" x-show="current && current.run.error" x-text="current ? current.run.error : ''"></div>
+
+      <div class="row g-2 mb-3" x-show="current && current.run.summary">
+        <div class="col-6 col-md-3"><div class="stat"><div class="stat-n" x-text="current && current.run.summary ? current.run.summary.counts.error : 0"></div><div class="stat-l">Errors</div></div></div>
+        <div class="col-6 col-md-3"><div class="stat"><div class="stat-n" x-text="current && current.run.summary ? current.run.summary.counts.warn : 0"></div><div class="stat-l">Warnings</div></div></div>
+        <div class="col-6 col-md-3"><div class="stat"><div class="stat-n" x-text="current && current.run.summary ? current.run.summary.pages : 0"></div><div class="stat-l">Pages checked</div></div></div>
+        <div class="col-6 col-md-3"><div class="stat"><div class="stat-n" x-text="current && current.run.summary ? current.run.summary.pagesWithErrors : 0"></div><div class="stat-l">Pages with errors</div></div></div>
+      </div>
+      <p class="small mb-3" x-show="compare" x-text="compare"></p>
+      <p class="small muted mb-3" x-show="notes" x-text="notes"></p>
+
+      <div class="d-flex gap-2 flex-wrap mb-3" x-show="current && current.run.summary">
+        <label class="visually-hidden" for="t-f-sev">Severity</label>
+        <select id="t-f-sev" class="form-select form-select-sm w-auto" x-model="filter.severity" @change="reload()"><option value="">All severities</option><option value="error">Errors</option><option value="warn">Warnings</option><option value="info">Notes</option></select>
+        <label class="visually-hidden" for="t-f-cat">Kind</label>
+        <select id="t-f-cat" class="form-select form-select-sm w-auto" x-model="filter.category" @change="reload()">
+          <option value="">All kinds</option>
+          <template x-for="c in categories" :key="c"><option :value="c" x-text="c"></option></template>
+        </select>
+        <label class="visually-hidden" for="t-f-vp">Screen</label>
+        <select id="t-f-vp" class="form-select form-select-sm w-auto" x-model="filter.viewport" @change="reload()"><option value="">All screens</option><option value="mobile">Phone</option><option value="tablet">Tablet</option><option value="desktop">Desktop</option><option value="html">Page source (no browser)</option><option value="site">Whole site</option></select>
+        <label class="visually-hidden" for="t-f-q">Search</label>
+        <input id="t-f-q" class="form-control form-control-sm w-auto" placeholder="Search" x-model.debounce.300ms="filter.q" @input="reload()">
+      </div>
+
+      <div class="empty" x-show="current && current.run.summary && !current.findings.length">Nothing found with these filters.</div>
+      <template x-for="g in groups" :key="g.path">
+        <details class="mb-2 t-page" :open="g.open">
+          <summary>
+            <span class="mono" x-text="g.path"></span>
+            <span class="tag err" x-show="g.errors" x-text="g.errors + ' errors'"></span>
+            <span class="tag warn" x-show="g.warns" x-text="g.warns + ' warnings'"></span>
+            <span class="tag" x-show="g.infos" x-text="g.infos + ' notes'"></span>
+          </summary>
+          <div class="d-flex gap-2 flex-wrap my-2">
+            <template x-for="s in g.shots" :key="s">
+              <a :href="shotUrl(s, g.path)" target="_blank" rel="noopener"><img :src="shotUrl(s, g.path)" :alt="'Top of ' + g.path + ' on ' + s" loading="lazy" style="height:120px;border:1px solid var(--line,#ddd);border-radius:6px"></a>
+            </template>
+          </div>
+          <ul class="list-unstyled mb-0">
+            <template x-for="f in g.items" :key="f.id">
+              <li class="py-1 border-top">
+                <span class="tag" :class="f.severity === 'error' ? 'err' : f.severity === 'warn' ? 'warn' : ''" x-text="f.severity === 'warn' ? 'warning' : f.severity === 'info' ? 'note' : 'error'"></span>
+                <span class="tag" x-text="f.viewport === 'site' ? 'whole site' : f.viewport === 'html' ? 'page source' : f.viewport"></span>
+                <span class="tag ok" x-show="f.isNew === true">new</span>
+                <span x-text="f.message"></span>
+                <span class="small muted" x-text="'(' + f.category + ' · ' + f.rule + ')'"></span>
+              </li>
+            </template>
+          </ul>
+        </details>
+      </template>
+      <button type="button" class="btn btn-sm btn-outline-secondary" x-show="current && current.findings.length < current.total" @click="more()">Show more</button>
+    </article>
+    <div class="empty" x-show="!current && loaded && runs.length">Pick a report on the left.</div>
+  </div>
+</div>

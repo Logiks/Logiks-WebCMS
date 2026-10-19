@@ -400,6 +400,10 @@
       <section x-data="mediaPage" @dragover.prevent="dragging = true" @dragleave="dragging = false" @drop.prevent="dragging = false; can('media.upload') && upload($event.dataTransfer.files)"></section>
     </template>
 
+    <template x-if="route === 'testing'">
+      <section x-data="testingPage"></section>
+    </template>
+
     <template x-if="route === 'prompts'">
       <section x-data="promptsPage"></section>
     </template>

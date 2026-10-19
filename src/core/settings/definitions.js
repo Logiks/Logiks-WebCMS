@@ -556,6 +556,8 @@ export function defineCoreSettings(registry) {
         help: 'The address (slug) of the content page shown at "/" by the starter home page. If it does not exist, the home page shows the latest posts instead.',
       },
       posts_per_page: { type: 'number', label: 'Posts per page', default: 10, min: 1, max: 100 },
+      // Which translations the AI wrote and no person has checked: { fr: { 'blog.older': { text, source } } } (System → Translations)
+      ai_translated: { type: 'json', hidden: true, default: {} },
       page_cache_seconds: {
         type: 'number',
         label: 'Page cache lifetime (seconds)',
