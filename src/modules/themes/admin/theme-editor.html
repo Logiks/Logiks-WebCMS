@@ -7,6 +7,27 @@
           </div>
         </div>
         <div class="alert alert-danger" role="alert" x-show="error" x-text="error"></div>
+        <div class="modal-x" x-show="dup.open" style="display:none" role="dialog" aria-modal="true" aria-labelledby="dup-title" @keydown.escape.window="dup.open = false">
+          <form class="modal-card" style="max-width:30rem" @submit.prevent="submitDup()">
+            <h2 class="h5" id="dup-title" x-text="'Duplicate “' + (dup.source ? dup.source.name : '') + '”'"></h2>
+            <p class="muted small">The copy starts identical to the original, with the same options. It isn’t live until you make it live.</p>
+            <div class="mb-3">
+              <label class="form-label" for="dup-name">Name</label>
+              <input id="dup-name" class="form-control" maxlength="80" required x-model="dup.name" @input="if (!dup.idTouched) dup.id = slugId(dup.name)">
+              <div class="form-text">Shown in Appearance → Themes.</div>
+            </div>
+            <div class="mb-3">
+              <label class="form-label" for="dup-id">Id</label>
+              <input id="dup-id" class="form-control mono" maxlength="32" required pattern="[a-z][a-z0-9_]{1,31}" x-model="dup.id" @input="dup.idTouched = true">
+              <div class="form-text">Lowercase letters, numbers and underscores, starting with a letter (2–32 characters). It can’t be changed later.</div>
+            </div>
+            <div class="text-danger small mb-2" role="alert" x-show="dup.error" x-text="dup.error"></div>
+            <div class="d-flex justify-content-end gap-2">
+              <button type="button" class="btn btn-outline-secondary" @click="dup.open = false">Cancel</button>
+              <button class="btn btn-primary" :disabled="dup.busy || !dup.id" x-text="dup.busy ? 'Creating…' : 'Create copy'"></button>
+            </div>
+          </form>
+        </div>
         <div class="alert alert-warning d-flex gap-2 align-items-center flex-wrap" x-show="loaded && !editable">
           <span>Built-in themes ship read-only with the code, so an edit would be lost on the next update. Duplicate it to get a copy you can edit.</span>
           <button class="btn btn-sm btn-primary ms-auto" x-show="can('themes.manage')" @click="duplicate()">Duplicate this theme</button>

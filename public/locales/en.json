@@ -20,12 +20,71 @@
     "email": "Your email",
     "message": "Message",
     "send": "Send message",
-    "sent": "Thanks. Your message has been sent."
+    "sent": "Thanks. Your message has been sent.",
+    "hero": { "text": "Tell us about your project and we will get back to you within one business day." }
   },
   "notfound": {
     "title": "Page not found",
     "text": "The page you were looking for isn't here. It may have moved.",
     "home": "Go to the home page"
   },
-  "entry": { "breadcrumbs": "Breadcrumbs" }
+  "entry": { "breadcrumbs": "Breadcrumbs" },
+  "layout": {
+    "skip": "Skip to content",
+    "main_menu": "Toggle navigation",
+    "get_in_touch": "Get in touch",
+    "about": "About",
+    "services": "Services",
+    "blog": "Blog",
+    "contact": "Contact",
+    "footer_tagline": "Open-source software, cloud infrastructure and developer tools for modern teams.",
+    "footer_company": "Company",
+    "footer_more": "More",
+    "footer_links": "Links",
+    "rights": "All rights reserved."
+  },
+  "home": {
+    "hero": {
+      "heading": "Open-source software for modern teams",
+      "text": "OpenLogiks designs and builds custom software, cloud infrastructure and developer tools, so your team can ship reliable products faster.",
+      "button": "Explore our services"
+    },
+    "cta": { "heading": "Have a project in mind?", "button": "Get in touch" }
+  },
+  "about": {
+    "hero": { "heading": "About OpenLogiks", "text": "We are a team of engineers who believe great software should be open, reliable and built to last." },
+    "story": {
+      "heading": "Our story",
+      "text1": "OpenLogiks started with a simple idea: software companies should build on open foundations instead of locking clients into proprietary black boxes.",
+      "text2": "Today we help organizations of all sizes design, build and run software and cloud infrastructure that they fully own and understand."
+    },
+    "mission": { "heading": "Our mission", "text": "To make modern engineering practices and open-source technology accessible to every team we work with, from startups to enterprises." },
+    "values": {
+      "heading": "What we value",
+      "open": { "title": "Openness", "text": "We favor open standards and open-source tools, and we are transparent with clients at every step." },
+      "quality": { "title": "Quality", "text": "We care about code that is tested, documented and built to be maintained for years, not weeks." },
+      "partnership": { "title": "Partnership", "text": "We work as an extension of your team, not just an outside vendor." }
+    },
+    "cta": { "heading": "Want to work with us?", "button": "Contact our team" }
+  },
+  "services": {
+    "hero": { "heading": "Services", "text": "From a first prototype to running infrastructure at scale, here is how we help." },
+    "custom": { "title": "Custom Software Development", "text": "Web and backend applications designed around your workflows, built with modern, maintainable stacks and clean APIs." },
+    "cloud": { "title": "Cloud & DevOps", "text": "Cloud architecture, containers, CI/CD pipelines and observability, so releases are routine instead of risky." },
+    "open": { "title": "Open-Source Engineering", "text": "We build on proven open-source foundations and, where it helps, open-source the tools we create along the way." },
+    "support": { "title": "Support & Maintenance", "text": "Ongoing monitoring, upgrades and a direct line to the engineers who know your system best." },
+    "cta": { "heading": "Not sure where to start?", "button": "Talk to an engineer" }
+  },
+  "features": {
+    "custom": { "title": "Custom Software", "text": "Bespoke applications and platforms built around how your business actually works." },
+    "cloud": { "title": "Cloud & DevOps", "text": "Infrastructure, CI/CD and automation so your teams ship faster and sleep better." },
+    "open": { "title": "Open Source", "text": "We build on and contribute back to open-source tools, no vendor lock-in." },
+    "support": { "title": "Ongoing Support", "text": "Long-term maintenance and support plans that keep systems healthy." }
+  },
+  "stats": {
+    "years": "Years in business",
+    "projects": "Projects delivered",
+    "clients": "Happy clients",
+    "countries": "Countries served"
+  }
 }

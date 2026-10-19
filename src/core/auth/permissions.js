@@ -85,6 +85,15 @@ export function defineCorePermissions(permissions) {
     'redirects.manage': 'Manage redirects',
     'site.messages': 'Read contact form messages',
   });
+  permissions.define('Assistant', {
+    // The chat itself needs only admin.access: every tool it calls checks the signed-in user's own permission.
+    'requirements.read': 'View the site requirements document',
+    'requirements.write': 'Edit the site requirements document',
+    'history.read': 'View the change history and what each change altered',
+    'history.commit':
+      'Commit the site as it is now to the change history (including edits made by hand)',
+    'history.push': 'Push the change history to the git remote',
+  });
   permissions.define('SEO', {
     'seo.read': 'View SEO Manager rules',
     'seo.write': 'Create, edit and delete SEO Manager rules',

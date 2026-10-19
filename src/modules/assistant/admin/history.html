@@ -1,0 +1,68 @@
+<div class="page-head d-flex justify-content-between align-items-end flex-wrap gap-2">
+  <div><h1>Change history</h1><p>Everything the assistant changed, as one entry per request, with what changed and a way back. Entries are also kept as commits in a git repository.</p></div>
+</div>
+<div class="alert alert-danger" role="alert" x-show="error" x-text="error"></div>
+<div class="alert alert-success" role="status" x-show="notice" x-text="notice"></div>
+
+<div class="panel mb-3" x-show="git">
+  <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+    <div class="small">
+      <strong>Git copy:</strong>
+      <span x-show="git && !git.mirror">switched off (Settings → Assistant)</span>
+      <span x-show="git && git.mirror">
+        <span class="mono" x-text="git && git.head ? git.head.slice(0, 8) : 'not created yet'"></span> ·
+        <span x-show="git && git.remote">remote <span class="mono" x-text="git && git.remote"></span> (<span x-text="git && git.branch"></span>), pushed up to change #<span x-text="git && git.pushedUpTo"></span> of <span x-text="git && git.latest"></span></span>
+        <span x-show="git && !git.remote">no remote set. Add one under <a href="#/settings">Settings → Assistant</a> to push.</span>
+      </span>
+    </div>
+    <button type="button" class="btn btn-outline-secondary btn-sm" x-show="can('history.push') && git && git.mirror && git.remote" :disabled="busy" @click="push()" x-text="busy ? 'Pushing…' : 'Push now'"></button>
+  </div>
+</div>
+
+<div class="panel mb-3" x-show="can('history.commit')">
+  <form class="d-flex gap-2 flex-wrap align-items-end" @submit.prevent="commitNow()">
+    <div class="flex-grow-1">
+      <label class="form-label mb-1" for="hist-msg">Commit the site as it is now</label>
+      <input id="hist-msg" class="form-control" maxlength="300" placeholder="What changed? (optional)" x-model="commitMessage">
+      <div class="form-text">Records everything that differs from the last entry, including edits you made by hand in the admin. The assistant's own changes are committed automatically after each request. Pushing is separate.</div>
+    </div>
+    <button class="btn btn-primary" :disabled="busy" x-text="busy ? 'Working…' : 'Commit now'"></button>
+  </form>
+</div>
+
+<div class="row g-3">
+  <div class="col-lg-5">
+    <div class="panel">
+      <div class="empty" x-show="loaded && !commits.length">No changes yet. When the assistant changes the site, each change appears here.</div>
+      <template x-for="c in commits" :key="c.id">
+        <a class="hist-row" :class="{active: selected && selected.commit.id === c.id}" :href="'#/history/' + c.id">
+          <span class="hist-msg" x-text="c.message"></span>
+          <span class="small muted">
+            #<span x-text="c.id"></span> · <span x-text="c.author"></span> · <span x-text="ago(c.createdAt)"></span> · <span x-text="c.files + (c.files === 1 ? ' file' : ' files')"></span>
+            <span x-show="c.kind === 'revert'"> · revert</span><span x-show="c.kind === 'manual'"> · committed by hand</span><span x-show="c.revertedBy"> · reverted</span>
+          </span>
+        </a>
+      </template>
+      <button type="button" class="btn btn-link btn-sm" x-show="more" @click="loadMore()">Older changes</button>
+    </div>
+  </div>
+  <div class="col-lg-7">
+    <div class="panel" x-show="selected">
+      <div class="d-flex justify-content-between align-items-start gap-2 mb-2">
+        <div><strong x-text="selected && selected.commit.message"></strong>
+          <div class="small muted">#<span x-text="selected && selected.commit.id"></span> · <span x-text="selected && selected.commit.author"></span>
+            <span x-show="selected && selected.commit.sha"> · <span class="mono" x-text="selected && selected.commit.sha ? selected.commit.sha.slice(0, 8) : ''"></span></span></div></div>
+        <button type="button" class="btn btn-outline-danger btn-sm" x-show="selected && selected.commit.kind !== 'revert' && !selected.commit.revertedBy" :disabled="busy" @click="revert()">Revert this change</button>
+      </div>
+      <template x-for="f in (selected ? selected.files : [])" :key="f.path">
+        <details class="hist-file" open>
+          <summary><span class="mono" x-text="f.path"></span> <span class="badge text-bg-light" x-text="f.status"></span>
+            <span class="small" x-show="!f.hidden"><span class="text-success">+<span x-text="f.added"></span></span> <span class="text-danger">−<span x-text="f.removed"></span></span></span></summary>
+          <div class="small muted p-2" x-show="f.hidden">You don't have permission to see what changed in this file.</div>
+          <pre class="diff" x-show="!f.hidden"><template x-for="(h, i) in (f.diff || [])" :key="i"><span class="diff-line" :class="'d' + (h.t === '+' ? 'add' : h.t === '-' ? 'del' : h.t === '…' ? 'gap' : 'ctx')" x-text="h.t + ' ' + h.s"></span></template></pre>
+        </details>
+      </template>
+    </div>
+    <div class="empty" x-show="!selected && commits.length">Choose a change to see what it altered.</div>
+  </div>
+</div>

@@ -1,0 +1,18 @@
+<div class="page-head d-flex justify-content-between align-items-end flex-wrap gap-2">
+  <div><h1>Requirements</h1><p>What this site is for and how it should work. The assistant keeps this up to date as you decide things in the chat; you can also edit it yourself.</p></div>
+  <div class="d-flex gap-2">
+    <button type="button" class="btn btn-outline-secondary" @click="download()" :disabled="!loaded">Download .md</button>
+    <button type="button" class="btn btn-outline-secondary" x-show="can('requirements.write') && !editing" @click="startEdit()">Edit</button>
+  </div>
+</div>
+<div class="alert alert-danger" role="alert" x-show="error" x-text="error"></div>
+<div class="panel" x-show="editing">
+  <label class="form-label" for="req-text">Requirements (markdown). The site inventory below the line is generated and not editable.</label>
+  <textarea id="req-text" class="form-control mono" rows="22" x-model="draft"></textarea>
+  <div class="d-flex gap-2 mt-2">
+    <button type="button" class="btn btn-primary" :disabled="busy" @click="save()" x-text="busy ? 'Saving…' : 'Save changes'"></button>
+    <button type="button" class="btn btn-outline-secondary" :disabled="busy" @click="editing = false">Cancel</button>
+  </div>
+</div>
+<div class="panel md-doc" x-show="!editing && loaded" x-html="html"></div>
+<p class="muted small mt-2" x-show="updatedAt" x-text="'Last edited ' + ago(updatedAt)"></p>

@@ -977,3 +977,327 @@ body {
   font-family: var(--mono);
   font-size: 0.8rem;
 }
+
+/* ── assistant panel (D-071): a third column, so the admin beside it stays visible and usable ── */
+.shell.has-chat {
+  grid-template-columns: var(--sidebar-w) minmax(0, 1fr) var(--chat-w, 26rem);
+}
+.chat-dock {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border-left: 1px solid var(--line);
+  min-width: 0;
+}
+.chat-head {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.6rem 0.75rem;
+  border-bottom: 1px solid var(--line);
+}
+.chat-title {
+  flex: 1;
+}
+.chat-sessions {
+  display: flex;
+  gap: 0.35rem;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--line);
+}
+.chat-log {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.chat-msg {
+  display: flex;
+}
+.chat-user {
+  justify-content: flex-end;
+}
+.chat-bubble {
+  max-width: 92%;
+  padding: 0.45rem 0.7rem;
+  border-radius: 0.6rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 0.92rem;
+}
+.chat-user .chat-bubble {
+  background: var(--cobalt);
+  color: #fff;
+}
+.chat-assistant .chat-bubble {
+  background: var(--paper);
+}
+.chat-wait {
+  color: var(--muted);
+}
+.chat-tool {
+  font-size: 0.78rem;
+  color: var(--muted);
+  padding-left: 0.25rem;
+}
+.chat-form {
+  padding: 0.6rem 0.75rem;
+  border-top: 1px solid var(--line);
+}
+.chat-fab {
+  position: fixed;
+  right: 1.25rem;
+  bottom: 1.25rem;
+  width: 3rem;
+  height: 3rem;
+  border-radius: 50%;
+  border: 0;
+  background: var(--cobalt);
+  color: #fff;
+  font-size: 1.25rem;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25);
+  z-index: 30;
+}
+.md-doc h2,
+.md-doc h3,
+.md-doc h4,
+.md-doc h5 {
+  margin-top: 1.25rem;
+}
+.md-doc pre {
+  background: var(--paper);
+  padding: 0.75rem;
+  border-radius: 0.4rem;
+  overflow-x: auto;
+}
+@media (max-width: 1100px) {
+  /* Too narrow for three columns: the panel covers the page instead of squeezing it. */
+  .shell.has-chat {
+    grid-template-columns: var(--sidebar-w) minmax(0, 1fr);
+  }
+  .chat-dock {
+    position: fixed;
+    inset: 0 0 0 auto;
+    width: min(26rem, 100vw);
+    z-index: 40;
+    box-shadow: -4px 0 16px rgba(0, 0, 0, 0.2);
+  }
+}
+@media (max-width: 860px) {
+  .shell.has-chat {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .chat-dock {
+    width: 100vw;
+  }
+}
+
+.chat-img {
+  display: block;
+  max-width: 100%;
+  margin-top: 0.4rem;
+  border-radius: 0.4rem;
+}
+.chat-thumbs {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.4rem;
+}
+.chat-thumb {
+  position: relative;
+}
+.chat-thumb img {
+  height: 3.2rem;
+  border-radius: 0.3rem;
+  display: block;
+}
+.chat-thumb .btn-close {
+  position: absolute;
+  top: -0.3rem;
+  right: -0.3rem;
+  background-color: var(--surface);
+  border-radius: 50%;
+  padding: 0.25rem;
+  font-size: 0.55rem;
+}
+.hist-row {
+  display: block;
+  padding: 0.55rem 0.4rem;
+  border-bottom: 1px solid var(--line);
+  color: inherit;
+  text-decoration: none;
+}
+.hist-row.active,
+.hist-row:hover {
+  background: var(--paper);
+}
+.hist-msg {
+  display: block;
+  overflow-wrap: anywhere;
+}
+.hist-file {
+  margin-top: 0.75rem;
+}
+.diff {
+  margin: 0.4rem 0 0;
+  padding: 0;
+  background: var(--paper);
+  border-radius: 0.4rem;
+  overflow-x: auto;
+  font-size: 0.8rem;
+}
+.diff-line {
+  display: block;
+  white-space: pre;
+  padding: 0 0.6rem;
+  font-family: 'IBM Plex Mono', monospace;
+}
+.diff-line.dadd {
+  background: #e3f4ea;
+  color: #14532d;
+}
+.diff-line.ddel {
+  background: #fbe5e2;
+  color: #7f1d1d;
+}
+.diff-line.dgap {
+  color: var(--muted);
+  font-style: italic;
+}
+
+/* ── assistant: changes card, model picker ── */
+.cc-warn {
+  margin: 0.5rem 0.75rem 0;
+  padding: 0.5rem 0.7rem;
+  border: 1px solid #e8c36a;
+  background: var(--amber-bg);
+  border-radius: 0.5rem;
+  font-size: 0.85rem;
+}
+.cc-warn-title {
+  font-weight: 600;
+  color: var(--amber);
+}
+.cc {
+  margin: 0.5rem 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: 0.55rem;
+  background: var(--surface);
+  overflow: hidden;
+}
+.cc-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.5rem 0.7rem;
+  border: 0;
+  background: var(--paper);
+  text-align: left;
+  font-size: 0.88rem;
+}
+.cc-head:hover {
+  background: #e8ece9;
+}
+.cc-chevron {
+  font-size: 0.75rem;
+  transition: transform 0.15s;
+}
+.cc-chevron.open {
+  transform: rotate(90deg);
+}
+.cc-title {
+  font-weight: 600;
+}
+.cc-count {
+  min-width: 1.4rem;
+  padding: 0 0.4rem;
+  border-radius: 999px;
+  background: var(--cobalt);
+  color: #fff;
+  font-size: 0.75rem;
+  text-align: center;
+}
+.cc-latest {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 0.78rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cc-body {
+  max-height: 46vh;
+  overflow-y: auto;
+  border-top: 1px solid var(--line);
+}
+.cc-item {
+  padding: 0.55rem 0.7rem;
+  border-bottom: 1px solid var(--line);
+}
+.cc-item:last-child {
+  border-bottom: 0;
+}
+.cc-item.reverted .cc-msg {
+  text-decoration: line-through;
+  color: var(--muted);
+}
+.cc-row {
+  display: flex;
+  gap: 0.55rem;
+  align-items: flex-start;
+}
+.cc-icon {
+  margin-top: 0.1rem;
+  color: var(--cobalt);
+}
+.cc-main {
+  flex: 1;
+  min-width: 0;
+}
+.cc-msg {
+  font-size: 0.86rem;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+.cc-meta {
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+.cc-actions {
+  display: flex;
+  gap: 0.25rem;
+  flex-shrink: 0;
+}
+.chat-diff {
+  margin-top: 0.4rem;
+}
+.chat-diff .diff {
+  max-height: 16rem;
+  overflow: auto;
+}
+.chat-foot {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-top: 0.4rem;
+}
+.chat-model {
+  width: auto;
+  max-width: 11rem;
+  min-width: 0;
+}
+.chat-usage {
+  display: block;
+  margin-top: 0.3rem;
+  font-size: 0.74rem;
+}

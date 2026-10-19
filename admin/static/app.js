@@ -58,6 +58,57 @@ const esc = (s) =>
     (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c],
   );
 
+// ───────── "Duplicate a theme" dialog, shared by Themes and the Theme editor ─────────
+// It asks for the copy's name AND id. (It used to ask only for the id and always named the copy "<name> (copy)".)
+const newDup = () => ({
+  open: false,
+  source: null,
+  name: '',
+  id: '',
+  idTouched: false,
+  busy: false,
+  error: '',
+});
+const dupTheme = {
+  dup: newDup(),
+  /** A theme id from a name: lowercase letters, numbers and underscores, starting with a letter, 2–32 characters. */
+  slugId(name) {
+    let id = String(name)
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '_')
+      .replace(/^_+|_+$/g, '');
+    if (!/^[a-z]/.test(id)) id = `t_${id}`;
+    return id.slice(0, 32).replace(/_+$/, '') || 'theme_copy';
+  },
+  openDup(t) {
+    this.dup = {
+      ...newDup(),
+      open: true,
+      source: t,
+      name: `${t.name} (copy)`,
+      id: this.slugId(`${t.id}_copy`),
+    };
+    this.$nextTick(() => document.getElementById('dup-name')?.select());
+  },
+  async submitDup() {
+    const d = this.dup;
+    d.error = '';
+    d.busy = true;
+    try {
+      const { theme } = await api('POST', `/admin/themes/${d.source.id}/duplicate`, {
+        id: d.id.trim(),
+        name: d.name.trim() || undefined,
+      });
+      d.open = false;
+      await this.dupDone(theme);
+    } catch (e) {
+      d.error = e.message;
+    } finally {
+      d.busy = false;
+    }
+  },
+};
+
 // ───────── helpers shared by every component ─────────
 const H = {
   can(perm) {
@@ -485,6 +536,25 @@ document.addEventListener('alpine:init', () => {
     hash: location.hash,
     openGroups: [],
     sidebarOpen: false,
+    // The assistant panel (System → Assistant, D-071): docked at the right so the admin stays usable beside it.
+    chatOpen: (() => {
+      try {
+        return localStorage.getItem('assistant.open') === '1';
+      } catch {
+        return false;
+      }
+    })(),
+    get chatShown() {
+      return this.chatOpen && !!this.user && !this.disabledModules.includes('assistant');
+    },
+    toggleChat(on = !this.chatOpen) {
+      this.chatOpen = on;
+      try {
+        localStorage.setItem('assistant.open', on ? '1' : '0');
+      } catch {
+        /* private window: the panel just opens closed next time */
+      }
+    },
     contentTypes: [],
     pluginNav: [],
     // Optional modules an administrator switched off (System → Modules): their menu entries are hidden.
@@ -655,6 +725,18 @@ document.addEventListener('alpine:init', () => {
           label: 'System',
           icon: 'bi-gear',
           items: [
+            {
+              id: 'requirements',
+              label: 'Requirements',
+              module: 'assistant',
+              perm: 'requirements.read',
+            },
+            {
+              id: 'history',
+              label: 'Change history',
+              module: 'assistant',
+              perm: 'history.read',
+            },
             { id: 'locales', label: 'Translations', perm: 'locales.read' },
             { id: 'redirects', label: 'Redirects', perm: 'redirects.manage' },
             { id: 'messages', label: 'Messages', perm: 'site.messages' },
@@ -1880,22 +1962,13 @@ document.addEventListener('alpine:init', () => {
         this.error = e.message;
       }
     },
-    async duplicate(t) {
-      const id = prompt(
-        `Duplicate “${t.name}”. Id for the copy (lowercase letters, numbers and underscores):`,
-        `${t.id}_custom`,
-      );
-      if (!id) return;
-      try {
-        const { theme } = await api('POST', `/admin/themes/${t.id}/duplicate`, {
-          id: id.trim(),
-          name: `${t.name} (copy)`,
-        });
-        toast(`Created ${theme.name}. It isn’t live until you make it live.`);
-        await this.load();
-      } catch (e) {
-        this.error = e.message;
-      }
+    ...dupTheme,
+    duplicate(t) {
+      this.openDup(t);
+    },
+    async dupDone(theme) {
+      toast(`Created ${theme.name}. It isn’t live until you make it live.`);
+      await this.load();
     },
     async remove(t) {
       if (!confirm(`Remove the theme “${t.name}”?`)) return;
@@ -2167,24 +2240,14 @@ document.addEventListener('alpine:init', () => {
         this.error = e.message;
       }
     },
-    async duplicate() {
-      const t = this.themes.find((x) => x.id === this.id);
-      const id = prompt(
-        `Duplicate “${t?.name ?? this.id}”. Id for the copy (lowercase letters, numbers and underscores):`,
-        `${this.id}_custom`,
-      );
-      if (!id) return;
-      try {
-        const { theme } = await api('POST', `/admin/themes/${this.id}/duplicate`, {
-          id: id.trim(),
-          name: `${t?.name ?? this.id} (copy)`,
-        });
-        this.themes = (await api('GET', '/admin/themes')).themes;
-        toast(`Created ${theme.name}. Make it live under Appearance → Themes when it’s ready.`);
-        await this.open(theme.id);
-      } catch (e) {
-        this.error = e.message;
-      }
+    ...dupTheme,
+    duplicate() {
+      this.openDup(this.themes.find((x) => x.id === this.id) ?? { id: this.id, name: this.id });
+    },
+    async dupDone(theme) {
+      this.themes = (await api('GET', '/admin/themes')).themes;
+      toast(`Created ${theme.name}. Make it live under Appearance → Themes when it’s ready.`);
+      await this.open(theme.id);
     },
   }));
 
@@ -4207,31 +4270,7 @@ document.addEventListener('alpine:init', () => {
         this.fileError = e.message;
       }
     },
-    async send() {
-      const text = this.draft.trim();
-      if (!text || this.busy) return;
-      this.draft = '';
-      this.error = '';
-      this.busy = true;
-      try {
-        const out = await api('POST', `/admin/plugin-editor/sessions/${this.id}/messages`, {
-          text,
-        });
-        this.session = out.session;
-        this.messages = [...this.messages, ...out.messages];
-        await this.loadFiles();
-      } catch (e) {
-        this.error = e.message;
-        this.draft = text; // give it back so nothing typed is lost
-      } finally {
-        this.busy = false;
-      }
-    },
     // ───── turning the raw Anthropic message history into chat-friendly entries ─────
-    // A tool call (assistant message) and its result (the VERY NEXT message, role 'user', per the API's own
-    // shape) live in two separate stored rows — merge them into one renderable "turn" here instead of asking the
-    // template to reach across messages itself. A user-authored message is always a plain string; a tool-result
-    // message is always a content-block array, so that alone tells the two apart.
     get turns() {
       const out = [];
       for (let i = 0; i < this.messages.length; i++) {
@@ -4266,6 +4305,555 @@ document.addEventListener('alpine:init', () => {
         if (text || calls.length) out.push({ kind: 'assistant', text, calls });
       }
       return out;
+    },
+    async send() {
+      const text = this.draft.trim();
+      if (!text || this.busy) return;
+      this.draft = '';
+      this.error = '';
+      this.busy = true;
+      try {
+        const out = await api('POST', `/admin/plugin-editor/sessions/${this.id}/messages`, {
+          text,
+        });
+        this.session = out.session;
+        this.messages = [...this.messages, ...out.messages];
+        await this.loadFiles();
+      } catch (e) {
+        this.error = e.message;
+        this.draft = text; // give it back so nothing typed is lost
+      } finally {
+        this.busy = false;
+      }
+    },
+  }));
+
+  // ───────── System → Assistant (docs/DECISIONS.md D-071, D-072) ─────────
+  const TOOL_LABELS = {
+    site_map: 'Looked at the site',
+    read_file: 'Read a file',
+    read_requirements: 'Read the requirements',
+    update_requirements: 'Updated the requirements',
+    list_theme_files: 'Listed theme files',
+    edit_file: 'Edited a file',
+    write_file: 'Wrote a file',
+    delete_file: 'Deleted a file',
+    validate_site: 'Checked the pages',
+    generate_image: 'Generated a picture',
+  };
+
+  Alpine.data('assistantPanel', () => ({
+    ...H,
+    sessions: [],
+    session: null,
+    items: [],
+    draft: '',
+    busy: false,
+    error: '',
+    loaded: false,
+    usage: { input: 0, output: 0, cacheRead: 0 },
+    commits: [],
+    warnings: [],
+    attachments: [],
+    showChanges: false, // collapsed until there is something new to look at
+    models: { default: '', options: [] },
+    details: {},
+    openDiff: null,
+    budget: { chatLimit: 0, dayLimit: 0, usedToday: 0 },
+    async init() {
+      if (!(await this.mountFragment('assistant', 'panel'))) return;
+      this.loadBudget();
+      this.loadModels();
+      try {
+        await this.loadSessions();
+        let id = null;
+        try {
+          id = Number(localStorage.getItem('assistant.session')) || null;
+        } catch {
+          /* no storage: start from the latest chat */
+        }
+        const pick = this.sessions.find((s) => s.id === id) || this.sessions[0];
+        if (pick) await this.open(pick.id);
+      } catch (e) {
+        this.error = e.message;
+      }
+      this.loaded = true;
+    },
+    async loadSessions() {
+      this.sessions = (await api('GET', '/admin/assistant/sessions')).sessions;
+    },
+    /** Flatten stored messages into what the panel shows: what was said, one line per tool used, and any picture. */
+    show(messages) {
+      // A generated picture's address is in the tool's result, which is a separate (hidden) message.
+      const results = new Map();
+      for (const m of messages)
+        if (m.role === 'user' && Array.isArray(m.content))
+          for (const b of m.content)
+            if (b.type === 'tool_result') results.set(b.tool_use_id, b.content);
+      const out = [];
+      for (const m of messages) {
+        if (m.role === 'user') {
+          if (typeof m.content === 'string') out.push({ kind: 'user', text: m.content });
+          else if (m.content.some((b) => b.type === 'text'))
+            out.push({
+              kind: 'user',
+              text: m.content.find((b) => b.type === 'text').text,
+              images: m.content.filter((b) => b.type === 'image_ref').map((b) => b.url),
+            });
+          continue; // an array of tool results is plumbing
+        }
+        for (const b of Array.isArray(m.content) ? m.content : [m.content]) {
+          if (b.type === 'text' && b.text?.trim()) out.push({ kind: 'assistant', text: b.text });
+          else if (b.type === 'tool_use') {
+            out.push({ kind: 'tool', text: TOOL_LABELS[b.name] || b.name });
+            if (b.name === 'generate_image') {
+              try {
+                const src = JSON.parse(results.get(b.id) || '{}').src;
+                if (src) out.push({ kind: 'assistant', text: '', images: [src] });
+              } catch {
+                /* the tool failed: the label alone is shown */
+              }
+            }
+          }
+        }
+      }
+      return out;
+    },
+    async open(id) {
+      this.error = '';
+      const data = await api('GET', `/admin/assistant/sessions/${id}`);
+      this.session = data.session;
+      this.items = this.show(data.messages);
+      this.usage = data.session.usage;
+      this.commits = data.commits || [];
+      this.showChanges = false;
+      this.details = {};
+      this.openDiff = null;
+      this.warnings = [];
+      try {
+        localStorage.setItem('assistant.session', String(id));
+      } catch {
+        /* ignore */
+      }
+      this.scroll();
+    },
+    async newChat() {
+      this.error = '';
+      try {
+        const { session } = await api('POST', '/admin/assistant/sessions');
+        await this.loadSessions();
+        await this.open(session.id);
+      } catch (e) {
+        this.error = e.message;
+      }
+    },
+    async rename() {
+      const title = window.prompt('Name this chat', this.session.title || '');
+      if (!title?.trim()) return;
+      try {
+        await api('PUT', `/admin/assistant/sessions/${this.session.id}`, { title: title.trim() });
+        await this.loadSessions();
+        this.session = this.sessions.find((s) => s.id === this.session.id) || this.session;
+      } catch (e) {
+        this.error = e.message;
+      }
+    },
+    async remove() {
+      if (!window.confirm('Delete this chat? The requirements document keeps what it recorded.'))
+        return;
+      try {
+        await api('DELETE', `/admin/assistant/sessions/${this.session.id}`);
+        this.session = null;
+        this.items = [];
+        this.commits = [];
+        await this.loadSessions();
+        if (this.sessions[0]) await this.open(this.sessions[0].id);
+      } catch (e) {
+        this.error = e.message;
+      }
+    },
+    async send() {
+      const text = this.draft.trim();
+      const sent = this.attachments;
+      if ((!text && !sent.length) || this.busy) return;
+      this.error = '';
+      this.busy = true;
+      try {
+        if (!this.session) {
+          const { session } = await api('POST', '/admin/assistant/sessions');
+          this.session = session;
+        }
+        this.items.push({
+          kind: 'user',
+          text: text || 'See the attached picture.',
+          images: sent.map((a) => a.dataUrl),
+        });
+        this.draft = '';
+        this.attachments = [];
+        this.scroll();
+        const out = await api('POST', `/admin/assistant/sessions/${this.session.id}/messages`, {
+          text,
+          images: sent.map((a) => ({ dataUrl: a.dataUrl, name: a.name })),
+        });
+        this.items.push(...this.show(out.messages.slice(1)));
+        this.session = out.session;
+        this.usage = out.session.usage;
+        this.warnings = out.warnings || [];
+        this.commits = (await api('GET', `/admin/assistant/sessions/${this.session.id}`)).commits;
+        this.details = {};
+        this.openDiff = null;
+        // Straight after the assistant built or changed something, show what it changed.
+        if (out.commit && this.can('history.read')) {
+          this.showChanges = true;
+          await this.toggleDiff(out.commit);
+        }
+        await this.loadSessions();
+        this.loadBudget();
+        // The assistant may have changed the requirements, a page or a component under this screen.
+        window.dispatchEvent(new CustomEvent('assistant-changed'));
+      } catch (e) {
+        const message = e.message;
+        this.draft = text; // keep what was typed (and attached) so it can be sent again once the cause is fixed
+        this.attachments = sent;
+        if (this.session) await this.open(this.session.id).catch(() => {});
+        this.error = message; // open() clears it
+      } finally {
+        this.busy = false;
+        this.scroll();
+      }
+    },
+    /** Show or hide what one entry changed, right in the chat (git's own diff when the server has it). */
+    async toggleDiff(c) {
+      if (this.openDiff === c.id) {
+        this.openDiff = null;
+        return;
+      }
+      try {
+        if (!this.details[c.id])
+          this.details[c.id] = await api('GET', `/admin/assistant/history/${c.id}`);
+        this.openDiff = c.id;
+      } catch (e) {
+        this.error = e.message;
+      }
+    },
+    async loadModels() {
+      try {
+        this.models = await api('GET', '/admin/assistant/models');
+      } catch {
+        /* the picker just offers the default */
+      }
+    },
+    modelName(value) {
+      return this.models.options.find((m) => m.value === value)?.label || value || 'default';
+    },
+    /** Choose the model for this chat from now on; it applies to the next message. */
+    async changeModel(value) {
+      if (!this.session) return;
+      try {
+        const { session } = await api('PUT', `/admin/assistant/sessions/${this.session.id}`, {
+          model: value || null,
+        });
+        this.session = session;
+      } catch (e) {
+        this.error = e.message;
+      }
+    },
+    async loadBudget() {
+      try {
+        this.budget = await api('GET', '/admin/assistant/budget');
+      } catch {
+        /* the footer just omits the limits */
+      }
+    },
+    /** Read chosen or pasted pictures; the server shrinks them, so only a sanity limit applies here. */
+    attach(files) {
+      for (const f of [...files]) {
+        if (this.attachments.length >= 4) {
+          this.error = 'Attach up to 4 pictures at a time.';
+          break;
+        }
+        if (!/^image\/(png|jpeg|webp|gif)$/.test(f.type)) {
+          this.error = 'Attach PNG, JPEG, WebP or GIF pictures.';
+          continue;
+        }
+        if (f.size > 6 * 1024 * 1024) {
+          this.error = 'A picture is too large (6 MB at most).';
+          continue;
+        }
+        const r = new window.FileReader();
+        r.onload = () => this.attachments.push({ dataUrl: r.result, name: f.name || 'pasted' });
+        r.readAsDataURL(f);
+      }
+    },
+    paste(ev) {
+      const files = [...(ev.clipboardData?.files || [])].filter((f) => f.type.startsWith('image/'));
+      if (files.length) {
+        ev.preventDefault();
+        this.attach(files);
+      }
+    },
+    async revert(c) {
+      if (!window.confirm('Revert this change? Anything edited since stays as it is.')) return;
+      this.busy = true;
+      this.error = '';
+      try {
+        const r = await api('POST', `/admin/assistant/history/${c.id}/revert`);
+        toast(
+          r.conflicts.length
+            ? `Reverted ${r.reverted.length}; left ${r.conflicts.length} that were edited since.`
+            : 'Change reverted.',
+        );
+        this.commits = (await api('GET', `/admin/assistant/sessions/${this.session.id}`)).commits;
+        window.dispatchEvent(new CustomEvent('assistant-changed'));
+      } catch (e) {
+        this.error = e.message;
+      } finally {
+        this.busy = false;
+      }
+    },
+    get usageLine() {
+      const u = this.usage;
+      const b = this.budget;
+      const left = b.chatLimit ? ` · limit ${b.chatLimit.toLocaleString()}` : '';
+      const day = b.dayLimit
+        ? ` · today ${b.usedToday.toLocaleString()}/${b.dayLimit.toLocaleString()}`
+        : '';
+      return `This chat: ${u.input.toLocaleString()} in · ${u.output.toLocaleString()} out · ${u.cacheRead.toLocaleString()} cached${left}${day}`;
+    },
+    scroll() {
+      this.$nextTick(() => {
+        const el = this.$refs.log;
+        if (el) el.scrollTop = el.scrollHeight;
+      });
+    },
+  }));
+
+  Alpine.data('historyPage', () => ({
+    ...H,
+    commits: [],
+    selected: null,
+    git: null,
+    commitMessage: '',
+    more: false,
+    loaded: false,
+    busy: false,
+    error: '',
+    notice: '',
+    async init() {
+      if (!(await this.mountFragment('assistant', 'history'))) return;
+      window.addEventListener('hashchange', () => this.sync());
+      window.addEventListener('assistant-changed', () => this.load());
+      await this.load();
+      this.loadGit();
+      await this.sync();
+    },
+    async load() {
+      try {
+        this.commits = (await api('GET', '/admin/assistant/history')).commits;
+        this.more = this.commits.length >= 50;
+        this.loaded = true;
+      } catch (e) {
+        this.error = e.message;
+      }
+    },
+    async loadMore() {
+      const last = this.commits.at(-1)?.id;
+      const more = (await api('GET', `/admin/assistant/history?before=${last}`)).commits;
+      this.commits.push(...more);
+      this.more = more.length >= 50;
+    },
+    async loadGit() {
+      try {
+        this.git = await api('GET', '/admin/assistant/history/git');
+      } catch {
+        this.git = null;
+      }
+    },
+    /** #/history/<id> selects one change; #/history shows the list alone. */
+    async sync() {
+      const id = Number(location.hash.replace(/^#\/?/, '').split('/')[1]);
+      if (location.hash.replace(/^#\/?/, '').split('/')[0] !== 'history') return;
+      if (!id) {
+        this.selected = null;
+        return;
+      }
+      try {
+        this.selected = await api('GET', `/admin/assistant/history/${id}`);
+      } catch (e) {
+        this.error = e.message;
+      }
+    },
+    async revert() {
+      if (!window.confirm('Revert this change? Anything edited since stays as it is.')) return;
+      this.busy = true;
+      this.error = '';
+      try {
+        const r = await api('POST', `/admin/assistant/history/${this.selected.commit.id}/revert`);
+        this.notice = r.conflicts.length
+          ? `Reverted ${r.reverted.length} file(s). Left alone because they were edited since: ${r.conflicts.map((c) => c.path).join(', ')}.`
+          : 'Change reverted.';
+        await this.load();
+        await this.sync();
+        this.loadGit();
+        window.dispatchEvent(new CustomEvent('assistant-changed'));
+      } catch (e) {
+        this.error = e.message;
+      } finally {
+        this.busy = false;
+      }
+    },
+    async commitNow() {
+      this.busy = true;
+      this.error = '';
+      this.notice = '';
+      try {
+        const r = await api('POST', '/admin/assistant/history/commit', {
+          message: this.commitMessage.trim() || undefined,
+        });
+        this.commitMessage = '';
+        this.notice = r.started
+          ? 'Tracking started: the site as it is now is the starting point. Later changes will be committed against it.'
+          : r.commit
+            ? `Committed ${r.commit.files} file${r.commit.files === 1 ? '' : 's'}.`
+            : 'Nothing has changed since the last entry.';
+        await this.load();
+        this.loadGit();
+        if (r.commit) location.hash = '#/history/' + r.commit.id;
+      } catch (e) {
+        this.error = e.message;
+      } finally {
+        this.busy = false;
+      }
+    },
+    async push() {
+      this.busy = true;
+      this.error = '';
+      this.notice = '';
+      try {
+        const r = await api('POST', '/admin/assistant/history/push');
+        this.git = r.status;
+        this.notice = 'Pushed.';
+      } catch (e) {
+        this.error = e.message;
+      } finally {
+        this.busy = false;
+      }
+    },
+  }));
+
+  /** A deliberately small markdown renderer: everything is escaped first, then a few patterns become tags. Links are
+   * only http(s) or site-relative, so a document can't smuggle a javascript: URL into the admin. */
+  function mdToHtml(md) {
+    const inline = (t) =>
+      esc(t)
+        .replace(/`([^`]+)`/g, '<code>$1</code>')
+        .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+        .replace(/(^|[\s(])_([^_]+)_(?=[\s).,;:]|$)/g, '$1<em>$2</em>')
+        .replace(
+          /\[([^\]]+)\]\(((?:https?:\/\/|\/)[^)\s]*)\)/g,
+          '<a href="$2" rel="noopener">$1</a>',
+        );
+    const out = [];
+    let list = null;
+    let code = null;
+    const close = () => {
+      if (list) out.push(`</${list}>`);
+      list = null;
+    };
+    for (const line of String(md).split('\n')) {
+      if (line.startsWith('```')) {
+        if (code) {
+          out.push(`<pre><code>${esc(code.join('\n'))}</code></pre>`);
+          code = null;
+        } else {
+          close();
+          code = [];
+        }
+        continue;
+      }
+      if (code) {
+        code.push(line);
+        continue;
+      }
+      const h = /^(#{1,4})\s+(.*)$/.exec(line);
+      const li = /^\s*(?:[-*]|(\d+)\.)\s+(.*)$/.exec(line);
+      if (h) {
+        close();
+        out.push(`<h${h[1].length + 1}>${inline(h[2])}</h${h[1].length + 1}>`);
+      } else if (li) {
+        const kind = li[1] ? 'ol' : 'ul';
+        if (list !== kind) {
+          close();
+          out.push(`<${kind}>`);
+          list = kind;
+        }
+        out.push(`<li>${inline(li[2])}</li>`);
+      } else if (!line.trim()) close();
+      else {
+        close();
+        out.push(`<p>${inline(line)}</p>`);
+      }
+    }
+    if (code) out.push(`<pre><code>${esc(code.join('\n'))}</code></pre>`);
+    close();
+    return out.join('\n');
+  }
+
+  Alpine.data('requirementsPage', () => ({
+    ...H,
+    markdown: '',
+    authored: '',
+    html: '',
+    updatedAt: null,
+    draft: '',
+    editing: false,
+    busy: false,
+    loaded: false,
+    error: '',
+    async init() {
+      if (!(await this.mountFragment('assistant', 'requirements'))) return;
+      // The assistant edits this document from the side panel: reload when it finishes a turn.
+      window.addEventListener('assistant-changed', () => this.load());
+      await this.load();
+    },
+    async load() {
+      try {
+        const d = await api('GET', '/admin/assistant/requirements');
+        this.markdown = d.markdown;
+        this.authored = d.authored;
+        this.html = mdToHtml(d.markdown);
+        this.updatedAt = d.updatedAt;
+        this.loaded = true;
+      } catch (e) {
+        this.error = e.message;
+      }
+    },
+    startEdit() {
+      this.draft = this.authored;
+      this.editing = true;
+    },
+    async save() {
+      this.busy = true;
+      this.error = '';
+      try {
+        await api('PUT', '/admin/assistant/requirements', { markdown: this.draft });
+        this.editing = false;
+        await this.load();
+        toast('Requirements saved.');
+      } catch (e) {
+        this.error = e.message;
+      } finally {
+        this.busy = false;
+      }
+    },
+    download() {
+      const url = URL.createObjectURL(new window.Blob([this.markdown], { type: 'text/markdown' }));
+      const a = Object.assign(document.createElement('a'), {
+        href: url,
+        download: 'requirements.md',
+      });
+      a.click();
+      URL.revokeObjectURL(url);
     },
   }));
 

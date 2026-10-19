@@ -1,0 +1,99 @@
+<div class="chat-head">
+  <strong class="chat-title"><i class="bi bi-stars"></i> Assistant</strong>
+  <button type="button" class="btn btn-sm btn-outline-secondary" :disabled="busy" @click="newChat()" title="Start a new chat">New chat</button>
+  <button type="button" class="btn btn-sm btn-outline-secondary" @click="$dispatch('close-chat')" aria-label="Close the assistant" title="Close"><i class="bi bi-x-lg"></i></button>
+</div>
+<div class="chat-sessions">
+  <label class="visually-hidden" for="chat-session">Chat</label>
+  <select id="chat-session" class="form-select form-select-sm" :disabled="busy" :value="session ? session.id : ''" @change="open(Number($event.target.value))">
+    <template x-for="s in sessions" :key="s.id"><option :value="s.id" x-text="s.title || 'New chat'"></option></template>
+  </select>
+  <button type="button" class="btn btn-sm btn-outline-secondary" x-show="session" :disabled="busy" @click="rename()" title="Rename this chat" aria-label="Rename this chat"><i class="bi bi-pencil"></i></button>
+  <button type="button" class="btn btn-sm btn-outline-danger" x-show="session" :disabled="busy" @click="remove()" title="Delete this chat" aria-label="Delete this chat"><i class="bi bi-trash"></i></button>
+</div>
+<div class="chat-log" x-ref="log" role="log" aria-live="polite">
+  <div class="empty" x-show="loaded && !items.length">
+    Describe what you want for the site, or ask for a change. Decisions are written into <a href="#/requirements">System → Requirements</a>; every change is recorded in <a href="#/history">System → Change history</a> and can be reverted.
+  </div>
+  <template x-for="(it, i) in items" :key="i">
+    <div class="chat-msg" :class="'chat-' + it.kind">
+      <template x-if="it.kind === 'tool'"><span class="chat-tool"><i class="bi bi-gear"></i> <span x-text="it.text"></span></span></template>
+      <template x-if="it.kind !== 'tool'">
+        <div class="chat-bubble">
+          <div x-text="it.text"></div>
+          <template x-for="u in (it.images || [])" :key="u"><img class="chat-img" :src="u" alt="Picture in the chat" loading="lazy"></template>
+        </div>
+      </template>
+    </div>
+  </template>
+  <div class="chat-msg chat-assistant" x-show="busy"><div class="chat-bubble chat-wait">Working…</div></div>
+</div>
+<div class="cc-warn" x-show="warnings.length" role="alert">
+  <div class="cc-warn-title"><i class="bi bi-exclamation-triangle"></i> These pages may be broken</div>
+  <template x-for="w in warnings" :key="w.path"><div class="small"><span class="mono" x-text="w.path"></span> — <span x-text="w.problem"></span></div></template>
+  <div class="small muted mt-1">Open the changes below and revert, or ask the assistant to fix it.</div>
+</div>
+<section class="cc" x-show="commits.length" aria-label="Changes in this chat">
+  <button type="button" class="cc-head" @click="showChanges = !showChanges" :aria-expanded="showChanges" aria-controls="cc-body">
+    <i class="bi bi-chevron-right cc-chevron" :class="{open: showChanges}"></i>
+    <span class="cc-title">Changes in this chat</span>
+    <span class="cc-count" x-text="commits.length"></span>
+    <span class="cc-latest" x-show="!showChanges && commits[0]" x-text="commits[0] ? 'Latest: ' + commits[0].files + (commits[0].files === 1 ? ' file' : ' files') + ' · ' + ago(commits[0].createdAt) : ''"></span>
+  </button>
+  <div class="cc-body" id="cc-body" x-show="showChanges">
+    <template x-for="c in commits" :key="c.id">
+      <div class="cc-item" :class="{reverted: c.revertedBy}">
+        <div class="cc-row">
+          <i class="bi cc-icon" :class="c.kind === 'revert' ? 'bi-arrow-counterclockwise' : c.kind === 'manual' ? 'bi-person-check' : 'bi-pencil-square'"></i>
+          <div class="cc-main">
+            <div class="cc-msg" x-text="c.message" :title="c.message"></div>
+            <div class="cc-meta">
+              <span x-text="c.kind === 'revert' ? 'Reverted' : c.kind === 'manual' ? 'Committed' : 'Changed'"></span> ·
+              <span x-text="c.files + (c.files === 1 ? ' file' : ' files')"></span> ·
+              <span x-text="ago(c.createdAt)"></span>
+              <span x-show="c.revertedBy"> · reverted</span>
+            </div>
+          </div>
+          <div class="cc-actions">
+            <button type="button" class="btn btn-sm btn-outline-secondary" x-show="can('history.read')" @click="toggleDiff(c)" :aria-pressed="openDiff === c.id" :title="openDiff === c.id ? 'Hide what changed' : 'Show what changed'" x-text="openDiff === c.id ? 'Hide' : 'Diff'"></button>
+            <a class="btn btn-sm btn-outline-secondary" :href="'#/history/' + c.id" x-show="can('history.read')" title="Open in Change history" aria-label="Open in Change history"><i class="bi bi-clock-history"></i></a>
+            <button type="button" class="btn btn-sm btn-outline-danger" x-show="c.kind !== 'revert' && !c.revertedBy" :disabled="busy" @click="revert(c)" title="Put the site back as it was before this change">Revert</button>
+          </div>
+        </div>
+        <div class="chat-diff" x-show="openDiff === c.id && details[c.id]">
+          <template x-for="f in ((details[c.id] || {}).files || [])" :key="f.path">
+            <details class="hist-file" open>
+              <summary><span class="mono" x-text="f.path"></span> <span class="badge text-bg-light" x-text="f.status"></span>
+                <span class="small" x-show="!f.hidden"><span class="text-success">+<span x-text="f.added"></span></span> <span class="text-danger">−<span x-text="f.removed"></span></span></span></summary>
+              <div class="small muted p-2" x-show="f.hidden">You don't have permission to see what changed in this file.</div>
+              <pre class="diff" x-show="!f.hidden"><template x-for="(h, i) in (f.diff || [])" :key="i"><span class="diff-line" :class="'d' + (h.t === '+' ? 'add' : h.t === '-' ? 'del' : h.t === '…' ? 'gap' : 'ctx')" x-text="h.t + ' ' + h.s"></span></template></pre>
+            </details>
+          </template>
+        </div>
+      </div>
+    </template>
+  </div>
+</section>
+<div class="alert alert-danger m-2 py-1 small" role="alert" x-show="error" x-text="error"></div>
+<form class="chat-form" @submit.prevent="send()" @paste="paste($event)">
+  <div class="chat-thumbs" x-show="attachments.length">
+    <template x-for="(a, i) in attachments" :key="i">
+      <span class="chat-thumb"><img :src="a.dataUrl" :alt="a.name"><button type="button" class="btn-close" aria-label="Remove this picture" @click="attachments.splice(i, 1)"></button></span>
+    </template>
+  </div>
+  <label class="visually-hidden" for="chat-input">Message</label>
+  <textarea id="chat-input" class="form-control" rows="2" placeholder="Ask for a change, or describe the site…" x-model="draft" :disabled="busy" @keydown.enter="if (!$event.shiftKey) { $event.preventDefault(); send(); }"></textarea>
+  <div class="chat-foot">
+    <label class="btn btn-sm btn-outline-secondary mb-0" title="Attach a picture" :class="{disabled: busy}">
+      <i class="bi bi-paperclip"></i><span class="visually-hidden">Attach a picture</span>
+      <input type="file" hidden multiple accept="image/png,image/jpeg,image/webp,image/gif" @change="attach($event.target.files); $event.target.value = ''">
+    </label>
+    <label class="visually-hidden" for="chat-model">Model for this chat</label>
+    <select id="chat-model" class="form-select form-select-sm chat-model" :disabled="busy || !session" :value="session && session.model ? session.model : ''" @change="changeModel($event.target.value)" title="The model this chat uses. Larger models are more capable and cost more per message.">
+      <option value="" x-text="'Default (' + modelName(models.default) + ')'"></option>
+      <template x-for="m in models.options" :key="m.value"><option :value="m.value" x-text="m.label"></option></template>
+    </select>
+    <button class="btn btn-primary btn-sm ms-auto" :disabled="busy || (!draft.trim() && !attachments.length)" x-text="busy ? 'Working…' : 'Send'"></button>
+  </div>
+  <small class="muted chat-usage" x-show="session" x-text="usageLine"></small>
+</form>

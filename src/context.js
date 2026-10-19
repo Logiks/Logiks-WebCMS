@@ -35,6 +35,7 @@ import { createSiteFiles } from './modules/site/files.js';
 import { createLibraries, defineLibrariesSettings } from './modules/libraries/service.js';
 import { defineSitemapSettings } from './modules/sitemap/service.js';
 import { defineAiSettings } from './modules/plugin-editor/service.js';
+import { defineAssistantSettings } from './modules/assistant/settings.js';
 import { createModuleRegistry } from './core/modules/registry.js';
 import { builtinModules } from './modules/index.js';
 import { createAnalyticsService } from './modules/analytics/service.js';
@@ -75,6 +76,7 @@ export async function createContext({ env, bus: busOverride, log: logOverride, a
   defineSitemapSettings(registry);
   defineLibrariesSettings(registry);
   defineAiSettings(registry);
+  defineAssistantSettings(registry);
   defineMediaGeneratorSettings(registry);
   const permissions = createPermissions();
   defineCorePermissions(permissions);

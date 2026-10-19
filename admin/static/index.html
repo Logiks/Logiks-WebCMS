@@ -131,7 +131,7 @@
 
 <!-- ───────── Shell ───────── -->
 <template x-if="view === 'app'">
-<div class="shell">
+<div class="shell" :class="{'has-chat': chatShown}">
   <div class="mobile-topbar">
     <button type="button" class="menu-btn" @click="sidebarOpen = true" aria-label="Open menu" aria-controls="sidebar" :aria-expanded="sidebarOpen"><i class="bi bi-list"></i></button>
     <span class="mobile-brand" x-text="siteName || 'Admin'"></span>
@@ -528,6 +528,16 @@
       <section x-data="librariesPage"></section>
     </template>
 
+    <!-- Requirements (System → Requirements, D-071) -->
+    <template x-if="route === 'requirements'">
+      <section x-data="requirementsPage"></section>
+    </template>
+
+    <!-- Change history (System → Change history, D-072) -->
+    <template x-if="route === 'history'">
+      <section x-data="historyPage"></section>
+    </template>
+
     <!-- My account -->
     <template x-if="route === 'account'">
       <section x-data="accountPage"></section>
@@ -539,6 +549,12 @@
     </template>
 
   </main>
+
+  <!-- The assistant (D-071): docked at the right, so the page beside it stays usable -->
+  <template x-if="chatShown">
+    <aside class="chat-dock" aria-label="Assistant" @close-chat="toggleChat(false)" x-data="assistantPanel"></aside>
+  </template>
+  <button type="button" class="chat-fab" x-show="!chatShown && !disabledModules.includes('assistant')" @click="toggleChat(true)" aria-label="Open the assistant" title="Open the assistant"><i class="bi bi-stars"></i></button>
 </div>
 </template>
 </body>

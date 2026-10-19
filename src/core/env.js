@@ -40,6 +40,9 @@ const schema = z.object({
   // Where every plugin's files live (docs/DECISIONS.md D-060): disk-sourced plugins are authored here directly;
   // db-sourced ones (installed from a zip) are materialized here too, derived from the database like LIBRARY_DIR.
   PLUGINS_DIR: z.string().default('./plugins'),
+  // Where each server keeps the git mirror of the assistant's change history (docs/DECISIONS.md D-072). Derived from the
+  // database like LIBRARY_DIR: the history itself is in the site_commits table.
+  VERSIONS_DIR: z.string().default('./data/versions'),
   ALLOW_SINGLE_NODE: bool,
 });
 
@@ -85,6 +88,9 @@ export function loadEnv(source = process.env) {
   if (env.NODE_ENV === 'test' && !source.PLUGINS_DIR) {
     // Tests (and the processes they spawn) must never write into the repository's own plugins/ folder.
     env.PLUGINS_DIR = path.join(os.tmpdir(), 'cms-test-plugins', String(process.pid));
+  }
+  if (env.NODE_ENV === 'test' && !source.VERSIONS_DIR) {
+    env.VERSIONS_DIR = path.join(os.tmpdir(), 'cms-test-versions', String(process.pid));
   }
   if (env.NODE_ENV === 'test' && !env.APP_MASTER_KEY) {
     env.APP_MASTER_KEY = 'test-only-master-key-not-a-secret-000'; // fixed, so simulated nodes agree

@@ -93,12 +93,22 @@ test('Customize: type custom CSS, see it in the preview, save it, and visitors g
 });
 
 test('Theme editor: a built-in theme is read-only; duplicate it, then edit and save a file', async () => {
-  b.win.prompt = () => 'ui_copy';
   b.go('#/theme-editor/default');
   const page = () => b.$('section[x-data="themeEditorPage"]');
   await wait(() => page() && b.alertShown(/Built-in themes ship read-only/));
   b.click(btn(page(), 'Duplicate this theme'));
+  await wait(
+    () =>
+      page().querySelector('#dup-name')?.offsetParent !== undefined &&
+      page().querySelector('#dup-id'),
+  );
+  // The name typed in the dialog is the name the copy gets, and the id follows it until edited.
+  input(page().querySelector('#dup-name'), 'My Own Theme');
+  await wait(() => page().querySelector('#dup-id').value === 'my_own_theme');
+  input(page().querySelector('#dup-id'), 'ui_copy');
+  b.click(btn(page(), 'Create copy'));
   await wait(() => node.ctx.themes.has('ui_copy'));
+  assert.equal(node.ctx.themes.list().find((t) => t.id === 'ui_copy').name, 'My Own Theme');
   await wait(() => page().querySelector('#te-content') && !b.alertShown(/read-only/));
   const css = () =>
     [...page().querySelectorAll('.te-file')].find((x) => /styles\/.*\.css/.test(x.textContent));
@@ -173,4 +183,36 @@ test('preview frames keep the site origin (so theme files load) and nothing more
     'Theme preview',
   ]);
   for (const [, title, sandbox] of frames) assert.equal(sandbox, 'allow-same-origin', title);
+});
+
+test('Themes: duplicating asks for a name and uses it (it used to force "<name> (copy)")', async () => {
+  b.go('#/themes');
+  const page = () => b.$('section[x-data="themesPage"]');
+  await wait(() => page() && btn(page(), 'Duplicate'));
+  b.click(btn(page(), 'Duplicate'));
+  await wait(() => page().querySelector('#dup-name'));
+  assert.match(
+    page().querySelector('#dup-name').value,
+    /\(copy\)$/,
+    'a sensible default is offered',
+  );
+  input(page().querySelector('#dup-name'), 'Brand Blue');
+  await wait(() => page().querySelector('#dup-id').value === 'brand_blue');
+  b.click(btn(page(), 'Create copy'));
+  await wait(() => node.ctx.themes.has('brand_blue'));
+  assert.equal(node.ctx.themes.list().find((t) => t.id === 'brand_blue').name, 'Brand Blue');
+  await wait(() =>
+    [...page().querySelectorAll('strong')].some((x) => x.textContent === 'Brand Blue'),
+  );
+});
+
+test('Themes: a bad id is refused with the reason, and the dialog stays open', async () => {
+  b.go('#/themes');
+  const page = () => b.$('section[x-data="themesPage"]');
+  await wait(() => page() && btn(page(), 'Duplicate'));
+  b.click(btn(page(), 'Duplicate'));
+  await wait(() => page().querySelector('#dup-id'));
+  input(page().querySelector('#dup-id'), 'brand_blue'); // already taken by the previous test
+  b.click(btn(page(), 'Create copy'));
+  await wait(() => /already exists/.test(page().querySelector('.modal-card').textContent));
 });
