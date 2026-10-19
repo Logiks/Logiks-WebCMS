@@ -332,6 +332,49 @@ describe('settings apply live, without a restart', () => {
     assert.equal(other.headers['access-control-allow-origin'], undefined);
   });
 
+  test('every CSP directive can take extra sources, and a header-splitting value is refused', async () => {
+    const s = await signedIn(node.app);
+    const ok = await s.put('/api/admin/settings/security').send({
+      values: {
+        csp_font_sources: ['https://fonts.gstatic.com'],
+        csp_style_sources: ['https://fonts.googleapis.com'],
+        csp_script_sources: ['https://www.googletagmanager.com'],
+        csp_object_sources: ['https://docs.example.com'],
+        csp_form_actions: ['https://hooks.example.com'],
+        csp_base_uri: ['https://base.example.com'],
+      },
+    });
+    assert.equal(ok.status, 200);
+    const csp = (await request(node.app).get('/api/public/info')).headers[
+      'content-security-policy'
+    ];
+    assert.match(csp, /font-src 'self' data: https:\/\/fonts\.gstatic\.com/);
+    assert.match(csp, /style-src 'self' 'unsafe-inline' https:\/\/fonts\.googleapis\.com/);
+    assert.match(csp, /script-src 'self' 'unsafe-eval' https:\/\/www\.googletagmanager\.com/);
+    assert.match(csp, /object-src https:\/\/docs\.example\.com(;|$)/);
+    assert.match(csp, /form-action 'self' https:\/\/hooks\.example\.com/);
+    assert.match(csp, /base-uri 'self' https:\/\/base\.example\.com/);
+
+    const bad = await s
+      .put('/api/admin/settings/security')
+      .send({ values: { csp_script_sources: ['https://a.example.com; script-src *'] } });
+    assert.equal(bad.status, 422);
+    await s.put('/api/admin/settings/security').send({
+      values: {
+        csp_font_sources: [],
+        csp_style_sources: [],
+        csp_script_sources: [],
+        csp_object_sources: [],
+        csp_form_actions: [],
+        csp_base_uri: [],
+      },
+    });
+    const back = (await request(node.app).get('/api/public/info')).headers[
+      'content-security-policy'
+    ];
+    assert.match(back, /object-src 'none'/);
+  });
+
   test('/api/public/info exposes login-page branding, resolving media ids to urls', async () => {
     const s = await signedIn(node.app);
     const now = Date.now();

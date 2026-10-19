@@ -1,3 +1,5 @@
+import { BUILTIN_MODELS } from '../ai-models/service.js';
+
 /** Settings → Assistant (docs/DECISIONS.md D-072): the git mirror of the change history, and token budgets. */
 export function defineAssistantSettings(registry) {
   registry.define('assistant', {
@@ -28,10 +30,9 @@ export function defineAssistantSettings(registry) {
         type: 'select',
         label: 'Model for summaries',
         default: 'claude-haiku-4-5',
-        options: [
-          { value: 'claude-haiku-4-5', label: 'Claude Haiku 4.5 (cheapest, recommended)' },
-          { value: 'claude-sonnet-5', label: 'Claude Sonnet 5' },
-        ],
+        // The same list as Settings → AI → Model (refreshed by ai-models/service.js); this is the first-start copy.
+        options: BUILTIN_MODELS,
+        dynamicOptions: true,
         help: 'Used only to summarise older parts of a long chat so they cost a few lines instead of being forgotten. Your main model does the real work.',
       },
       chat_token_limit: {

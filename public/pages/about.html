@@ -2,10 +2,11 @@
 description: About OpenLogiks — our story, mission and values.
 ---
 {% assign heading = 'about.hero.heading' | t: 'About OpenLogiks' %}
+{% assign hero_text = 'about.hero.text' | t: 'We are a team of engineers who believe great software should be open, reliable and built to last.' %}
 {% seo title: heading %}
 {% render "hero",
   heading: heading,
-  text: 'about.hero.text' | t: 'We are a team of engineers who believe great software should be open, reliable and built to last.'
+  text: hero_text
 %}
 <section class="container py-5">
   <div class="row g-5 align-items-center">
@@ -66,8 +67,10 @@ description: About OpenLogiks — our story, mission and values.
     </div>
   </div>
 </section>
+{% assign cta_heading = 'about.cta.heading' | t: 'Want to work with us?' %}
+{% assign cta_button = 'about.cta.button' | t: 'Contact our team' %}
 {% render "cta",
-  heading: 'about.cta.heading' | t: 'Want to work with us?',
-  button_label: 'about.cta.button' | t: 'Contact our team',
+  heading: cta_heading,
+  button_label: cta_button,
   button_url: '/contact'
 %}

@@ -17,20 +17,31 @@ const KEBAB = {
 /**
  * The one CSP directive set, shared by the generic per-request middleware below and `cspHeader()` (a page render's
  * own override, `sitepages.js`/`public.js`, for the nonce a component's `<script>` needs — D-055).
- * @param {{ csp_img_sources: string[], csp_connect_sources: string[] }} v
+ * Each `csp_*_sources` setting lists EXTRA hosts on top of the built-in sources; a missing list means none.
+ * @typedef {{ csp_img_sources?: string[], csp_connect_sources?: string[], csp_font_sources?: string[],
+ *   csp_style_sources?: string[], csp_script_sources?: string[], csp_object_sources?: string[],
+ *   csp_form_actions?: string[], csp_base_uri?: string[] }} CspSettings
+ * @param {CspSettings} v
  * @param {{ https: boolean, nonce?: string }} opts
  */
 function directives(v, { https, nonce }) {
+  const x = (/** @type {string[] | undefined} */ l) => l ?? [];
   return {
     defaultSrc: ["'self'"],
-    scriptSrc: ["'self'", "'unsafe-eval'", ...(nonce ? [`'nonce-${nonce}'`] : [])],
-    styleSrc: ["'self'", "'unsafe-inline'"],
-    imgSrc: ["'self'", 'data:', ...v.csp_img_sources],
-    fontSrc: ["'self'", 'data:'],
-    connectSrc: ["'self'", ...v.csp_connect_sources],
-    objectSrc: ["'none'"],
-    baseUri: ["'self'"],
-    formAction: ["'self'"],
+    scriptSrc: [
+      "'self'",
+      "'unsafe-eval'",
+      ...(nonce ? [`'nonce-${nonce}'`] : []),
+      ...x(v.csp_script_sources),
+    ],
+    styleSrc: ["'self'", "'unsafe-inline'", ...x(v.csp_style_sources)],
+    imgSrc: ["'self'", 'data:', ...x(v.csp_img_sources)],
+    fontSrc: ["'self'", 'data:', ...x(v.csp_font_sources)],
+    connectSrc: ["'self'", ...x(v.csp_connect_sources)],
+    // 'none' cannot be combined with other sources, so it is dropped once an admin allows a host.
+    objectSrc: x(v.csp_object_sources).length ? x(v.csp_object_sources) : ["'none'"],
+    baseUri: ["'self'", ...x(v.csp_base_uri)],
+    formAction: ["'self'", ...x(v.csp_form_actions)],
     frameAncestors: ["'none'"],
     ...(https ? { upgradeInsecureRequests: [] } : {}),
   };
@@ -39,7 +50,7 @@ function directives(v, { https, nonce }) {
 /**
  * The literal `Content-Security-Policy` header value for one response, with a page-specific script nonce (or none).
  * Used to override the generic header set below for a rendered site page whose component(s) declared a `<script>`.
- * @param {{ csp_img_sources: string[], csp_connect_sources: string[] }} v
+ * @param {CspSettings} v
  * @param {{ https: boolean, nonce?: string }} opts
  */
 export function cspHeader(v, opts) {
@@ -58,7 +69,7 @@ export function cspHeader(v, opts) {
  *
  * Alpine's standard build needs 'unsafe-eval' (see README: switch to @alpinejs/csp to remove it).
  * @param {{ isProd: boolean }} env
- * @param {{ csp_img_sources: string[], csp_connect_sources: string[] }} v
+ * @param {CspSettings} v
  * @returns {import('express').RequestHandler}
  */
 export function securityHeaders(env, v) {

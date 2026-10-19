@@ -2,10 +2,11 @@
 description: OpenLogiks services — custom software, cloud and DevOps, open-source engineering and support.
 ---
 {% assign heading = 'services.hero.heading' | t: 'Services' %}
+{% assign hero_text = 'services.hero.text' | t: 'From a first prototype to running infrastructure at scale, here is how we help.' %}
 {% seo title: heading %}
 {% render "hero",
   heading: heading,
-  text: 'services.hero.text' | t: 'From a first prototype to running infrastructure at scale, here is how we help.'
+  text: hero_text
 %}
 <section class="container py-5">
   <div class="row g-4">
@@ -40,8 +41,10 @@ description: OpenLogiks services — custom software, cloud and DevOps, open-sou
   </div>
 </section>
 {% render "stats" %}
+{% assign cta_heading = 'services.cta.heading' | t: 'Not sure where to start?' %}
+{% assign cta_button = 'services.cta.button' | t: 'Talk to an engineer' %}
 {% render "cta",
-  heading: 'services.cta.heading' | t: 'Not sure where to start?',
-  button_label: 'services.cta.button' | t: 'Talk to an engineer',
+  heading: cta_heading,
+  button_label: cta_button,
   button_url: '/contact'
 %}

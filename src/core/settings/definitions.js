@@ -4,6 +4,14 @@ import { buildTransport, explain, fromOf, verifySmtp } from '../mail/smtp.js';
 import { render } from '../mail/templates.js';
 import { checkCustomCss, CUSTOM_CSS_MAX } from '../../modules/themes/package.js';
 
+/** One CSP source per line. A space, `;` or `,` would let a value start a new directive, so they are refused. */
+const cspSources = (/** @type {string[]} */ list) => {
+  const bad = list.find((v) => /[\s;,]/.test(v) || /^'none'$/i.test(v));
+  return bad
+    ? `"${bad}" isn't a valid source. Use one host per line, like https://cdn.example.com (no spaces, commas or semicolons).`
+    : null;
+};
+
 const tz = (v) => {
   try {
     new Intl.DateTimeFormat('en', { timeZone: v });
@@ -148,7 +156,55 @@ export function defineCoreSettings(registry) {
         default: [],
         help: 'Hosts allowed to serve images in the admin, e.g. https://cdn.example.com',
       },
-      csp_connect_sources: { type: 'list', label: 'Extra connect sources (CSP)', default: [] },
+      csp_connect_sources: {
+        type: 'list',
+        label: 'Extra connect sources (CSP)',
+        default: [],
+        validate: cspSources,
+        help: 'Hosts the pages may call with fetch or WebSocket, e.g. https://api.example.com',
+      },
+      csp_font_sources: {
+        type: 'list',
+        label: 'Extra font sources (CSP)',
+        default: [],
+        validate: cspSources,
+        help: 'Hosts allowed to serve fonts, e.g. https://fonts.gstatic.com',
+      },
+      csp_style_sources: {
+        type: 'list',
+        label: 'Extra style sources (CSP)',
+        default: [],
+        validate: cspSources,
+        help: 'Hosts allowed to serve stylesheets, e.g. https://fonts.googleapis.com',
+      },
+      csp_script_sources: {
+        type: 'list',
+        label: 'Extra script sources (CSP)',
+        default: [],
+        validate: cspSources,
+        help: 'Hosts allowed to serve scripts, e.g. https://www.googletagmanager.com. Each one can run code on your pages, so add only hosts you trust.',
+      },
+      csp_object_sources: {
+        type: 'list',
+        label: 'Extra object sources (CSP)',
+        default: [],
+        validate: cspSources,
+        help: 'Hosts allowed to serve plugins and embedded objects. Empty blocks them all, which is what you want unless you embed PDFs or Flash-era content.',
+      },
+      csp_form_actions: {
+        type: 'list',
+        label: 'Extra form targets (CSP)',
+        default: [],
+        validate: cspSources,
+        help: 'Hosts a form may submit to besides this site, e.g. https://hooks.example.com',
+      },
+      csp_base_uri: {
+        type: 'list',
+        label: 'Extra base URLs (CSP)',
+        default: [],
+        validate: cspSources,
+        help: 'Hosts a base tag may point to besides this site. Most sites leave this empty.',
+      },
       reset_token_minutes: {
         type: 'number',
         label: 'Password reset link lifetime (minutes)',

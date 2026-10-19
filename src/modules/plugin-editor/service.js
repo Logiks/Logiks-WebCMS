@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { now } from '../../core/db/index.js';
 import { HttpError, notFound } from '../../core/http/errors.js';
+import { BUILTIN_MODELS } from '../ai-models/service.js';
 import { checkPluginFile, checkPluginFiles, dryRun, manifestSchema } from '../plugins/package.js';
 
 const MAX_ITERATIONS = 30; // runaway-loop guard: one user message should never need more tool calls than this
@@ -146,12 +147,27 @@ export function defineAiSettings(registry) {
         type: 'select',
         label: 'Model',
         default: MODEL_DEFAULT,
-        options: [
-          { value: 'claude-opus-5', label: 'Claude Opus 5 (recommended for building plugins)' },
-          { value: 'claude-sonnet-5', label: 'Claude Sonnet 5 (faster, cheaper)' },
-          { value: 'claude-haiku-4-5', label: 'Claude Haiku 4.5 (fastest, cheapest)' },
-        ],
+        options: BUILTIN_MODELS,
+        dynamicOptions: true, // replaced by the refreshed list (ai-models/service.js)
       },
+      models_source: {
+        type: 'select',
+        label: 'Model list source',
+        default: 'builtin',
+        options: [
+          { value: 'builtin', label: 'Built-in list (never changes)' },
+          { value: 'api', label: 'Claude API (updated daily)' },
+          { value: 'file', label: 'JSON file (re-read daily)' },
+        ],
+        help: 'Where the Model choices come from. Use “Refresh model list” below to update now.',
+      },
+      models_file: {
+        type: 'string',
+        label: 'Model list file',
+        default: 'config/ai-models.json',
+        help: 'Used when the source is a JSON file: a list like ["claude-opus-5"] or [{"value": "claude-opus-5", "label": "Claude Opus 5"}]. Relative paths start from the server’s working folder.',
+      },
+      model_catalog: { type: 'json', hidden: true, default: null },
     },
     tests: {
       connect: {

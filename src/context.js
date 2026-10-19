@@ -34,6 +34,7 @@ import { createSiteService } from './modules/site/service.js';
 import { createSiteFiles } from './modules/site/files.js';
 import { createLibraries, defineLibrariesSettings } from './modules/libraries/service.js';
 import { defineSitemapSettings } from './modules/sitemap/service.js';
+import { createAiModels } from './modules/ai-models/service.js';
 import { defineAiSettings } from './modules/plugin-editor/service.js';
 import { defineAssistantSettings } from './modules/assistant/settings.js';
 import { createModuleRegistry } from './core/modules/registry.js';
@@ -291,6 +292,9 @@ export async function createContext({ env, bus: busOverride, log: logOverride, a
       return cache.invalidate(['site']);
   });
   settings.onChange('sitemap', () => cache.invalidate(['sitemap']));
+  const aiModels = createAiModels({ settings, log });
+  jobs.define('ai.refresh_models', () => aiModels.autoRefresh());
+  jobs.schedule('ai.refresh_models', { everyMs: 24 * 3600_000 });
   jobs.define('content.publish_due', async () => {
     await content.publishDue();
   });

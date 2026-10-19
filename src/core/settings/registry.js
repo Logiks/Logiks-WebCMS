@@ -23,6 +23,8 @@ import { z } from 'zod';
  *   hidden          not shown in the UI or API (internal, e.g. generated keys)
  *   generate        () => value, called once on first boot if no value exists
  *   options         [{value,label}] for select
+ *   dynamicOptions  select only: `options` is replaced at run time (e.g. a refreshed model list), so a value is
+ *                   checked against the live list instead of the one present at start-up
  *   min/max/int     number bounds  (min/max also bound string length)
  *   format          'url' | 'email' for strings
  *   validate        (value) => string | null   custom check, returns an error message
@@ -73,6 +75,12 @@ export function buildValidator(name, f) {
       s = z.boolean({ error: 'Must be true or false' });
       break;
     case 'select':
+      if (f.dynamicOptions) {
+        s = z
+          .string()
+          .refine((v) => f.options.some((o) => o.value === v), 'Choose one of the listed options');
+        break;
+      }
       s = z.enum(
         f.options.map((o) => o.value),
         { error: 'Choose one of the listed options' },

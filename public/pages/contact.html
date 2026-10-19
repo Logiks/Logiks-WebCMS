@@ -2,9 +2,10 @@
 description: Get in touch with OpenLogiks.
 ---
 {% assign heading = 'contact.title' | t: 'Contact us' %}
+{% assign hero_text = 'contact.hero.text' | t: 'Tell us about your project and we will get back to you within one business day.' %}
 {% seo title: heading %}
 {% render "hero",
   heading: heading,
-  text: 'contact.hero.text' | t: 'Tell us about your project and we will get back to you within one business day.'
+  text: hero_text
 %}
 {% render "contact-form" %}

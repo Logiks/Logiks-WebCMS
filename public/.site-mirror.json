@@ -5,8 +5,8 @@
  "pages/blog/[slug].html": "a0250fd7b062550a1374c5259d2d327445d0183305805c8d44c5d32631b98595",
  "pages/blog/index.html": "004f94254b6459b4f0d5f8578b5fa53bed95ea2cae20ee90337aa1c2fa14c56e",
  "pages/category/[slug].html": "326e491121efe67491b6487e0d25d6a851a25839acffc93c8617f78ddb2b663c",
- "pages/contact.html": "f62d12eca51146a13a0b2c4655e751bc70f5cc6b87182cc188ce1b3178afdc04",
- "pages/index.html": "c7faf87a517eb30fcd7940232ae26a762d2bbdd141d46c57d24fc31bd457a231",
+ "pages/contact.html": "2f89bc183aff8db72d6200cd065609a6cae86021e51885844a716f4b7b3a46a5",
+ "pages/index.html": "8a548035565403fd8f5733667c357ebaf0e36d677c73e36d852293e7bd55aefe",
  "pages/search.html": "724e55a8bec7387ee47c09272d15dd02eb3df912d98811e52905a799cdcf8a4d",
  "pages/tag/[slug].html": "008adaca81e78b88725a07a0d2c3851b39fdc6867a342494cc47c112566ecae1",
  "components/contact-form.html": "c793c3b49304de40bdce643dd617ca4ca3b3ca78e79af8f0ef42b8dfe9697910",
@@ -22,8 +22,8 @@
  "locales/en.json": "b738bd66de43327f51e6949d40dbe373d1432a7aab06d91efadd275be95ea932",
  "components/features.html": "b0ae4f42956d8e0c4da97d38054067afeec4231805cadca64f584a2771b72e80",
  "components/stats.html": "b568b5ca59f452ea117484928d8048b658fc9ac5fc3b625e7251a3a67fb77f4f",
- "pages/about.html": "6078cec16a8bbfe3ea8876d9ba00bdc8cdfbb2a565dae371fd4c10ab42278c40",
- "pages/services.html": "1cdce2fd91808c7a75d56a36f56765605dd1eda4e5e98382559485b1dadc5eef",
+ "pages/about.html": "c1bbac1bfe77ed6d76a260d8fb44d4228bc59a12255aaa75224fc710d3b75835",
+ "pages/services.html": "deff5678d306f3659bb25241905d4059ab374d58829c46a8847799c8eaeec93c",
  "components/ip-viewer/ip-detector.html": "fa876852087b9aa0e4dc5d728e25d1cd250e886e7e8c0bde0a8a421afb6dbc7c",
  "components/weather-demo/current.html": "91436474b418ed1fe9b09ec1e84257455dcf28e137f829d1d74a768076a470e9"
 }

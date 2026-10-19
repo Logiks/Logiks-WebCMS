@@ -80,6 +80,12 @@ export function createApp(ctx) {
     hotSwap(settings, 'security', (v) => securityHeaders(env, v), [
       'csp_img_sources',
       'csp_connect_sources',
+      'csp_font_sources',
+      'csp_style_sources',
+      'csp_script_sources',
+      'csp_object_sources',
+      'csp_form_actions',
+      'csp_base_uri',
     ]),
   );
 
