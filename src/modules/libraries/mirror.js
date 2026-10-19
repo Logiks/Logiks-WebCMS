@@ -53,7 +53,7 @@ const FONT_EXTS = new Set(['.woff', '.woff2', '.ttf', '.otf', '.eot']);
 
 // Addresses an administrator-triggered download must never reach: this server's own network. The person who asks for a
 // URL may not be the person who wrote it (a page can carry text that asks the assistant to fetch something).
-function isPrivateIp(ip) {
+export function isPrivateIp(ip) {
   if (net.isIPv4(ip)) {
     const [a, b] = ip.split('.').map(Number);
     return (

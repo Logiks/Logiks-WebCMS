@@ -1,0 +1,94 @@
+<div class="page-head d-flex justify-content-between align-items-end flex-wrap gap-2">
+  <div><h1>Prompts</h1><p>The instructions the assistant and the page designer follow. The project type for this site is chosen under Settings → General; its instructions, the master prompt and the working method are sent with every request, so nobody has to repeat them in the chat.</p></div>
+  <button type="button" class="btn btn-primary" x-show="can('prompts.write')" @click="startNew()">New project type</button>
+</div>
+<div class="alert alert-danger" role="alert" x-show="error" x-text="error"></div>
+
+<div class="row g-3" x-show="!current">
+  <div class="col-lg-6">
+    <section class="panel p-3 mb-3" aria-labelledby="pr-types-h">
+      <h2 class="h6" id="pr-types-h">Project types</h2>
+      <p class="small muted">Site type for this installation: <strong x-text="projectType"></strong>. <a href="#/settings/general">Change it in Settings</a>.</p>
+      <div class="empty" x-show="loaded && !typeItems.length">No project types.</div>
+      <div class="list-group list-group-flush">
+        <template x-for="i in typeItems" :key="i.key">
+          <button type="button" class="list-group-item list-group-item-action" @click="edit(i)">
+            <div class="d-flex justify-content-between gap-2">
+              <span class="fw-semibold" x-text="i.label"></span>
+              <span class="small muted">
+                <span x-show="isSelected(i)">In use · </span><span x-show="!i.enabled">Off · </span><span x-show="i.edited">Edited · </span><span x-show="!i.builtin">Custom</span>
+              </span>
+            </div>
+            <div class="small muted" x-text="i.description"></div>
+          </button>
+        </template>
+      </div>
+    </section>
+  </div>
+  <div class="col-lg-6">
+    <section class="panel p-3 mb-3" aria-labelledby="pr-core-h">
+      <h2 class="h6" id="pr-core-h">Master prompt and working method</h2>
+      <p class="small muted">The master prompt is the quality standard for every site. Under “Before building” in Settings → AI behaviour you choose which working method applies.</p>
+      <div class="list-group list-group-flush">
+        <template x-for="i in masterItems" :key="i.key">
+          <button type="button" class="list-group-item list-group-item-action" @click="edit(i)">
+            <div class="d-flex justify-content-between gap-2">
+              <span class="fw-semibold" x-text="i.label"></span>
+              <span class="small muted"><span x-text="kindLabel(i.kind)"></span><span x-show="i.edited"> · Edited</span></span>
+            </div>
+            <div class="small muted" x-text="i.description"></div>
+          </button>
+        </template>
+      </div>
+    </section>
+    <section class="panel p-3" aria-labelledby="pr-prev-h">
+      <h2 class="h6" id="pr-prev-h">See exactly what the assistant is told</h2>
+      <div class="d-flex gap-2 flex-wrap mb-2">
+        <label class="visually-hidden" for="pr-prev-type">Project type</label>
+        <select id="pr-prev-type" class="form-select w-auto" x-model="previewType">
+          <template x-for="i in typeItems.filter((t) => t.enabled)" :key="i.key">
+            <option :value="i.key.slice(8)" x-text="i.label"></option>
+          </template>
+        </select>
+        <button type="button" class="btn btn-outline-secondary" @click="showPreview()">Show</button>
+      </div>
+      <pre class="small mono p-2 border rounded" style="white-space:pre-wrap;max-height:24rem;overflow:auto" x-show="preview" x-text="preview && preview.text"></pre>
+    </section>
+  </div>
+</div>
+
+<form class="panel p-3" x-show="current" @submit.prevent="save()" aria-labelledby="pr-edit-h">
+  <h2 class="h5" id="pr-edit-h" x-text="current && current.isNew ? 'New project type' : 'Edit prompt'"></h2>
+  <div class="row g-3">
+    <div class="col-md-4" x-show="current && current.isNew">
+      <label class="form-label" for="pr-id">Id</label>
+      <input id="pr-id" class="form-control" maxlength="40" placeholder="real-estate" x-model="current.id">
+      <div class="form-text">Lowercase letters, numbers and hyphens. It cannot be changed later.</div>
+    </div>
+    <div class="col-md-8">
+      <label class="form-label" for="pr-label">Name</label>
+      <input id="pr-label" class="form-control" maxlength="120" x-model="current.label">
+    </div>
+    <div class="col-12">
+      <label class="form-label" for="pr-desc">Short description</label>
+      <input id="pr-desc" class="form-control" maxlength="400" x-model="current.description">
+    </div>
+    <div class="col-12">
+      <label class="form-label" for="pr-body">Instructions</label>
+      <textarea id="pr-body" class="form-control mono" rows="22" x-model="current.body"></textarea>
+      <div class="form-text" x-show="current && current.kind === 'project_type'">Say who visits and what they should do, the pages and parts this kind of site needs, what must really work, the design direction, what to ask when it is not known, and what to avoid.</div>
+    </div>
+    <div class="col-12" x-show="current && current.kind === 'project_type'">
+      <div class="form-check">
+        <input id="pr-on" class="form-check-input" type="checkbox" x-model="current.enabled">
+        <label class="form-check-label" for="pr-on">Offer in Settings → General</label>
+      </div>
+    </div>
+  </div>
+  <div class="d-flex gap-2 mt-3 flex-wrap">
+    <button class="btn btn-primary" :disabled="busy" x-show="can('prompts.write')" x-text="busy ? 'Saving…' : 'Save changes'"></button>
+    <button type="button" class="btn btn-outline-secondary" :disabled="busy" @click="current = null">Cancel</button>
+    <button type="button" class="btn btn-outline-secondary ms-auto" :disabled="busy" x-show="current && current.builtin && current.edited && can('prompts.write')" @click="reset()">Reset to shipped text</button>
+    <button type="button" class="btn btn-outline-danger" :disabled="busy" x-show="current && !current.builtin && !current.isNew && can('prompts.write')" @click="remove()">Delete</button>
+  </div>
+</form>

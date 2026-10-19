@@ -15,8 +15,16 @@ const updateBody = z
   .object({
     title: z.string().min(1).max(190).optional(),
     model: z.string().max(64).nullable().optional(), // '' or null = the installation's default
+    focus: z.string().max(191).nullable().optional(), // '' or null = not pinned
   })
-  .refine((v) => v.title !== undefined || v.model !== undefined, 'Give a title or a model.');
+  .refine(
+    (v) => v.title !== undefined || v.model !== undefined || v.focus !== undefined,
+    'Give a title, a model or a focus.',
+  );
+const planDecisionBody = z.object({
+  decision: z.enum(['approve', 'changes', 'reject']),
+  note: z.string().max(2000).optional(),
+});
 const requirementsBody = z.object({ markdown: z.string().max(200_000) });
 
 /**
@@ -39,13 +47,35 @@ export default function assistantRoutes(ctx) {
     res.json(await assistant.get(Number(req.params.id), actorOf(req)));
   });
   r.put('/assistant/sessions/:id', chat, docs({ body: updateBody }), async (req, res) => {
-    const { title, model } = parse(updateBody, req.body);
+    const { title, model, focus } = parse(updateBody, req.body);
     const id = Number(req.params.id);
     let session;
     if (title !== undefined) session = await assistant.rename(id, title, actorOf(req));
     if (model !== undefined) session = await assistant.setModel(id, model, actorOf(req));
+    if (focus !== undefined) session = await assistant.setFocus(id, focus, actorOf(req));
     res.json({ session });
   });
+  // Only a person can answer a plan: this is what lifts the assistant's block on a build-sized change.
+  r.post(
+    '/assistant/sessions/:id/plans/:planId',
+    chat,
+    docs({
+      body: planDecisionBody,
+      response: z.object({ status: z.string(), savedToRequirements: z.boolean() }),
+    }),
+    async (req, res) => {
+      const { decision, note } = parse(planDecisionBody, req.body);
+      res.json(
+        await assistant.decidePlan(
+          Number(req.params.id),
+          Number(req.params.planId),
+          decision,
+          note,
+          actorOf(req),
+        ),
+      );
+    },
+  );
   r.get('/assistant/models', chat, (_req, res) => {
     res.json(assistant.models());
   });

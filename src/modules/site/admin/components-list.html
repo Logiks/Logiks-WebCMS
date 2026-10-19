@@ -19,6 +19,7 @@
                     <td class="muted text-nowrap" x-text="ago(c.updatedAt)"></td>
                     <td class="text-end text-nowrap">
                       <a class="btn btn-sm btn-outline-secondary" :href="'#/components/' + encodeURIComponent(c.name)">Edit</a>
+                      <button class="btn btn-sm btn-outline-secondary" type="button" x-show="assistantAvailable()" @click="askAssistant(c.path)" title="Open the assistant, focused on this component" aria-label="Ask the assistant about this component"><i class="bi bi-stars"></i></button>
                       <button class="btn btn-sm btn-outline-danger" type="button" x-show="can('components.write')" @click="remove(c)">Delete</button>
                     </td>
                   </tr></template></tbody></table>

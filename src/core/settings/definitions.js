@@ -68,6 +68,15 @@ export function defineCoreSettings(registry) {
         validate: (v) =>
           /^[a-z]{2}(-[A-Z]{2})?$/.test(v) ? null : 'Use a language code such as en or en-IN',
       },
+      project_type: {
+        type: 'select',
+        label: 'Project type',
+        default: 'general',
+        // Replaced at run time by the prompts module with the types under System → Prompts (D-082).
+        options: [{ value: 'general', label: 'General website' }],
+        dynamicOptions: true,
+        help: 'What kind of site this is. The assistant and page designer use it to follow the right instructions, without being told each time. The types and their instructions are under System → Prompts.',
+      },
       maintenance_mode: {
         type: 'boolean',
         label: 'Maintenance mode',

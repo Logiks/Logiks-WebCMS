@@ -851,3 +851,89 @@ a {
 .form-select:focus {
   background-color: #fff;
 }
+
+.research-summary {
+  white-space: pre-wrap;
+}
+.ac-assistant .ac-text a {
+  text-decoration: underline;
+}
+
+/* A plan the assistant proposed, with the approve / change / reject buttons (D-083) */
+.ac-plan {
+  border: 1px solid var(--line, #d9dde3);
+  border-radius: 10px;
+  padding: 0.75rem;
+  background: var(--panel, #fff);
+  max-width: 100%;
+}
+.ac-plan-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.5rem;
+  margin-bottom: 0.4rem;
+}
+.ac-plan summary {
+  cursor: pointer;
+}
+
+/* What the assistant is working on: the files it changed, as chips, and the path on each tool line (D-084) */
+.ac-working {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.4rem 0.75rem;
+  border-bottom: 1px solid var(--line, #d9dde3);
+}
+.ac-working-title {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  opacity: 0.7;
+}
+.ac-chip {
+  display: inline-flex;
+  max-width: 100%;
+  border: 1px solid var(--line, #d9dde3);
+  border-radius: 999px;
+  overflow: hidden;
+  font-size: 0.8rem;
+  text-decoration: none;
+}
+.ac-chip-kind {
+  padding: 0.1rem 0.5rem;
+  background: var(--panel-2, #f1f3f6);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.ac-chip-name {
+  padding: 0.1rem 0.5rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ac-chip.deleted .ac-chip-name {
+  text-decoration: line-through;
+}
+.ac-tool-doc {
+  margin-left: 0.4rem;
+  opacity: 0.8;
+  word-break: break-all;
+}
+.ac-tool-kind {
+  font-weight: 600;
+}
+
+/* The thing this chat is pinned to (D-085) */
+.ac-focus {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.4rem 0.75rem;
+  border-bottom: 1px solid var(--line, #d9dde3);
+}
+.ac-chip-focus {
+  border-color: var(--accent, #2f6f4f);
+}

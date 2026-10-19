@@ -52,7 +52,7 @@ test('Content lives under its own menu group, with a link per content type', asy
       .filter(b.visible)
       .flatMap((g) => [...g.querySelectorAll('.nav-sub-link')].map((a) => a.textContent.trim()));
   await wait(() => links().includes('Pages'));
-  assert.deepEqual(links(), ['Pages', 'Posts', 'Categories and tags']);
+  assert.deepEqual(links(), ['Pages', 'Posts', 'Categories and tags', 'AI Research']);
   b.click(b.button('Content'));
 });
 

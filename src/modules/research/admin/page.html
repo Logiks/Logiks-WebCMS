@@ -1,0 +1,89 @@
+        <div class="page-head d-flex justify-content-between align-items-end flex-wrap gap-2">
+          <div><h1>AI Research</h1><p>What the assistant found on the web, with the links it came from. Ask the assistant to research something and it saves the result here.</p></div>
+        </div>
+        <div class="alert alert-danger" role="alert" x-show="error" x-text="error"></div>
+        <section class="panel p-3 mb-3" x-show="can('research.write')" aria-labelledby="rs-h">
+          <h2 class="h6" id="rs-h">Search the web</h2>
+          <form class="d-flex gap-2 flex-wrap mb-2" @submit.prevent="search()">
+            <label class="visually-hidden" for="rs-q">Search for</label>
+            <input id="rs-q" class="form-control flex-grow-1" style="min-width:12rem;max-width:32rem" maxlength="300" placeholder="What do you want to find?" x-model="q">
+            <select class="form-select w-auto" aria-label="What to search" x-model="kind">
+              <option value="web">Web pages</option>
+              <option value="images">Pictures</option>
+            </select>
+            <button class="btn btn-primary" :disabled="searching || q.trim().length < 2"><span x-show="!searching">Search</span><span x-show="searching">Searching…</span></button>
+          </form>
+          <p class="small muted mb-2" x-show="engine" x-text="'Searched with ' + engine + '. Change the engine under Settings → AI Research.'"></p>
+          <ul class="list-unstyled mb-0" x-show="kind === 'web' && results.length">
+            <template x-for="r in results" :key="r.url">
+              <li class="mb-2">
+                <a :href="r.url" target="_blank" rel="noopener noreferrer" x-text="r.title || r.url"></a>
+                <div class="small muted text-break" x-text="r.url"></div>
+                <div class="small" x-text="r.snippet"></div>
+                <button type="button" class="btn btn-sm btn-outline-secondary mt-1" :disabled="r.saved" @click="saveNote(r)" x-text="r.saved ? 'Saved' : 'Save as research note'"></button>
+              </li>
+            </template>
+          </ul>
+          <div class="d-flex flex-wrap gap-3" x-show="kind === 'images' && results.length">
+            <template x-for="r in results" :key="r.url">
+              <figure class="m-0" style="width:160px">
+                <img :src="'/api/admin/research/thumb?url=' + encodeURIComponent(r.thumbnail || r.url)" :alt="r.title" style="width:160px;height:110px;object-fit:cover;border-radius:6px" loading="lazy" referrerpolicy="no-referrer">
+                <figcaption class="small">
+                  <span x-text="r.title"></span>
+                  <span class="muted d-block" x-text="[r.creator, r.license].filter(Boolean).join(' · ')"></span>
+                  <a x-show="r.pageUrl" :href="r.pageUrl" target="_blank" rel="noopener noreferrer">Source page</a>
+                </figcaption>
+                <button type="button" class="btn btn-sm btn-outline-primary mt-1" x-show="can('media.upload')" :disabled="r.saved" @click="importImage(r)" x-text="r.saved ? 'In media library' : 'Download'"></button>
+              </figure>
+            </template>
+          </div>
+          <div class="empty" x-show="searched && !searching && !results.length && !error">No results.</div>
+        </section>
+        <div class="row g-3">
+          <div class="col-lg-5">
+            <div class="panel">
+              <div class="empty" x-show="loaded && !items.length">Nothing saved yet. Open the assistant and ask it to research a topic.</div>
+              <div class="list-group list-group-flush" x-show="items.length">
+                <template x-for="it in items" :key="it.id">
+                  <button type="button" class="list-group-item list-group-item-action" :class="{active: current && current.id === it.id}" @click="open(it.id)">
+                    <div class="fw-semibold" x-text="it.title"></div>
+                    <div class="small" x-text="it.sources.length + (it.sources.length === 1 ? ' source' : ' sources') + ' · ' + new Date(it.createdAt).toLocaleDateString()"></div>
+                  </button>
+                </template>
+              </div>
+            </div>
+          </div>
+          <div class="col-lg-7">
+            <template x-if="current">
+              <article class="panel p-3" aria-live="polite">
+                <div class="d-flex justify-content-between gap-2 align-items-start">
+                  <h2 class="h5 mb-1" x-text="current.title"></h2>
+                  <button type="button" class="btn btn-sm btn-outline-danger" x-show="can('research.delete')" :disabled="busy" @click="remove()">Delete</button>
+                </div>
+                <p class="small muted" x-show="current.topic" x-text="'Asked: ' + current.topic"></p>
+                <div class="research-summary" x-text="current.summary"></div>
+                <h3 class="h6 mt-3">Sources</h3>
+                <ol class="small ps-3">
+                  <template x-for="s in current.sources" :key="s.url">
+                    <li class="mb-1">
+                      <a :href="s.url" target="_blank" rel="noopener noreferrer" x-text="s.title || s.url"></a>
+                      <span class="muted" x-show="s.title" x-text="' — ' + s.url"></span>
+                      <div x-show="s.note" x-text="s.note"></div>
+                    </li>
+                  </template>
+                </ol>
+                <template x-if="images.length">
+                  <div>
+                    <h3 class="h6 mt-3">Pictures</h3>
+                    <div class="d-flex flex-wrap gap-2">
+                      <template x-for="m in images" :key="m.id">
+                        <a href="#/media" :title="m.alt || m.filename"><img :src="m.url" :alt="m.alt || m.filename" style="height:90px;width:auto;border-radius:6px" loading="lazy"></a>
+                      </template>
+                    </div>
+                  </div>
+                </template>
+              </article>
+            </template>
+            <div class="empty" x-show="!current && items.length">Choose an item to read it.</div>
+          </div>
+        </div>

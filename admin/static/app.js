@@ -58,6 +58,16 @@ const esc = (s) =>
     (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c],
   );
 
+/** Chat text with `[label](#/screen)` and `[label](https://…)` turned into links. Escaped first, so nothing else is markup. */
+const linkify = (s) =>
+  esc(s).replace(
+    /\[([^\]\n]{1,120})\]\((#\/[A-Za-z0-9_\-/%.]{1,200}|https:\/\/[^\s)"'<>]{1,500})\)/g,
+    (_, label, href) =>
+      href.startsWith('#')
+        ? `<a href="${href}">${label}</a>`
+        : `<a href="${href}" target="_blank" rel="noopener noreferrer">${label}</a>`,
+  );
+
 // ───────── "Duplicate a theme" dialog, shared by Themes and the Theme editor ─────────
 // It asks for the copy's name AND id. (It used to ask only for the id and always named the copy "<name> (copy)".)
 const newDup = () => ({
@@ -111,6 +121,21 @@ const dupTheme = {
 
 // ───────── helpers shared by every component ─────────
 const H = {
+  /** True when the assistant is on for this person, so a screen can offer "Ask the assistant". */
+  assistantAvailable() {
+    return (
+      this.can('admin.access') && !Alpine.$data(document.body).disabledModules.includes('assistant')
+    );
+  },
+  /**
+   * Pin the assistant chat to one thing (a document path such as pages/about.html, or plugins/<slug>) and open it, so
+   * "this page" in the chat means what is on screen here (D-085).
+   */
+  askAssistant(path) {
+    window.__assistantFocus = path;
+    Alpine.$data(document.body).toggleChat(true);
+    window.dispatchEvent(new CustomEvent('assistant-focus', { detail: path }));
+  },
   can(perm) {
     const p = auth.user?.permissions || [];
     if (p.includes('*') || p.includes(perm)) return true;
@@ -619,6 +644,7 @@ document.addEventListener('alpine:init', () => {
               perm: `content.${t.id}.read`,
             })),
             { id: 'terms', label: 'Categories and tags', perm: 'content.terms.manage' },
+            { id: 'research', label: 'AI Research', module: 'research', perm: 'research.read' },
           ],
         },
         {
@@ -731,6 +757,7 @@ document.addEventListener('alpine:init', () => {
               module: 'assistant',
               perm: 'requirements.read',
             },
+            { id: 'prompts', label: 'Prompts', perm: 'prompts.read' },
             {
               id: 'history',
               label: 'Change history',
@@ -1862,6 +1889,107 @@ document.addEventListener('alpine:init', () => {
       this.prompt = '';
       this.filename = '';
       this.alt = '';
+    },
+  }));
+
+  // ───────── Content → AI Research ─────────
+  Alpine.data('researchPage', () => ({
+    ...H,
+    items: [],
+    current: null,
+    images: [],
+    q: '',
+    kind: 'web',
+    results: [],
+    engine: '',
+    searching: false,
+    searched: false,
+    loaded: false,
+    busy: false,
+    error: '',
+    async init() {
+      if (!(await this.mountFragment('research', 'page'))) return;
+      await this.load();
+    },
+    async load() {
+      try {
+        this.items = (await api('GET', '/admin/research')).items;
+      } catch (e) {
+        this.error = e.message;
+      } finally {
+        this.loaded = true;
+      }
+    },
+    async search() {
+      this.searching = true;
+      this.error = '';
+      this.results = [];
+      try {
+        const r = await api('POST', '/admin/research/search', { query: this.q, kind: this.kind });
+        this.results = r.results;
+        this.engine = r.engine || '';
+        this.searched = true;
+      } catch (e) {
+        this.error = e.message;
+      } finally {
+        this.searching = false;
+      }
+    },
+    async saveNote(r) {
+      try {
+        await api('POST', '/admin/research', {
+          title: r.title || r.url,
+          topic: this.q,
+          summary: r.snippet || r.title || r.url,
+          sources: [{ url: r.url, title: r.title }],
+        });
+        r.saved = true;
+        toast('Saved to AI Research.');
+        await this.load();
+      } catch (e) {
+        this.error = e.message;
+      }
+    },
+    async importImage(r) {
+      try {
+        await api('POST', '/admin/research/import-image', {
+          url: r.url,
+          name: r.title,
+          alt: r.title,
+          credit: [r.creator, r.license, r.pageUrl].filter(Boolean).join(', '),
+        });
+        r.saved = true;
+        toast('Saved to the media library.');
+      } catch (e) {
+        this.error = e.message;
+      }
+    },
+    async open(id) {
+      this.error = '';
+      try {
+        this.current = (await api('GET', `/admin/research/${id}`)).item;
+        const got = await Promise.all(
+          this.current.mediaIds.map((m) => api('GET', `/admin/media/${m}`).catch(() => null)),
+        );
+        this.images = got.filter(Boolean).map((r) => r.item);
+      } catch (e) {
+        this.error = e.message;
+      }
+    },
+    async remove() {
+      if (!confirm('Delete this research? The pictures stay in the media library.')) return;
+      this.busy = true;
+      try {
+        await api('DELETE', `/admin/research/${this.current.id}`);
+        this.current = null;
+        this.images = [];
+        await this.load();
+        toast('Research deleted.');
+      } catch (e) {
+        this.error = e.message;
+      } finally {
+        this.busy = false;
+      }
     },
   }));
 
@@ -4373,6 +4501,8 @@ document.addEventListener('alpine:init', () => {
     read_requirements: 'Read the requirements',
     update_requirements: 'Updated the requirements',
     list_theme_files: 'Listed theme files',
+    plugin_guide: 'Read the plugin rules',
+    list_plugin_files: 'Listed a plugin’s files',
     edit_file: 'Edited a file',
     write_file: 'Wrote a file',
     delete_file: 'Deleted a file',
@@ -4380,10 +4510,32 @@ document.addEventListener('alpine:init', () => {
     generate_image: 'Generated a picture',
     list_libraries: 'Looked at the libraries',
     install_library: 'Installed a library',
+    screenshot_page: 'Looked at a page in a browser',
+    capture_reference: 'Studied a reference site',
+    propose_plan: 'Proposed a plan',
   };
+
+  /** What kind of thing a document path is, and the admin screen where it lives. */
+  const DOC_KINDS = [
+    [/^pages\//, 'Page', '#/pages'],
+    [/^components\//, 'Component', '#/components'],
+    [/^plugins\/([^/]+)\//, 'Plugin', '#/plugins'],
+    [/^themes\//, 'Theme file', '#/theme-editor'],
+    [/^locales\//, 'Translation', '#/locales'],
+    [/^menus\//, 'Menu', '#/menus'],
+    [/^seo\//, 'SEO rule', '#/seo'],
+    [/^services\//, 'Service', '#/services'],
+    [/^requirements\.md$/, 'Requirements', '#/requirements'],
+  ];
+  const docKind = (path) => {
+    const hit = DOC_KINDS.find(([re]) => re.test(path || ''));
+    return hit ? { label: hit[1], href: hit[2] } : null;
+  };
+  const WRITE_TOOLS = new Set(['write_file', 'edit_file', 'delete_file']);
 
   Alpine.data('assistantPanel', () => ({
     ...H,
+    linkify,
     sessions: [],
     session: null,
     items: [],
@@ -4394,6 +4546,8 @@ document.addEventListener('alpine:init', () => {
     usage: { input: 0, output: 0, cacheRead: 0 },
     commits: [],
     warnings: [],
+    plans: [],
+    focus: null,
     attachments: [],
     showChanges: false, // collapsed until there is something new to look at
     models: { default: '', options: [] },
@@ -4411,6 +4565,7 @@ document.addEventListener('alpine:init', () => {
         this.$nextTick(() => document.getElementById('chat-input')?.focus());
       };
       window.addEventListener('assistant-ask', (e) => takePrefill(e.detail));
+      window.addEventListener('assistant-focus', (e) => this.pin(e.detail));
       if (window.__assistantPrefill) takePrefill(window.__assistantPrefill);
       try {
         await this.loadSessions();
@@ -4426,6 +4581,8 @@ document.addEventListener('alpine:init', () => {
         this.error = e.message;
       }
       this.loaded = true;
+      // A screen asked for a pin before this panel was on the page.
+      if (window.__assistantFocus) await this.pin(window.__assistantFocus);
     },
     async loadSessions() {
       this.sessions = (await api('GET', '/admin/assistant/sessions')).sessions;
@@ -4454,8 +4611,27 @@ document.addEventListener('alpine:init', () => {
         }
         for (const b of Array.isArray(m.content) ? m.content : [m.content]) {
           if (b.type === 'text' && b.text?.trim()) out.push({ kind: 'assistant', text: b.text });
-          else if (b.type === 'tool_use') {
-            out.push({ kind: 'tool', text: TOOL_LABELS[b.name] || b.name });
+          else if (b.type === 'tool_use' && b.name === 'propose_plan') {
+            let planId = null;
+            try {
+              planId = JSON.parse(results.get(b.id) || '{}').planId ?? null;
+            } catch {
+              /* the call failed (a malformed plan): the label alone is shown */
+            }
+            out.push(
+              planId
+                ? { kind: 'plan', planId, plan: b.input, text: '', askChanges: false, note: '' }
+                : { kind: 'tool', text: TOOL_LABELS.propose_plan },
+            );
+          } else if (b.type === 'tool_use') {
+            const path = typeof b.input?.path === 'string' ? b.input.path : '';
+            out.push({
+              kind: 'tool',
+              text: TOOL_LABELS[b.name] || b.name,
+              tool: b.name,
+              path,
+              doc: docKind(path)?.label || '',
+            });
             if (b.name === 'generate_image') {
               try {
                 const src = JSON.parse(results.get(b.id) || '{}').src;
@@ -4476,6 +4652,8 @@ document.addEventListener('alpine:init', () => {
       this.items = this.show(data.messages);
       this.usage = data.session.usage;
       this.commits = data.commits || [];
+      this.plans = data.plans || [];
+      this.focus = data.session.focus || null;
       this.showChanges = false;
       this.details = {};
       this.openDiff = null;
@@ -4549,7 +4727,9 @@ document.addEventListener('alpine:init', () => {
         this.session = out.session;
         this.usage = out.session.usage;
         this.warnings = out.warnings || [];
-        this.commits = (await api('GET', `/admin/assistant/sessions/${this.session.id}`)).commits;
+        const fresh = await api('GET', `/admin/assistant/sessions/${this.session.id}`);
+        this.commits = fresh.commits;
+        this.plans = fresh.plans || [];
         this.details = {};
         this.openDiff = null;
         // Straight after the assistant built or changed something, show what it changed.
@@ -4570,6 +4750,100 @@ document.addEventListener('alpine:init', () => {
       } finally {
         this.busy = false;
         this.scroll();
+      }
+    },
+    /** The pages, components, plugins… this chat has changed, newest first: so it is always clear what is being edited. */
+    get working() {
+      const seen = new Map();
+      for (const it of [...this.items].reverse()) {
+        if (it.kind !== 'tool' || !WRITE_TOOLS.has(it.tool) || !it.path || seen.has(it.path))
+          continue;
+        const k = docKind(it.path);
+        if (!k) continue;
+        const plugin = /^plugins\/([^/]+)\//.exec(it.path)?.[1];
+        seen.set(it.path, {
+          path: it.path,
+          label: plugin ? `Plugin · ${plugin}` : k.label,
+          name: plugin ? it.path.replace(/^plugins\/[^/]+\//, '') : it.path.replace(/^[^/]+\//, ''),
+          href: k.href,
+          deleted: it.tool === 'delete_file',
+        });
+        if (seen.size >= 8) break;
+      }
+      return [...seen.values()];
+    },
+    /** What the pinned thing is, for the chip: its kind and a short name. */
+    get focusInfo() {
+      if (!this.focus) return null;
+      const plugin = /^plugins\/([^/]+)$/.exec(this.focus);
+      if (plugin) return { label: 'Plugin', name: plugin[1], href: '#/plugins' };
+      const k = docKind(this.focus);
+      return {
+        label: k?.label || 'Document',
+        name: this.focus.replace(/^[^/]+\//, ''),
+        href: k?.href || '#/',
+      };
+    },
+    /** Pin this chat to a page, component or plugin (starting a chat if there is none yet). */
+    async pin(path) {
+      window.__assistantFocus = null;
+      this.error = '';
+      try {
+        if (!this.session) {
+          const { session } = await api('POST', '/admin/assistant/sessions');
+          this.session = session;
+          await this.loadSessions();
+        }
+        const { session } = await api('PUT', `/admin/assistant/sessions/${this.session.id}`, {
+          focus: path || '',
+        });
+        this.session = session;
+        this.focus = session.focus || null;
+        if (path) this.$nextTick(() => document.getElementById('chat-input')?.focus());
+      } catch (e) {
+        this.error = e.message;
+      }
+    },
+    /** Where a proposed plan stands: pending until the person answers; later ones replace earlier ones. */
+    planStatus(planId) {
+      return this.plans.find((p) => p.id === planId)?.status || 'pending';
+    },
+    planStatusText(planId) {
+      return (
+        {
+          pending: 'Waiting for your decision',
+          approved: 'Approved',
+          changes: 'You asked for changes',
+          rejected: 'Not approved',
+          superseded: 'Replaced by a newer plan',
+        }[this.planStatus(planId)] || ''
+      );
+    },
+    /** Answer a plan with the chat's buttons, then tell the assistant what was decided so it carries on. */
+    async decidePlan(it, decision) {
+      if (this.busy || !this.session) return;
+      const note = (it.note || '').trim();
+      if (decision === 'changes' && !note) {
+        it.askChanges = true;
+        return;
+      }
+      this.error = '';
+      try {
+        const r = await api(
+          'POST',
+          `/admin/assistant/sessions/${this.session.id}/plans/${it.planId}`,
+          { decision, note },
+        );
+        this.plans = (await api('GET', `/admin/assistant/sessions/${this.session.id}`)).plans || [];
+        this.draft =
+          decision === 'approve'
+            ? `Plan approved${r.savedToRequirements ? ' and saved under "Brief and assumptions"' : ''}. ${r.savedToRequirements ? '' : 'Save it under "Brief and assumptions" in the requirements first. '}Build it now, completely, then check the pages with screenshots.`
+            : decision === 'changes'
+              ? `Changes to the plan: ${note}`
+              : `I do not approve this plan.${note ? ` ${note}` : ' Ask me what I want instead.'}`;
+        await this.send();
+      } catch (e) {
+        this.error = e.message;
       }
     },
     /** Show or hide what one entry changed, right in the chat (git's own diff when the server has it). */
@@ -4904,6 +5178,136 @@ document.addEventListener('alpine:init', () => {
       });
       a.click();
       URL.revokeObjectURL(url);
+    },
+  }));
+
+  // ───────── System → Prompts (docs/DECISIONS.md D-082) ─────────
+  Alpine.data('promptsPage', () => ({
+    ...H,
+    items: [],
+    projectType: '',
+    current: null, // the prompt being edited: { key, kind, label, description, body, enabled, builtin, edited, isNew, id }
+    preview: null, // { text, projectType, planning, parts }
+    previewType: '',
+    loaded: false,
+    busy: false,
+    error: '',
+    async init() {
+      if (!(await this.mountFragment('prompts', 'page'))) return;
+      await this.load();
+    },
+    async load() {
+      try {
+        const d = await api('GET', '/admin/prompts');
+        this.items = d.items;
+        this.projectType = d.projectType;
+        this.previewType ||= d.projectType;
+        this.loaded = true;
+      } catch (e) {
+        this.error = e.message;
+      }
+    },
+    get masterItems() {
+      return this.items.filter((i) => i.kind !== 'project_type');
+    },
+    get typeItems() {
+      return this.items.filter((i) => i.kind === 'project_type');
+    },
+    kindLabel(k) {
+      return { master: 'Master', workflow: 'Working method', project_type: 'Project type' }[k] ?? k;
+    },
+    isSelected(i) {
+      return i.kind === 'project_type' && i.key === 'project.' + this.projectType;
+    },
+    edit(i) {
+      this.error = '';
+      this.current = { ...i, isNew: false, id: '' };
+    },
+    startNew() {
+      this.error = '';
+      this.current = {
+        key: '',
+        kind: 'project_type',
+        label: '',
+        description: '',
+        body: '',
+        enabled: true,
+        builtin: false,
+        edited: false,
+        isNew: true,
+        id: '',
+      };
+    },
+    async save() {
+      this.busy = true;
+      this.error = '';
+      const c = this.current;
+      const body = {
+        label: c.label,
+        description: c.description,
+        body: c.body,
+        enabled: c.enabled,
+      };
+      try {
+        if (c.isNew) await api('POST', '/admin/prompts', { ...body, id: c.id });
+        else await api('PUT', '/admin/prompts/' + encodeURIComponent(c.key), body);
+        this.current = null;
+        await this.load();
+        toast('Prompt saved.');
+      } catch (e) {
+        this.error = e.message;
+      } finally {
+        this.busy = false;
+      }
+    },
+    async reset() {
+      if (
+        !window.confirm(
+          'Replace your changes to this prompt with the text that ships with the platform?',
+        )
+      )
+        return;
+      this.busy = true;
+      this.error = '';
+      try {
+        const d = await api(
+          'POST',
+          '/admin/prompts/' + encodeURIComponent(this.current.key) + '/reset',
+        );
+        this.current = { ...d.item, isNew: false, id: '' };
+        await this.load();
+        toast('Prompt reset.');
+      } catch (e) {
+        this.error = e.message;
+      } finally {
+        this.busy = false;
+      }
+    },
+    async remove() {
+      if (!window.confirm('Delete this project type?')) return;
+      this.busy = true;
+      this.error = '';
+      try {
+        await api('DELETE', '/admin/prompts/' + encodeURIComponent(this.current.key));
+        this.current = null;
+        await this.load();
+        toast('Project type deleted.');
+      } catch (e) {
+        this.error = e.message;
+      } finally {
+        this.busy = false;
+      }
+    },
+    async showPreview() {
+      this.error = '';
+      try {
+        this.preview = await api(
+          'GET',
+          '/admin/prompts/compose?projectType=' + encodeURIComponent(this.previewType),
+        );
+      } catch (e) {
+        this.error = e.message;
+      }
     },
   }));
 
@@ -5867,6 +6271,7 @@ document.addEventListener('alpine:init', () => {
     services: 'api endpoint data query sql script service',
     seo: 'search engine title description meta og twitter schema json-ld',
     terms: 'categories tags taxonomy',
+    research: 'research findings sources references links web notes saved ai',
     media: 'images files upload library pictures photos',
     'media-generator': 'ai image generate picture dall-e imagen stability',
     'media-analytics': 'media usage unused files',
@@ -5884,6 +6289,7 @@ document.addEventListener('alpine:init', () => {
     'theme-editor': 'theme files layout template css edit code header footer',
     menus: 'navigation menu header footer links nav',
     requirements: 'requirements documentation readme spec brief project',
+    prompts: 'prompts project type system prompt instructions ai assistant master quality',
     history: 'change history git commit diff revert undo push versions',
     locales: 'translations languages wording text locale i18n',
     redirects: 'redirect 301 302 moved urls',
@@ -5911,6 +6317,7 @@ document.addEventListener('alpine:init', () => {
     login: 'sign in page logo background welcome branding',
     mail: 'email smtp sender outgoing messages server',
     ai: 'anthropic claude api key model assistant',
+    research: 'brave search web research key',
     media_generator: 'image generation openai google stability keys',
     assistant: 'assistant git push remote token limits budget summaries',
     seo: 'search engines twitter facebook verification tags',
@@ -5999,6 +6406,12 @@ document.addEventListener('alpine:init', () => {
     ['Change the sitemap or robots.txt', 'sitemap', 'sitemap robots search engines crawl', ''],
     ['Upload images and files', 'media', 'upload images pictures photos files library', ''],
     [
+      'Read what the assistant researched (with source links)',
+      'research',
+      'research findings sources references links notes web',
+      '',
+    ],
+    [
       'Generate an image with AI',
       'media-generator',
       'ai generate image picture dall-e imagen stability',
@@ -6038,6 +6451,12 @@ document.addEventListener('alpine:init', () => {
       'Review or undo what the assistant changed',
       'history',
       'assistant changes diff revert undo git commit history push',
+      '',
+    ],
+    [
+      'Change what kind of site the AI builds (project type, prompts)',
+      'prompts',
+      'prompts project type system prompt instructions ai assistant master quality',
       '',
     ],
     [

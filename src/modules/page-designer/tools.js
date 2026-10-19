@@ -203,4 +203,14 @@ export const TOOLS = [
       "Render the current draft page exactly as a visitor would see it, including any not-yet-created approved component proposals, laid over the real site/theme. Call this before telling the owner it's ready.",
     input_schema: { type: 'object', properties: {}, additionalProperties: false },
   },
+  {
+    name: 'screenshot_draft',
+    description:
+      'A real browser renders the current draft and you get the picture, plus mechanical checks (sideways scrolling, broken pictures, empty links, outside requests). Use it after preview_draft to judge layout, spacing, hierarchy and contrast the way a visitor would, and fix what you see.',
+    input_schema: {
+      type: 'object',
+      properties: { viewport: { type: 'string', enum: ['desktop', 'mobile'] } },
+      additionalProperties: false,
+    },
+  },
 ];

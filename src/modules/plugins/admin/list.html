@@ -20,6 +20,7 @@
                     </td>
                     <td class="text-end text-nowrap">
                       <button class="btn btn-sm btn-outline-secondary" type="button" x-show="can('plugins.manage')" @click="editWithAi(p)">Edit with AI</button>
+                      <button class="btn btn-sm btn-outline-secondary" type="button" x-show="can('plugins.manage') && assistantAvailable() && p.source === 'disk'" @click="askAssistant('plugins/' + p.slug)" title="Open the assistant, focused on this plugin"><i class="bi bi-stars"></i> Assistant</button>
                       <button class="btn btn-sm btn-outline-secondary" type="button" x-show="can('plugins.manage') && p.hasConfig" :class="{active: configSlug === p.slug}" @click="toggleConfig(p)">Configure</button>
                       <button class="btn btn-sm btn-outline-secondary" type="button" x-show="can('plugins.manage')" @click="toggle(p)" x-text="p.enabled ? 'Disable' : 'Enable'"></button>
                       <a class="btn btn-sm btn-outline-secondary" x-show="can('plugins.read')" :href="exportUrl(p)">Export</a>

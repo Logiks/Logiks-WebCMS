@@ -18,6 +18,7 @@
                     <td class="muted text-nowrap" x-text="ago(p.updatedAt)"></td>
                     <td class="text-end text-nowrap">
                       <a class="btn btn-sm btn-outline-secondary" :href="'#/pages/' + encodeURIComponent(p.name)">Edit</a>
+                      <button class="btn btn-sm btn-outline-secondary" type="button" x-show="assistantAvailable()" @click="askAssistant(p.path)" title="Open the assistant, focused on this page" aria-label="Ask the assistant about this page"><i class="bi bi-stars"></i></button>
                       <button class="btn btn-sm btn-outline-danger" type="button" x-show="can('pages.write')" @click="remove(p)">Delete</button>
                     </td>
                   </tr></template></tbody></table>

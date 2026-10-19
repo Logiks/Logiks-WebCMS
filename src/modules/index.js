@@ -23,7 +23,10 @@ import plugins from './plugins/module.js';
 import pluginEditor from './plugin-editor/module.js';
 import mediaGenerator from './media-generator/module.js';
 import pageDesigner from './page-designer/module.js';
+import research from './research/module.js';
 import assistant from './assistant/module.js';
+import prompts from './prompts/module.js';
+import visual from './visual/module.js';
 import api from './api/module.js';
 
 /**
@@ -55,6 +58,9 @@ export const builtinModules = [
   plugins,
   pluginEditor,
   mediaGenerator,
+  prompts,
+  visual,
+  research,
   pageDesigner,
   assistant,
   api,

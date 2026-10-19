@@ -1,4 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk';
+import { problemsOf } from '../visual/service.js';
 import { now } from '../../core/db/index.js';
 import { HttpError, notFound, forbidden } from '../../core/http/errors.js';
 import { siteGlobals } from '../site/public.js';
@@ -121,7 +122,7 @@ How a page is built here:
 - An image for a hero/banner/etc. is just a plain string prop (or a raw <img src="...">) holding the URL generate_raster_image or save_svg_image hands you — there's no special "image" prop type, a resolved media URL is just a string.
 - If NO existing component fits a section, propose_component stages a new one. The owner reviews it as a card in the chat UI and must click Approve before create_component can actually build it — if they reject it, adapt (reuse something close, or write that section as plain HTML in the page body instead of insisting on a new component).
 - If the page genuinely needs structured/repeatable data that no existing content type or component already supplies, propose_table_and_service stages a new table + a read-only query-builder Service over it, same owner-approval gate as a new component. Don't reach for this for anything a component's own props could hold.
-- Call site_context and list_components early, before proposing anything new. Call preview_draft before telling the owner it's ready, and look at what comes back. write_page_draft only stages the page — it is never live until the owner clicks "Save page" themselves, so build it iteratively and don't ask permission to try a draft.
+- Call site_context and list_components early, before proposing anything new. Call preview_draft before telling the owner it's ready, and look at what comes back; then call screenshot_draft (desktop, and mobile for anything with columns) to see the page as a visitor would, fix what looks wrong (spacing, hierarchy, cut-off text, empty areas) and every mechanical problem it lists, and look again. write_page_draft only stages the page — it is never live until the owner clicks "Save page" themselves, so build it iteratively and don't ask permission to try a draft.
 - When you're done, give a short, plain-language summary of the page you built, any new components/tables the owner still needs to approve, and remind them nothing is live until they click Save.${existing}`;
   }
 
@@ -189,7 +190,7 @@ How a page is built here:
   /** Tool implementations. `actor` gates writes the same way the equivalent HTTP route would. `getMessages`
    * returns the live, growing message array for this turn so preview_draft can see a write_page_draft the model
    * already made earlier in the SAME turn. */
-  function toolsFor(session, actor, getMessages) {
+  function toolsFor(session, actor, getMessages, shots = { n: 0 }) {
     const requirePerm = (perm) => {
       if (!actor?.can(perm))
         throw new Error(
@@ -363,6 +364,31 @@ How a page is built here:
         if (!draft) throw new Error('Call write_page_draft first — there is no draft yet.');
         return renderDraft(draft, await pendingComponentOverlay(session.id));
       },
+
+      /** @param {{ viewport?: "desktop" | "mobile" }} [opts] */
+      async screenshot_draft({ viewport } = {}) {
+        if (!ctx.visual) throw new Error('Screenshots are switched off (Visual check module).');
+        if ((shots.n += 1) > 6)
+          throw new Error(
+            'That is 6 screenshots this turn. Fix what you have seen, then summarise.',
+          );
+        const draft = findLatestDraft(getMessages());
+        if (!draft) throw new Error('Call write_page_draft first — there is no draft yet.');
+        const out = await renderDraft(draft, await pendingComponentOverlay(session.id));
+        if (out.redirect)
+          throw new Error(`The draft redirects to ${out.redirect}, so there is nothing to show.`);
+        const c = await ctx.visual.capture({ html: out.html, viewport }).catch((e) => {
+          throw new Error(e.message);
+        });
+        const problems = problemsOf(c);
+        return {
+          __images: [{ media_type: 'image/jpeg', data: c.jpeg.toString('base64') }],
+          viewport: c.viewport,
+          widthPx: c.width,
+          shownHeightPx: c.shownHeight,
+          mechanicalProblems: problems.length ? problems : 'none found',
+        };
+      },
     };
   }
 
@@ -506,7 +532,15 @@ How a page is built here:
       messages.push(newRows[0]);
 
       const client = injectedClient ?? new Anthropic({ apiKey: anthropic_api_key });
-      const tools = toolsFor(session, actor, () => messages);
+      const tools = toolsFor(session, actor, () => messages, { n: 0 });
+      // The site's project type, quality standard and working method (D-082); the Designer works without them if unreadable.
+      const guidance = await ctx.prompts
+        ?.compose()
+        .then((c) => c.text)
+        .catch(() => '');
+      const system = guidance
+        ? `${buildSystemPrompt(session)}\n\n${guidance}`
+        : buildSystemPrompt(session);
 
       for (let i = 0; i < MAX_ITERATIONS; i++) {
         const response = await client.messages.create({
@@ -514,7 +548,7 @@ How a page is built here:
           max_tokens: 16000,
           thinking: { type: 'adaptive' },
           output_config: { effort: 'high' },
-          system: buildSystemPrompt(session),
+          system,
           tools: TOOLS,
           messages,
         });
@@ -524,27 +558,47 @@ How a page is built here:
 
         const toolUses = response.content.filter((b) => b.type === 'tool_use');
         const results = [];
+        const stored = [];
         for (const call of toolUses) {
           try {
             const fn = tools[call.name];
             if (!fn) throw new Error(`Unknown tool "${call.name}".`);
-            const out = await fn(call.input ?? {});
+            const { __images: pictures, ...out } = (await fn(call.input ?? {})) ?? {};
+            const text = JSON.stringify(out);
             results.push({
               type: 'tool_result',
               tool_use_id: call.id,
-              content: JSON.stringify(out),
+              content: pictures?.length
+                ? [
+                    ...pictures.map((p) => ({
+                      type: 'image',
+                      source: { type: 'base64', media_type: p.media_type, data: p.data },
+                    })),
+                    { type: 'text', text },
+                  ]
+                : text,
+            });
+            // A screenshot is only useful on the turn it was taken; the stored chat keeps a note instead.
+            stored.push({
+              type: 'tool_result',
+              tool_use_id: call.id,
+              content: pictures?.length
+                ? `${text}\n[a screenshot was shown; it is not kept]`
+                : text,
             });
           } catch (e) {
-            results.push({
+            const err = {
               type: 'tool_result',
               tool_use_id: call.id,
               is_error: true,
               content: e.message,
-            });
+            };
+            results.push(err);
+            stored.push(err);
           }
         }
         messages.push({ role: 'user', content: results });
-        newRows.push({ role: 'user', content: results });
+        newRows.push({ role: 'user', content: stored });
       }
 
       const t = now();

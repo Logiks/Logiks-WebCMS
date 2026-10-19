@@ -123,6 +123,9 @@ Tools available: list_files, read_file, write_file, delete_file, validate_plugin
 When you're done, give a short, plain-language summary of what you built or changed. The plugin is NOT live yet: a human reviews the files and clicks Enable in Plugin Manager themselves — you cannot do that step.`;
 
 /** @param {{slug: string|null}} session */
+/** The plugin conventions alone (without this chat's own tool list), for other AI builders that write plugin files. */
+export const PLUGIN_CONVENTIONS = SYSTEM_PROMPT.split('\n\nTools available:')[0];
+
 function buildSystemPrompt(session) {
   return session.slug
     ? `${SYSTEM_PROMPT}\n\nThis session is scoped to the existing plugin "${session.slug}". Use list_files and read_file to see what it already has before changing anything.`
@@ -350,7 +353,88 @@ export function createPluginEditor(ctx, { pluginsDir, client: injectedClient }) 
     };
   }
 
+  /**
+   * Plugin files by slug, for the assistant (docs/DECISIONS.md D-084). The same validated write path the Plugin
+   * Editor uses, with no chat session. Only plugins whose files live on this server's disk can be edited: a plugin
+   * installed from a zip is rebuilt from the database and would lose a hand edit.
+   */
+  const files = {
+    async editable(slug) {
+      const row = await db('plugins').where({ slug }).first();
+      if (row?.source === 'db')
+        throw new HttpError(
+          422,
+          'invalid_input',
+          `"${slug}" was installed from a zip, so its files are kept in the database. Install a new version instead of editing it here.`,
+        );
+    },
+    exists: (slug) => exists(path.join(pluginsDir, slug)),
+    /** Slugs of the plugin folders on this server's disk. */
+    async slugs() {
+      try {
+        return (await fs.readdir(pluginsDir, { withFileTypes: true }))
+          .filter((e) => e.isDirectory())
+          .map((e) => e.name)
+          .sort();
+      } catch {
+        return [];
+      }
+    },
+    async list(slug) {
+      return [...(await loadFileMap(path.join(pluginsDir, slug))).keys()].sort();
+    },
+    async read(slug, p) {
+      try {
+        return await fs.readFile(safePath(path.join(pluginsDir, slug), p), 'utf8');
+      } catch (e) {
+        if (e instanceof HttpError) throw e;
+        return null;
+      }
+    },
+    async write(slug, p, content) {
+      await files.editable(slug);
+      const there = await files.exists(slug);
+      if (!there) {
+        if (p !== 'plugin.json')
+          throw new HttpError(
+            422,
+            'invalid_input',
+            `There is no plugin "${slug}" yet. Create it by writing plugins/${slug}/plugin.json first.`,
+          );
+        let named;
+        try {
+          named = JSON.parse(content)?.slug;
+        } catch {
+          /* writeFileReal explains what is wrong with the JSON */
+        }
+        if (named !== undefined && named !== slug)
+          throw new HttpError(
+            422,
+            'invalid_input',
+            `plugin.json says the slug is "${named}" but the path says "${slug}". Use plugins/${named}/plugin.json, or change the slug in the file.`,
+          );
+      }
+      return writeFileReal({ slug: there ? slug : null }, p, content);
+    },
+    async remove(slug, p) {
+      await files.editable(slug);
+      if (!(await files.exists(slug))) return; // already gone (undoing a plugin removes its folder in one go)
+      if (p !== 'plugin.json') return deleteFileReal({ slug }, p);
+      // Deleting plugin.json removes the whole plugin, which is only safe while it has never been switched on.
+      const row = await db('plugins').where({ slug }).first();
+      if (row?.enabled)
+        throw new HttpError(
+          409,
+          'conflict',
+          `"${slug}" is switched on. Disable it in Plugin Manager before removing it.`,
+        );
+      await fs.rm(path.join(pluginsDir, slug), { recursive: true, force: true });
+      if (row) await db('plugins').where({ slug }).delete();
+    },
+  };
+
   const svc = {
+    files,
     list: async () =>
       (await db('plugin_editor_sessions').select('*').orderBy('updated_at', 'desc')).map(fromRow),
 

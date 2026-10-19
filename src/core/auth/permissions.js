@@ -56,6 +56,17 @@ export function defineCorePermissions(permissions) {
     'media.upload': 'Upload and describe files',
     'media.delete': 'Delete files',
   });
+  permissions.define('AI Research', {
+    'research.read': 'View saved AI research',
+    // Lets the assistant (acting as this person) read other sites and save findings; downloading pictures also needs media.upload.
+    'research.write': 'Research on the web and save the findings',
+    'research.delete': 'Delete saved AI research',
+  });
+  permissions.define('Prompts', {
+    'prompts.read': 'View the AI prompts and project types',
+    // Prompts steer an AI that can edit the whole site as the person using it, so treat this like a Webmaster permission.
+    'prompts.write': 'Edit the AI prompts and project types',
+  });
   permissions.define('Webmaster', {
     // Raw HTML and CSS reach every visitor, so treat these like administrator-level permissions.
     'pages.read': 'View site pages (public/pages)',

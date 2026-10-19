@@ -6,7 +6,7 @@ export default {
   label: 'AI Page Designer',
   optional: true,
   description: 'A chat session that plans and builds a complete page.',
-  requires: ['site', 'services', 'media-generator', 'plugin-editor'],
+  requires: ['site', 'prompts', 'services', 'media-generator', 'plugin-editor'],
   provides: { services: ['pageDesigner'], permissions: ['pages.write'] },
   create(ctx) {
     ctx.pageDesigner = createPageDesigner(ctx);

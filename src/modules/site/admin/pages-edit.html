@@ -1,6 +1,9 @@
               <div class="page-head d-flex justify-content-between align-items-end flex-wrap gap-2">
                 <div><h1 x-text="isNew ? 'New page' : (front.title || pageName)"></h1><p x-show="!isNew" class="mono" x-text="'/' + pageName"></p></div>
-                <a href="#/pages" class="btn btn-outline-secondary">Back to pages</a>
+                <div class="d-flex gap-2 flex-wrap">
+                  <button type="button" class="btn btn-outline-secondary" x-show="!isNew && assistantAvailable()" @click="askAssistant(path)" title="Open the assistant, focused on this page"><i class="bi bi-stars"></i> Ask the assistant</button>
+                  <a href="#/pages" class="btn btn-outline-secondary">Back to pages</a>
+                </div>
               </div>
               <div class="alert alert-danger" role="alert" x-show="error" x-text="error"></div>
               <div class="row g-3" x-show="loaded">

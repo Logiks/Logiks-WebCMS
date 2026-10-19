@@ -1,6 +1,9 @@
               <div class="page-head d-flex justify-content-between align-items-end flex-wrap gap-2">
                 <div><h1 x-text="isNew ? 'New component' : (metaTitle || name)"></h1><p x-show="!isNew" class="mono" x-text="name"></p></div>
-                <a href="#/components" class="btn btn-outline-secondary">Back to components</a>
+                <div class="d-flex gap-2 flex-wrap">
+                  <button type="button" class="btn btn-outline-secondary" x-show="!isNew && assistantAvailable()" @click="askAssistant('components/' + name + '.html')" title="Open the assistant, focused on this component"><i class="bi bi-stars"></i> Ask the assistant</button>
+                  <a href="#/components" class="btn btn-outline-secondary">Back to components</a>
+                </div>
               </div>
               <div class="alert alert-danger" role="alert" x-show="error" x-text="error"></div>
               <div class="row g-3" x-show="loaded">

@@ -8,6 +8,7 @@ import { HttpError } from '../../core/http/errors.js';
  *   pages/…  components/…  locales/<code>.json      the site tree (siteFiles)
  *   themes/<id>/<file>                              a text file of an installed (editable) theme
  *   menus/<name>.json    seo/<pattern>.json    services/<slug>.json      one JSON document each
+ *   plugins/<slug>/<file>                           a file of a plugin kept on this server's disk (D-084)
  *   requirements.md                                 the requirements document
  *
  * Every write goes through the module that owns the data, so its own validation, cache invalidation and audit trail
@@ -39,6 +40,11 @@ const bad = (m) => new HttpError(422, 'invalid_input', m);
 /** @param {any} ctx */
 export function createDocStore(ctx, requirements) {
   const { siteFiles, themes, site, seo, services } = ctx;
+  const plugins = () => {
+    if (!ctx.pluginEditor)
+      throw bad('Plugins cannot be edited here: the Plugin Editor module is switched off.');
+    return ctx.pluginEditor.files;
+  };
 
   /** @returns {{kind: string, read: string, write: string, id?: string, rest?: string}} */
   function parse(key) {
@@ -60,8 +66,17 @@ export function createDocStore(ctx, requirements) {
     if (m) return { kind: 'seo', read: 'seo.read', write: 'seo.write', id: dec(m[1]) };
     m = /^services\/([a-z0-9][a-z0-9_-]*)\.json$/.exec(k);
     if (m) return { kind: 'service', read: 'services.read', write: 'services.write', id: m[1] };
+    m = /^plugins\/([a-z0-9][a-z0-9-]{1,61})\/(.+)$/.exec(k);
+    if (m)
+      return {
+        kind: 'plugin',
+        read: 'plugins.manage',
+        write: 'plugins.manage',
+        id: m[1],
+        rest: m[2],
+      };
     throw bad(
-      'Paths are pages/…, components/…, locales/<code>.json, themes/<id>/<file>, menus/<name>.json, seo/<pattern>.json, services/<slug>.json or requirements.md.',
+      'Paths are pages/…, components/…, locales/<code>.json, themes/<id>/<file>, plugins/<slug>/<file>, menus/<name>.json, seo/<pattern>.json, services/<slug>.json or requirements.md.',
     );
   }
 
@@ -107,6 +122,8 @@ export function createDocStore(ctx, requirements) {
             return null;
           }
         }
+        case 'plugin':
+          return plugins().read(p.id, p.rest);
         case 'menu': {
           const m = (await site.menus.list()).find((x) => x.name === p.id);
           return m ? json({ title: m.title, items: m.items }) : null;
@@ -153,6 +170,12 @@ export function createDocStore(ctx, requirements) {
         case 'theme':
           if (text == null) await themes.deleteFile(p.id, p.rest, actor);
           else await themes.saveFile(p.id, p.rest, text, actor);
+          return;
+        case 'plugin':
+          if (text == null) await plugins().remove(p.id, p.rest);
+          else await plugins().write(p.id, p.rest, text);
+          // Let Plugin Manager see a new or changed folder without a restart. Switching it on stays a person's click.
+          await ctx.plugins?.rescanDisk().catch(() => {});
           return;
         case 'menu':
           if (text == null) await site.menus.remove(p.id, actor);
@@ -203,6 +226,22 @@ export function createDocStore(ctx, requirements) {
           if (!f.text) continue;
           const c = await themes.file(t.id, f.path);
           all.set(`themes/${t.id}/${f.path}`, c.content);
+        }
+      }
+      if (ctx.pluginEditor) {
+        const pe = ctx.pluginEditor.files;
+        for (const slug of await pe.slugs()) {
+          if (
+            await pe.editable(slug).then(
+              () => false,
+              () => true,
+            )
+          )
+            continue; // zip-installed: not ours to version
+          for (const f of await pe.list(slug)) {
+            const text = await pe.read(slug, f);
+            if (text != null) all.set(`plugins/${slug}/${f}`, text);
+          }
         }
       }
       for (const m of await site.menus.list())

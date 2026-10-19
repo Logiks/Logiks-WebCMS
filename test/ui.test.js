@@ -115,7 +115,7 @@ test('signing in shows the shell with navigation for an administrator', async ()
 
   click(button('Content'));
   await until(() => subLinks().length);
-  assert.deepEqual(subLinks(), ['Pages', 'Posts', 'Categories and tags']);
+  assert.deepEqual(subLinks(), ['Pages', 'Posts', 'Categories and tags', 'AI Research']);
   click(button('Content'));
   await until(() => subLinks().length === 0);
 

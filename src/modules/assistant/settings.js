@@ -35,6 +35,16 @@ export function defineAssistantSettings(registry) {
         dynamicOptions: true,
         help: 'Used only to summarise older parts of a long chat so they cost a few lines instead of being forgotten. Your main model does the real work.',
       },
+      effort: {
+        type: 'select',
+        label: 'Thinking effort',
+        default: 'high',
+        options: [
+          { value: 'medium', label: 'Medium (faster, cheaper)' },
+          { value: 'high', label: 'High (better plans and finished work, recommended)' },
+        ],
+        help: 'How much the assistant thinks before and while it works. High costs more tokens and gives noticeably more complete results on big requests.',
+      },
       chat_token_limit: {
         type: 'number',
         label: 'Token limit per chat',

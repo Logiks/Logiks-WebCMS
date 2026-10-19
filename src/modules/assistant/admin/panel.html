@@ -11,16 +11,72 @@
   <button type="button" class="btn btn-sm btn-outline-secondary" x-show="session" :disabled="busy" @click="rename()" title="Rename this chat" aria-label="Rename this chat"><i class="bi bi-pencil"></i></button>
   <button type="button" class="btn btn-sm btn-outline-danger" x-show="session" :disabled="busy" @click="remove()" title="Delete this chat" aria-label="Delete this chat"><i class="bi bi-trash"></i></button>
 </div>
+<div class="ac-focus" x-show="focusInfo">
+  <span class="ac-working-title">Focused on</span>
+  <a class="ac-chip ac-chip-focus" :href="focusInfo ? focusInfo.href : '#'" title="Open the screen for it">
+    <span class="ac-chip-kind" x-text="focusInfo ? focusInfo.label : ''"></span> <span class="ac-chip-name" x-text="focusInfo ? focusInfo.name : ''"></span>
+  </a>
+  <button type="button" class="btn btn-sm btn-link p-0 ms-1" :disabled="busy" @click="pin('')" aria-label="Stop focusing on this" title="Stop focusing on this"><i class="bi bi-x-lg"></i></button>
+</div>
+<div class="ac-working" x-show="working.length" aria-label="What this chat has changed">
+  <span class="ac-working-title">Working on</span>
+  <template x-for="w in working" :key="w.path">
+    <a class="ac-chip" :class="{deleted: w.deleted}" :href="w.href" :title="w.path + ' — open the screen for it'">
+      <span class="ac-chip-kind" x-text="w.label"></span> <span class="ac-chip-name" x-text="w.name"></span>
+    </a>
+  </template>
+</div>
 <div class="chat-log" x-ref="log" role="log" aria-live="polite">
   <div class="empty" x-show="loaded && !items.length">
     Describe what you want for the site, or ask for a change. Decisions are written into <a href="#/requirements">System → Requirements</a>; every change is recorded in <a href="#/history">System → Change history</a> and can be reverted.
   </div>
   <template x-for="(it, i) in items" :key="i">
     <div class="ac-msg" :class="'ac-' + it.kind">
-      <template x-if="it.kind === 'tool'"><span class="ac-tool"><i class="bi bi-check2-circle"></i><span x-text="it.text"></span></span></template>
-      <template x-if="it.kind !== 'tool'">
+      <template x-if="it.kind === 'tool'"><span class="ac-tool"><i class="bi bi-check2-circle"></i><span x-text="it.text"></span><span class="ac-tool-doc" x-show="it.path"><span class="ac-tool-kind" x-text="it.doc"></span> <span class="mono" x-text="it.path"></span></span></span></template>
+      <template x-if="it.kind === 'plan'">
+        <div class="ac-plan" role="group" :aria-label="'Plan: ' + it.plan.title">
+          <div class="ac-plan-head">
+            <strong x-text="it.plan.title"></strong>
+            <span class="badge" :class="planStatus(it.planId) === 'approved' ? 'text-bg-success' : planStatus(it.planId) === 'pending' ? 'text-bg-warning' : 'text-bg-secondary'" x-text="planStatusText(it.planId)"></span>
+          </div>
+          <p class="small mb-2" x-show="it.plan.summary" x-text="it.plan.summary"></p>
+          <details open>
+            <summary class="small fw-semibold">Assumptions (<span x-text="(it.plan.assumptions || []).length"></span>)</summary>
+            <ul class="small mb-2"><template x-for="a in (it.plan.assumptions || [])" :key="a"><li x-text="a"></li></template></ul>
+          </details>
+          <details open x-show="(it.plan.pages || []).length">
+            <summary class="small fw-semibold">Pages (<span x-text="(it.plan.pages || []).length"></span>)</summary>
+            <ul class="small mb-2"><template x-for="p in (it.plan.pages || [])" :key="p.path"><li><span class="mono" x-text="p.path"></span> <span x-text="p.purpose ? '— ' + p.purpose : ''"></span></li></template></ul>
+          </details>
+          <details x-show="(it.plan.components || []).length">
+            <summary class="small fw-semibold">Components</summary>
+            <ul class="small mb-2"><template x-for="c in (it.plan.components || [])" :key="c"><li x-text="c"></li></template></ul>
+          </details>
+          <details x-show="(it.plan.content || []).length">
+            <summary class="small fw-semibold">Content and data</summary>
+            <ul class="small mb-2"><template x-for="c in (it.plan.content || [])" :key="c"><li x-text="c"></li></template></ul>
+          </details>
+          <p class="small mb-2" x-show="it.plan.design"><strong>Design:</strong> <span x-text="it.plan.design"></span></p>
+          <details x-show="(it.plan.sample_content || []).length">
+            <summary class="small fw-semibold">Sample content you will need to replace</summary>
+            <ul class="small mb-2"><template x-for="c in (it.plan.sample_content || [])" :key="c"><li x-text="c"></li></template></ul>
+          </details>
+          <div x-show="planStatus(it.planId) === 'pending'">
+            <div class="mb-2" x-show="it.askChanges">
+              <label class="visually-hidden" :for="'plan-note-' + i">What should change</label>
+              <textarea :id="'plan-note-' + i" class="form-control form-control-sm" rows="2" placeholder="What should change in this plan?" x-model="it.note"></textarea>
+            </div>
+            <div class="d-flex gap-2 flex-wrap">
+              <button type="button" class="btn btn-sm btn-primary" :disabled="busy" @click="decidePlan(it, 'approve')">Approve and build</button>
+              <button type="button" class="btn btn-sm btn-outline-secondary" :disabled="busy" @click="decidePlan(it, 'changes')" x-text="it.askChanges ? 'Send changes' : 'Request changes'"></button>
+              <button type="button" class="btn btn-sm btn-outline-danger" :disabled="busy" @click="decidePlan(it, 'reject')">Reject</button>
+            </div>
+          </div>
+        </div>
+      </template>
+      <template x-if="it.kind !== 'tool' && it.kind !== 'plan'">
         <div class="ac-bubble">
-          <div class="ac-text" x-text="it.text" x-show="it.text"></div>
+          <div class="ac-text" x-html="linkify(it.text)" x-show="it.text"></div>
           <template x-for="u in (it.images || [])" :key="u"><img class="ac-img" :src="u" alt="Picture in the chat" loading="lazy"></template>
         </div>
       </template>

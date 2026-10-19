@@ -37,9 +37,12 @@ import { defineSitemapSettings } from './modules/sitemap/service.js';
 import { createAiModels } from './modules/ai-models/service.js';
 import { defineAiSettings } from './modules/plugin-editor/service.js';
 import { defineAssistantSettings } from './modules/assistant/settings.js';
+import { definePromptSettings } from './modules/prompts/settings.js';
+import { defineVisualSettings } from './modules/visual/settings.js';
 import { createModuleRegistry } from './core/modules/registry.js';
 import { builtinModules } from './modules/index.js';
 import { createAnalyticsService } from './modules/analytics/service.js';
+import { defineResearchSettings } from './modules/research/service.js';
 import { defineMediaGeneratorSettings } from './modules/media-generator/service.js';
 
 const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
@@ -78,7 +81,10 @@ export async function createContext({ env, bus: busOverride, log: logOverride, a
   defineLibrariesSettings(registry);
   defineAiSettings(registry);
   defineAssistantSettings(registry);
+  definePromptSettings(registry);
+  defineVisualSettings(registry);
   defineMediaGeneratorSettings(registry);
+  defineResearchSettings(registry);
   const permissions = createPermissions();
   defineCorePermissions(permissions);
 
@@ -348,6 +354,7 @@ export async function createContext({ env, bus: busOverride, log: logOverride, a
       updates.stop();
       themes.stop();
       libraries.stop();
+      await ctx.visual?.close();
       ctx.plugins.stop();
       await siteFiles.stop();
       await nodes.stop();
