@@ -26,7 +26,7 @@ function directives(v, { https, nonce }) {
     scriptSrc: ["'self'", "'unsafe-eval'", ...(nonce ? [`'nonce-${nonce}'`] : [])],
     styleSrc: ["'self'", "'unsafe-inline'"],
     imgSrc: ["'self'", 'data:', ...v.csp_img_sources],
-    fontSrc: ["'self'"],
+    fontSrc: ["'self'", 'data:'],
     connectSrc: ["'self'", ...v.csp_connect_sources],
     objectSrc: ["'none'"],
     baseUri: ["'self'"],

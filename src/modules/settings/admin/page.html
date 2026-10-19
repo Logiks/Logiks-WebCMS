@@ -13,7 +13,7 @@
               <div class="panel-h"><span x-text="current?.title"></span>
                 <span class="muted small fw-normal" x-text="current?.description"></span></div>
               <template x-for="f in (current?.fields || [])" :key="f.key">
-                <div class="frow" :class="{changed: isDirty(f)}">
+                <div class="frow" :id="'f-' + current.namespace + '-' + f.key" :class="{changed: isDirty(f)}">
                   <div>
                     <label class="title" :for="'f_' + f.key" x-text="f.label"></label>
                     <span class="tag" x-show="st(f).locked">Set by environment</span>

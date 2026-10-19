@@ -9,12 +9,14 @@
 }
 </script>
 <style>
-  :host { display: block; }
-  .box { max-width: 68rem; margin: 3rem auto; padding: 2rem 1.25rem; border: 1px solid var(--line, #dde3e1); border-radius: 12px; text-align: center; }
-  h2 { margin: 0 0 1rem; }
-  a { display: inline-block; background: var(--accent, #2b59c3); color: #fff; padding: 0.65rem 1.2rem; border-radius: 8px; text-decoration: none; font-weight: 600; }
+  .cta-box { background: var(--accent, #2b59c3); border-radius: 1rem; color: #fff; }
+  .cta-box h2 { font-weight: 700; }
+  .btn-light-accent { background: #fff; color: var(--accent, #2b59c3); font-weight: 600; }
+  .btn-light-accent:hover { background: #f5f7f6; color: var(--accent, #2b59c3); }
 </style>
-<div class="box">
-  <h2>{{ heading | default: "Ready to talk?" }}</h2>
-  <a href="{{ button_url | default: '/contact' }}">{{ button_label | default: "Contact us" }}</a>
-</div>
+<section class="container my-5">
+  <div class="cta-box p-5 text-center">
+    <h2 class="mb-3">{{ heading | default: "Ready to talk?" }}</h2>
+    <a class="btn btn-light-accent btn-lg px-4" href="{{ button_url | default: '/contact' }}">{{ button_label | default: "Contact us" }}</a>
+  </div>
+</section>

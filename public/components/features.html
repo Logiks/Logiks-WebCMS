@@ -1,0 +1,58 @@
+<script type="application/json" data-cms="meta">
+{
+  "title": "Feature grid",
+  "description": "Three/four column feature grid with icons, used on the home page.",
+  "props": {
+    "heading": { "type": "string", "label": "Heading", "default": "What we do" }
+  }
+}
+</script>
+<style>
+  .feature-icon { width: 3rem; height: 3rem; border-radius: 0.75rem; background: rgba(43, 89, 195, 0.1); color: var(--accent, #2b59c3); display: flex; align-items: center; justify-content: center; }
+  .feature-icon svg { width: 1.5rem; height: 1.5rem; }
+  .feature-card h3 { font-size: 1.1rem; font-weight: 700; }
+  .feature-card p { color: var(--muted, #5d7076); }
+</style>
+<section class="py-5">
+  <div class="container py-4">
+    <h2 class="text-center mb-5 fw-bold">{{ heading | default: "What we do" }}</h2>
+    <div class="row g-4">
+      <div class="col-md-6 col-lg-3">
+        <div class="feature-card h-100">
+          <div class="feature-icon mb-3" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 8 4 12 9 16"/><polyline points="15 8 20 12 15 16"/></svg>
+          </div>
+          <h3>{{ 'features.custom.title' | t: 'Custom Software' }}</h3>
+          <p>{{ 'features.custom.text' | t: 'Bespoke applications and platforms built around how your business actually works.' }}</p>
+        </div>
+      </div>
+      <div class="col-md-6 col-lg-3">
+        <div class="feature-card h-100">
+          <div class="feature-icon mb-3" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 18a4 4 0 0 1-1-7.87A5.5 5.5 0 0 1 16.5 9h.25a3.75 3.75 0 0 1 .25 7.5"/><path d="M12 12v6m0 0 2.5-2.5M12 18l-2.5-2.5" stroke-dasharray="0"/></svg>
+          </div>
+          <h3>{{ 'features.cloud.title' | t: 'Cloud & DevOps' }}</h3>
+          <p>{{ 'features.cloud.text' | t: 'Infrastructure, CI/CD and automation so your teams ship faster and sleep better.' }}</p>
+        </div>
+      </div>
+      <div class="col-md-6 col-lg-3">
+        <div class="feature-card h-100">
+          <div class="feature-icon mb-3" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="11" width="16" height="9" rx="1.5"/><path d="M8 11V7a4 4 0 0 1 7.6-1.8"/></svg>
+          </div>
+          <h3>{{ 'features.open.title' | t: 'Open Source' }}</h3>
+          <p>{{ 'features.open.text' | t: 'We build on and contribute back to open-source tools, no vendor lock-in.' }}</p>
+        </div>
+      </div>
+      <div class="col-md-6 col-lg-3">
+        <div class="feature-card h-100">
+          <div class="feature-icon mb-3" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3.5"/><path d="M12 3v5.5M12 15.5V21M3 12h5.5M15.5 12H21"/></svg>
+          </div>
+          <h3>{{ 'features.support.title' | t: 'Ongoing Support' }}</h3>
+          <p>{{ 'features.support.text' | t: 'Long-term maintenance and support plans that keep systems healthy.' }}</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>

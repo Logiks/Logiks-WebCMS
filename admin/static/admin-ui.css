@@ -1,0 +1,853 @@
+/* Admin design layer (D-078). Loaded after admin.css: the same class names, a calmer and more finished look.
+   It only restyles — no layout contracts are changed here, so screens keep working if this file is removed. */
+
+:root {
+  --paper: #f4f6f9;
+  --surface: #ffffff;
+  --line: #e4e9ef;
+  --line-strong: #d3dae3;
+  --text: #17232c;
+  --muted: #627280;
+  --ink: #10303a;
+  --ink-2: #1c4753;
+  --cobalt: #2c5fd0;
+  --cobalt-soft: #e9effc;
+  --moss: #2f7d57;
+  --brick: #b3392f;
+  --radius: 12px;
+  --radius-sm: 8px;
+  --shadow-1: 0 1px 2px rgba(16, 38, 58, 0.06), 0 0 0 1px rgba(16, 38, 58, 0.02);
+  --shadow-2: 0 10px 30px rgba(16, 38, 58, 0.14), 0 2px 6px rgba(16, 38, 58, 0.06);
+  --sidebar-w: 248px;
+  --bs-body-bg: var(--paper);
+  --bs-border-radius: var(--radius-sm);
+}
+html {
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+body {
+  background: var(--paper);
+  font-size: 0.93rem;
+  letter-spacing: -0.003em;
+}
+h1,
+h2,
+h3,
+h4 {
+  letter-spacing: -0.015em;
+}
+a {
+  text-underline-offset: 2px;
+}
+::selection {
+  background: rgba(44, 95, 208, 0.18);
+}
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #c3ccd6 transparent;
+}
+
+/* ── sidebar ── */
+.sidebar {
+  background: linear-gradient(180deg, #123741 0%, #0e2d36 100%);
+  padding: 1.1rem 0.8rem 0.9rem;
+  border-right: 1px solid rgba(255, 255, 255, 0.04);
+}
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  padding: 0.15rem 0.5rem 1.15rem;
+  font-size: 1.02rem;
+  line-height: 1.2;
+}
+.brand::before {
+  content: '';
+  flex: 0 0 auto;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 9px;
+  background: linear-gradient(135deg, #8fd0c9, #4f8de8);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.25);
+}
+.brand-text {
+  min-width: 0;
+}
+.brand-text > span {
+  display: block;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 9.5rem;
+}
+.brand small {
+  margin-top: 0.1rem;
+  letter-spacing: 0.02em;
+}
+.sidebar nav {
+  flex: 1 1 auto;
+}
+.nav-link-x {
+  gap: 0.7rem;
+  padding: 0.5rem 0.7rem;
+  margin: 1px 0;
+  border-radius: var(--radius-sm);
+  border-left: 0;
+  font-size: 0.92rem;
+  color: #c9dcde;
+  transition:
+    background 0.12s,
+    color 0.12s;
+}
+.nav-link-x > .bi {
+  width: 1.15rem;
+  text-align: center;
+  font-size: 1rem;
+  opacity: 0.85;
+}
+.nav-link-x:hover {
+  background: rgba(255, 255, 255, 0.07);
+}
+.nav-link-x.active {
+  background: rgba(143, 208, 201, 0.16);
+  color: #fff;
+  box-shadow: inset 3px 0 0 #8fd0c9;
+}
+.nav-group-btn.has-active {
+  color: #fff;
+}
+.nav-group-btn.has-active > .bi {
+  color: #8fd0c9;
+  opacity: 1;
+}
+.nav-sub {
+  margin: 0.15rem 0 0.4rem 1.05rem;
+  padding-left: 0.55rem;
+  border-left: 1px solid rgba(255, 255, 255, 0.1);
+}
+.nav-sub-link {
+  padding: 0.38rem 0.7rem;
+  font-size: 0.88rem;
+}
+.nav-sub-link.active {
+  box-shadow: none;
+  background: rgba(143, 208, 201, 0.16);
+}
+.quick-links {
+  border-top-color: rgba(255, 255, 255, 0.08);
+}
+.me {
+  border-top-color: rgba(255, 255, 255, 0.08);
+  padding-bottom: 0.2rem;
+}
+
+/* ── page structure ── */
+.main {
+  padding: 1.9rem 2.25rem 6rem;
+}
+.page-head {
+  margin-bottom: 1.4rem;
+}
+.page-head h1 {
+  font-size: 1.65rem;
+  font-weight: 650;
+  margin-bottom: 0.25rem;
+}
+.page-head p {
+  max-width: 70ch;
+  font-size: 0.95rem;
+}
+
+/* ── cards (.panel) ── */
+.panel {
+  padding: 0;
+  border-radius: var(--radius);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow-1);
+  background: var(--surface);
+}
+.panel.p-3 {
+  padding: 1.1rem 1.2rem !important;
+}
+.panel-h {
+  padding: 0.9rem 1.2rem;
+  font-size: 0.95rem;
+  background: transparent;
+}
+.panel > .empty:only-child,
+.panel > .empty {
+  padding: 2.2rem 1.25rem;
+}
+.empty {
+  color: var(--muted);
+}
+
+/* KPI tiles on Overview and anywhere a big number is shown */
+.bigver {
+  font-family: var(--bs-body-font-family);
+  font-size: 2.2rem;
+  font-weight: 650;
+  letter-spacing: -0.03em;
+  line-height: 1.05;
+  font-variant-numeric: tabular-nums;
+}
+.panel.p-3 > .muted.small:first-child {
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 0.7rem !important;
+  font-weight: 600;
+}
+
+/* ── tables ── */
+.table {
+  font-size: 0.9rem;
+}
+.table > :not(caption) > * > * {
+  padding: 0.7rem 1.2rem;
+  border-bottom-color: var(--line);
+  vertical-align: middle;
+}
+.table thead th {
+  background: #f8fafc;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+}
+.table tbody tr {
+  transition: background 0.1s;
+}
+.table tbody tr:hover > * {
+  background: #f8fafc;
+}
+.table tbody tr:last-child > * {
+  border-bottom-width: 0;
+}
+
+/* ── controls ── */
+.btn {
+  border-radius: var(--radius-sm);
+  font-weight: 550;
+  font-size: 0.9rem;
+  padding: 0.42rem 0.9rem;
+  transition:
+    background 0.12s,
+    border-color 0.12s,
+    box-shadow 0.12s,
+    color 0.12s;
+}
+.btn-sm {
+  padding: 0.28rem 0.65rem;
+  font-size: 0.82rem;
+  border-radius: 7px;
+}
+.btn-primary {
+  box-shadow: 0 1px 2px rgba(44, 95, 208, 0.35);
+}
+.btn-outline-secondary {
+  --bs-btn-color: #34444f;
+  --bs-btn-border-color: var(--line-strong);
+  --bs-btn-hover-bg: #eef2f6;
+  --bs-btn-hover-border-color: #c3ccd6;
+  --bs-btn-hover-color: var(--text);
+  --bs-btn-active-bg: #e4e9ef;
+  --bs-btn-active-color: var(--text);
+  --bs-btn-active-border-color: #b9c3ce;
+  background: var(--surface);
+}
+.btn-outline-danger {
+  background: var(--surface);
+}
+.btn-outline-primary {
+  background: var(--surface);
+}
+.form-control,
+.form-select {
+  border-radius: var(--radius-sm);
+  border-color: var(--line-strong);
+  padding: 0.45rem 0.75rem;
+  font-size: 0.92rem;
+}
+.form-control-sm,
+.form-select-sm {
+  padding: 0.28rem 0.6rem;
+  font-size: 0.85rem;
+}
+.form-label {
+  font-weight: 550;
+  font-size: 0.86rem;
+  margin-bottom: 0.3rem;
+}
+.form-text {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+.form-check-input:checked {
+  background-color: var(--cobalt);
+  border-color: var(--cobalt);
+}
+.alert {
+  border-radius: var(--radius-sm);
+  border-width: 1px;
+  font-size: 0.9rem;
+}
+.badge {
+  font-weight: 550;
+}
+
+/* pills */
+.tag {
+  border-radius: 999px;
+  padding: 0.12rem 0.55rem;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  background: #eaeff4;
+  color: #51626f;
+}
+.tag.ok {
+  background: #e0f1e8;
+  color: #1f6a47;
+}
+.tag.warn {
+  background: #fdf1d3;
+  color: #8f5b00;
+}
+
+/* rows used by settings, themes, cluster, updates */
+.frow,
+.node,
+.upd {
+  border-bottom-color: var(--line);
+}
+.node,
+.upd {
+  padding: 1rem 1.25rem;
+}
+.frow {
+  padding: 1.05rem 1.25rem;
+}
+.subnav a {
+  border-radius: var(--radius-sm);
+  font-size: 0.9rem;
+}
+.subnav a.active {
+  box-shadow: var(--shadow-1);
+}
+.savebar {
+  box-shadow: 0 -6px 20px rgba(16, 38, 58, 0.07);
+  border-top-color: var(--line);
+}
+
+/* modal, toast */
+.modal-x {
+  background: rgba(14, 38, 48, 0.5);
+  backdrop-filter: blur(2px);
+}
+.modal-card {
+  border-radius: 14px;
+  box-shadow: var(--shadow-2);
+  padding: 1.25rem 1.35rem;
+}
+.toast-x {
+  border-radius: 10px;
+  box-shadow: var(--shadow-2);
+  font-size: 0.9rem;
+}
+
+/* ── sign-in ── */
+.login-side {
+  background: radial-gradient(120% 90% at 0% 0%, #1d5666 0%, var(--ink) 55%, #0b2229 100%);
+}
+.login-form {
+  background: var(--surface);
+}
+.login-form .btn-primary {
+  padding: 0.55rem 1.1rem;
+}
+
+/* ───────── the assistant panel ───────── */
+.chat-dock {
+  background: var(--surface);
+  border-left: 1px solid var(--line);
+  box-shadow: -8px 0 24px rgba(16, 38, 58, 0.04);
+}
+.chat-head {
+  padding: 0.75rem 0.9rem;
+  gap: 0.5rem;
+}
+.chat-title {
+  font-size: 0.98rem;
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+.chat-title .bi {
+  color: var(--cobalt);
+}
+.chat-sessions {
+  padding: 0.55rem 0.9rem;
+  background: #fafbfd;
+}
+.chat-log {
+  padding: 1rem 0.9rem;
+  gap: 0.7rem;
+  background: var(--surface);
+  overflow-x: hidden;
+}
+.chat-log .empty {
+  padding: 1.5rem 0.5rem;
+  font-size: 0.88rem;
+  line-height: 1.55;
+}
+
+/* messages: the person on the right, the assistant on the left; padding sized to the text, not to the template */
+.ac-msg {
+  display: flex;
+  min-width: 0;
+}
+.ac-msg.ac-user {
+  justify-content: flex-end;
+}
+.ac-bubble {
+  max-width: 88%;
+  min-width: 0;
+  padding: 0.55rem 0.8rem;
+  border-radius: 14px;
+  font-size: 0.9rem;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+.ac-text {
+  white-space: pre-wrap; /* newlines in what was said are kept; the markup around it is not */
+}
+.ac-user .ac-bubble {
+  background: var(--cobalt);
+  color: #fff;
+  border-bottom-right-radius: 4px;
+}
+.ac-assistant .ac-bubble {
+  background: #f1f4f8;
+  color: var(--text);
+  border-bottom-left-radius: 4px;
+}
+.ac-bubble .ac-text + .ac-img {
+  margin-top: 0.45rem;
+}
+.ac-img {
+  display: block;
+  max-width: 100%;
+  border-radius: 8px;
+}
+.ac-tool {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0 0 0 0.15rem;
+  padding: 0.12rem 0.6rem 0.12rem 0.45rem;
+  border-radius: 999px;
+  background: #eef4f1;
+  color: #2c6a4d;
+  font-size: 0.76rem;
+  font-weight: 550;
+}
+.ac-tool .bi {
+  font-size: 0.82rem;
+}
+.ac-wait {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--muted);
+}
+.ac-dots {
+  display: inline-flex;
+  gap: 3px;
+}
+.ac-dots i {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #9aa8b5;
+  animation: ac-bounce 1.2s infinite ease-in-out;
+}
+.ac-dots i:nth-child(2) {
+  animation-delay: 0.15s;
+}
+.ac-dots i:nth-child(3) {
+  animation-delay: 0.3s;
+}
+@keyframes ac-bounce {
+  0%,
+  80%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.5;
+  }
+  40% {
+    transform: translateY(-3px);
+    opacity: 1;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ac-dots i {
+    animation: none;
+  }
+}
+
+.chat-form {
+  padding: 0.7rem 0.9rem 0.8rem;
+  background: #fafbfd;
+}
+.chat-form textarea {
+  resize: none;
+  min-height: 2.9rem;
+  border-radius: 10px;
+}
+.chat-foot {
+  margin-top: 0.5rem;
+}
+.chat-usage {
+  color: var(--muted);
+  font-size: 0.72rem;
+  margin-top: 0.35rem;
+}
+.chat-fab {
+  background: var(--cobalt);
+  box-shadow: 0 6px 18px rgba(44, 95, 208, 0.4);
+}
+.chat-fab:hover {
+  background: #244aa3;
+}
+
+/* the changes card */
+.cc {
+  margin: 0 0.9rem 0.6rem;
+  border-radius: 10px;
+  box-shadow: none;
+}
+.cc-head {
+  background: #f6f8fb;
+  padding: 0.5rem 0.75rem;
+}
+.cc-warn {
+  margin: 0 0.9rem 0.6rem;
+  border-radius: 10px;
+}
+
+/* ───────── command search ───────── */
+.nav-search {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  width: 100%;
+  margin: 0 0 0.85rem;
+  padding: 0.5rem 0.7rem;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.06);
+  color: #b3cbcd;
+  font-size: 0.88rem;
+  text-align: left;
+  transition:
+    background 0.12s,
+    border-color 0.12s;
+}
+.nav-search:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.2);
+  color: #fff;
+}
+.nav-search kbd {
+  margin-left: auto;
+  padding: 0.05rem 0.4rem;
+  border-radius: 5px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.06);
+  color: #a9c3c6;
+  font-family: var(--mono);
+  font-size: 0.7rem;
+}
+.cmdk {
+  position: fixed;
+  inset: 0;
+  z-index: 3000;
+  background: rgba(14, 38, 48, 0.5);
+  backdrop-filter: blur(2px);
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding: 11vh 1rem 1rem;
+}
+.cmdk-card {
+  width: min(40rem, 100%);
+  max-height: 70vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border-radius: 14px;
+  box-shadow: var(--shadow-2);
+  overflow: hidden;
+}
+.cmdk-input {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  padding: 0.85rem 1.1rem;
+  border-bottom: 1px solid var(--line);
+}
+.cmdk-input .bi {
+  color: var(--muted);
+  font-size: 1.05rem;
+}
+.cmdk-input input {
+  flex: 1;
+  border: 0;
+  outline: 0;
+  font-size: 1.02rem;
+  background: transparent;
+  color: var(--text);
+  min-width: 0;
+}
+.cmdk-input kbd,
+.cmdk-foot kbd {
+  padding: 0.05rem 0.4rem;
+  border-radius: 5px;
+  border: 1px solid var(--line-strong);
+  background: #f6f8fb;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 0.7rem;
+}
+.cmdk-list {
+  overflow-y: auto;
+  padding: 0.4rem;
+}
+.cmdk-group {
+  padding: 0.55rem 0.7rem 0.25rem;
+  font-size: 0.68rem;
+  font-weight: 650;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.cmdk-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.7rem;
+  width: 100%;
+  padding: 0.55rem 0.7rem;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  text-align: left;
+  color: var(--text);
+}
+.cmdk-item.active {
+  background: var(--cobalt-soft);
+}
+.cmdk-item .bi {
+  margin-top: 0.12rem;
+  color: var(--muted);
+  width: 1.1rem;
+  text-align: center;
+}
+.cmdk-item.active .bi {
+  color: var(--cobalt);
+}
+.cmdk-main {
+  min-width: 0;
+  flex: 1;
+}
+.cmdk-title {
+  font-weight: 550;
+  font-size: 0.92rem;
+}
+.cmdk-title mark,
+.cmdk-sub mark {
+  background: rgba(255, 213, 79, 0.55);
+  color: inherit;
+  padding: 0 1px;
+  border-radius: 2px;
+}
+.cmdk-sub {
+  color: var(--muted);
+  font-size: 0.8rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+.cmdk-path {
+  flex: 0 0 auto;
+  align-self: center;
+  color: var(--muted);
+  font-size: 0.74rem;
+  white-space: nowrap;
+}
+.cmdk-empty {
+  padding: 1.6rem 1rem;
+  text-align: center;
+  color: var(--muted);
+}
+.cmdk-foot {
+  display: flex;
+  gap: 1rem;
+  padding: 0.5rem 1rem;
+  border-top: 1px solid var(--line);
+  background: #fafbfd;
+  color: var(--muted);
+  font-size: 0.74rem;
+}
+
+@media (max-width: 860px) {
+  .main {
+    padding: 1.25rem 1rem 6rem;
+  }
+  .page-head h1 {
+    font-size: 1.4rem;
+  }
+  .nav-search kbd {
+    display: none;
+  }
+  .cmdk {
+    padding-top: 4vh;
+  }
+}
+
+.frow.flash {
+  animation: row-flash 2.4s ease-out;
+}
+@keyframes row-flash {
+  0%,
+  35% {
+    background: #fff2b8;
+    box-shadow: inset 3px 0 0 #e0a800;
+  }
+  100% {
+    background: transparent;
+    box-shadow: inset 3px 0 0 transparent;
+  }
+}
+.topbar-search {
+  margin-left: auto;
+  background: none;
+  border: 0;
+  color: #cfe0e0;
+  font-size: 1.05rem;
+  min-width: 44px;
+  min-height: 44px;
+}
+.topbar-search + .topbar-site-link {
+  margin-left: 0;
+}
+@media (min-width: 861px) {
+  .topbar-search {
+    display: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .frow.flash {
+    animation: none;
+    background: #fff2b8;
+  }
+}
+
+/* The search host sits inside the page grid but draws nothing itself. */
+.cmdk-host {
+  display: contents;
+}
+
+/* A heading used as a panel's first row, and the rendered requirements document, need their own breathing room. */
+.panel > .page-head {
+  margin: 0;
+  padding: 1rem 1.2rem 0.35rem;
+}
+.md-doc {
+  padding: 1.4rem 1.7rem !important;
+  line-height: 1.6;
+}
+.md-doc > :first-child {
+  margin-top: 0;
+}
+.md-doc h2 {
+  font-size: 1.35rem;
+}
+.md-doc h3 {
+  font-size: 1.1rem;
+}
+.md-doc h4 {
+  font-size: 0.95rem;
+  text-transform: none;
+}
+.md-doc code {
+  background: #eef2f6;
+  padding: 0.05rem 0.35rem;
+  border-radius: 5px;
+  font-size: 0.85em;
+}
+/* White fields on white cards (Bootstrap fills them with the page colour). */
+.form-control,
+.form-select {
+  background-color: #fff;
+}
+.form-control:disabled,
+.form-select:disabled {
+  background-color: #f1f4f7;
+}
+.frow label.title {
+  font-weight: 600;
+}
+/* Softer alert colours that sit with the rest of the palette. */
+.alert-info {
+  --bs-alert-color: #1d4f73;
+  --bs-alert-bg: #eaf4fb;
+  --bs-alert-border-color: #c6e0f1;
+}
+.alert-success {
+  --bs-alert-color: #1f5f41;
+  --bs-alert-bg: #e8f5ee;
+  --bs-alert-border-color: #c3e3d1;
+}
+.alert-warning {
+  --bs-alert-color: #7a4f00;
+  --bs-alert-bg: #fdf4d9;
+  --bs-alert-border-color: #f1dd9d;
+}
+.alert-danger {
+  --bs-alert-color: #8a2a22;
+  --bs-alert-bg: #fdecea;
+  --bs-alert-border-color: #f3c6c1;
+}
+
+.ac-tool {
+  align-self: flex-start;
+  flex: 0 0 auto;
+}
+.cmdk-foot span {
+  white-space: nowrap;
+}
+.cmdk-foot {
+  flex-wrap: wrap;
+}
+
+/* A heading row inside a padded card lines up with the text below it instead of being indented twice. */
+.panel.p-3 > .panel-h,
+.panel.p-3 > .d-flex > .panel-h {
+  padding: 0 0 0.6rem;
+}
+.panel.p-3 > .panel-h {
+  margin-bottom: 0.8rem;
+}
+
+.form-control:focus,
+.form-select:focus {
+  background-color: #fff;
+}

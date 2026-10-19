@@ -81,7 +81,10 @@ test('restart without a supervisor: the process starts a fresh copy of itself on
     const back = await until(
       async () => {
         const r = await n.c.get('/api/admin/updates').catch(() => null);
-        return r?.status === 200 && r.body.self !== n.id ? r.body : null;
+        // The new process answers before its own heartbeat row exists, so also wait until it lists itself.
+        return r?.status === 200 && r.body.self !== n.id && r.body.nodes?.some((x) => x.self)
+          ? r.body
+          : null;
       },
       { timeout: 20000, every: 200 },
     );

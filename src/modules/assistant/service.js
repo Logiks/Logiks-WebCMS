@@ -6,12 +6,18 @@ import { createGitMirror } from './git.js';
 import { createHistory } from './history.js';
 import { createRequirements } from './requirements.js';
 import { TOOLS } from './tools.js';
-import { createValidator } from './validate.js';
+import { localizeAssets } from './localize.js';
+import { BLOCKED_HINT, blockedAssets, createValidator } from './validate.js';
 
 const MAX_ITERATIONS = 20;
 const MAX_WRITES_PER_TURN = 30;
-const MODEL_DEFAULT = 'claude-opus-5';
-const MAX_OUTPUT_TOKENS = 4096;
+const MODEL_DEFAULT = 'claude-sonet-5';
+// Room for a whole page or theme file in one tool call; a cap this size is a ceiling, not a cost.
+const MAX_OUTPUT_TOKENS = 64000; //16000;
+// If a reply still hits the cap, the assistant is asked to carry on (up to this many times per request) instead of the
+// person being asked to. Those nudges are stored but never shown, and never count as the person speaking.
+const MAX_CONTINUES = 3;
+export const AUTO = '[auto] ';
 const TURN_LOCK_MS = 5 * 60_000; // a crashed turn frees its session after this
 const KEEP_TURNS = 8; // older whole turns are not resent
 const TOOL_RESULT_CHARS = 8_000; // a result is cut here, with a hint to ask for more
@@ -30,9 +36,11 @@ const SYSTEM_PROMPT = `You are the site assistant inside a CMS admin. You help t
 Rules:
 - Be brief. Plain sentences, no preamble, no restating the request.
 - Look before you act: site_map first; read only the lines you need. Reuse existing components and wording before adding new ones.
+- Keep each tool call modest: build a big page in steps (write the first part, then add sections with edit_file) rather than one enormous write_file.
 - Change things with edit_file (small replacements) rather than rewriting whole files. Every change goes live immediately and is recorded so the person can review and revert it, so make changes that are complete and safe, not drafts.
 - After changing pages, components, locales, menus or theme files, call validate_site and fix what it reports before you finish.
 - Page text goes through {{ 'key' | t: 'English fallback' }}, never hard-coded, so languages keep working. Pages use components with {% render "name", prop: "value" %}.
+- The live site may have no internet and its security policy only loads files from the site itself. So prefer install_library for npm packages (bootstrap, bootstrap-icons, @fontsource/inter…). A CDN link you write is downloaded into the site and rewritten automatically, but a package is better. Never rely on a CDN at run time.
 - Built-in themes are read-only: to change one, tell the person to duplicate it under Appearance → Themes first.
 - Whatever the person decides about the site (audience, goals, pages, features, look and feel) belongs in the requirements document: call update_requirements with just the affected section. Do not log small talk.
 - Use generate_image only when a picture is really needed; it costs money.
@@ -52,7 +60,7 @@ const clip = (s, max = TOOL_RESULT_CHARS) =>
 /** A turn starts at a user message that is the person speaking (text, maybe with pictures), not tool results. */
 const isTurnStart = (m) =>
   m.role === 'user' &&
-  (typeof m.content === 'string' ||
+  ((typeof m.content === 'string' && !m.content.startsWith(AUTO)) ||
     (Array.isArray(m.content) && !m.content.some((b) => b.type === 'tool_result')));
 
 /** Index of the first message that is still sent: the start of the Nth most recent earlier turn. */
@@ -110,6 +118,20 @@ export function compactHistory(messages, currentStart, images = new Map(), summa
       }),
     };
   });
+}
+
+/**
+ * One model call, returning the finished message. The SDK refuses a long non-streaming request (above roughly 21,000
+ * output tokens it throws "Streaming is required…" before sending anything), and replies here are allowed to be
+ * much longer than that, so real calls stream and wait for the end. A client that only has `create` (the tests'
+ * stand-ins) is used as it is.
+ * @param {any} client
+ * @param {any} params
+ */
+export function complete(client, params) {
+  return typeof client.messages.stream === 'function'
+    ? client.messages.stream(params).finalMessage()
+    : client.messages.create(params);
 }
 
 let sharpP;
@@ -254,6 +276,7 @@ export function createAssistant(ctx, { client: injectedClient } = {}) {
     const out = [];
     for (const m of msgs) {
       const who = m.role === 'user' ? 'Person' : 'Assistant';
+      if (typeof m.content === 'string' && m.content.startsWith(AUTO)) continue;
       if (typeof m.content === 'string') {
         out.push(`${who}: ${m.content}`);
         continue;
@@ -318,7 +341,17 @@ export function createAssistant(ctx, { client: injectedClient } = {}) {
           `That is ${MAX_WRITES_PER_TURN} changes in one turn. Stop here and ask the person whether to continue.`,
         );
       const current = await docstore.read(path);
-      const next = compute(current);
+      let next = compute(current);
+      let localized = [];
+      let failed = [];
+      if (typeof next === 'string') {
+        // Links to a CDN are downloaded into the site and rewritten, so the page works offline and under the CSP.
+        ({
+          text: next,
+          localized,
+          failed,
+        } = await localizeAssets(path, next, { libraries: ctx.libraries, actor }));
+      }
       if (next === current) return { ok: true, path, changed: false };
       if (!rec.changes.has(path)) rec.changes.set(path, { before: current, after: current });
       try {
@@ -328,7 +361,20 @@ export function createAssistant(ctx, { client: injectedClient } = {}) {
       }
       rec.writes++;
       rec.changes.get(path).after = await docstore.read(path);
-      return { ok: true, path, changed: true };
+      const blocked = blockedAssets(path, rec.changes.get(path).after);
+      return {
+        ok: true,
+        path,
+        changed: true,
+        ...(localized.length ? { downloadedIntoSite: localized } : {}),
+        ...(blocked.length
+          ? {
+              blocked,
+              ...(failed.length ? { why: failed.map((f) => `${f.url}: ${f.reason}`) } : {}),
+              hint: BLOCKED_HINT,
+            }
+          : {}),
+      };
     }
 
     return {
@@ -415,7 +461,48 @@ export function createAssistant(ctx, { client: injectedClient } = {}) {
       },
 
       async validate_site() {
-        return validator.check([...rec.changes.keys()]);
+        return validator.check([...rec.changes.keys()], (p) => docstore.read(p));
+      },
+
+      async list_libraries() {
+        requirePerm('libraries.read');
+        return {
+          scriptsAllowed: !!settings.get('libraries.allow_scripts'),
+          libraries: ctx.libraries.list().map((l) => ({
+            name: l.name,
+            version: l.version,
+            loadsOnEveryPage: l.autoload,
+            files: l.include,
+          })),
+        };
+      },
+
+      async install_library({ name, version, include, autoload = true }) {
+        requirePerm('libraries.manage');
+        const lib = await ctx.libraries
+          .install(
+            {
+              name,
+              version: version || 'latest',
+              autoload,
+              include: include?.length ? include : undefined,
+            },
+            actor,
+          )
+          .catch(asErr);
+        const scripts = settings.get('libraries.allow_scripts');
+        return {
+          name: lib.name,
+          version: lib.version,
+          loadsOnEveryPage: lib.autoload,
+          files: lib.include,
+          use: `{{ '${lib.name}/<file>' | library_url }}`,
+          ...(!scripts && lib.include.some((f) => /\.m?js$/i.test(f))
+            ? {
+                note: 'Its scripts will not run until an administrator turns on Settings → Libraries → allow scripts.',
+              }
+            : {}),
+        };
       },
 
       async generate_image({ prompt, name, alt }) {
@@ -636,6 +723,7 @@ export function createAssistant(ctx, { client: injectedClient } = {}) {
       let commit = null;
       let warnings = [];
       try {
+        let cuts = 0;
         for (let i = 0; i < MAX_ITERATIONS; i++) {
           if (
             chatLimit &&
@@ -654,7 +742,7 @@ export function createAssistant(ctx, { client: injectedClient } = {}) {
           }
           let response;
           try {
-            response = await client.messages.create({
+            response = await complete(client, {
               model: row.model || defaultModel || MODEL_DEFAULT,
               max_tokens: MAX_OUTPUT_TOKENS,
               output_config: { effort: 'medium' },
@@ -671,16 +759,33 @@ export function createAssistant(ctx, { client: injectedClient } = {}) {
           usage.cacheRead += u.cache_read_input_tokens ?? 0;
           // A reply cut off by the token limit may end in a half-written tool call, which could never be answered;
           // keep only its text and say so.
-          const cut = response.stop_reason === 'max_tokens';
-          const reply = cut
-            ? [
-                ...response.content.filter((b) => b.type === 'text'),
-                { type: 'text', text: '(The answer was cut short. Ask me to continue.)' },
-              ]
-            : response.content;
-          messages.push({ role: 'assistant', content: reply });
-          newRows.push({ role: 'assistant', content: reply });
-          if (cut || response.stop_reason !== 'tool_use') break;
+          if (response.stop_reason === 'max_tokens') {
+            // The reply ran out of room. Keep only what was finished (a half-written tool call can never be answered),
+            // then ask the assistant to carry on, in smaller steps if it was in the middle of a tool call.
+            const text = response.content.filter((b) => b.type === 'text' && b.text?.trim());
+            const halfCall = response.content.some((b) => b.type === 'tool_use');
+            const giveUp = cuts >= MAX_CONTINUES;
+            const kept = giveUp
+              ? [...text, { type: 'text', text: '(The answer was cut short. Ask me to continue.)' }]
+              : text.length
+                ? text
+                : [{ type: 'text', text: '…' }];
+            messages.push({ role: 'assistant', content: kept });
+            newRows.push({ role: 'assistant', content: kept });
+            if (giveUp) break;
+            cuts++;
+            const nudge =
+              AUTO +
+              (halfCall
+                ? 'Your last tool call was cut off before it finished, so it changed nothing. Do it again in smaller steps: create the file with its first part, then add the rest with edit_file, each call well under 300 lines.'
+                : 'Your reply was cut off. Continue exactly where you stopped.');
+            messages.push({ role: 'user', content: nudge });
+            newRows.push({ role: 'user', content: nudge });
+            continue;
+          }
+          messages.push({ role: 'assistant', content: response.content });
+          newRows.push({ role: 'assistant', content: response.content });
+          if (response.stop_reason !== 'tool_use') break;
 
           const results = [];
           for (const call of response.content.filter((b) => b.type === 'tool_use')) {
@@ -743,7 +848,9 @@ export function createAssistant(ctx, { client: injectedClient } = {}) {
               sessionId: id,
             });
             if (commit)
-              warnings = (await validator.check(names).catch(() => ({ ok: true }))).problems ?? [];
+              warnings =
+                (await validator.check(names, (p) => docstore.read(p)).catch(() => ({ ok: true })))
+                  .problems ?? [];
           } catch (e) {
             log?.error({ err: e.message }, 'assistant: change history not recorded');
           }

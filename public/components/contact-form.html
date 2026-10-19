@@ -2,28 +2,30 @@
 { "title": "Contact form", "description": "Posts to /contact. Messages appear under Content → Messages; the form is off unless Settings → Site → Contact form is on." }
 </script>
 <style>
-  :host { display: block; }
-  form { max-width: 34rem; margin: 0 auto; padding: 1rem 1.25rem 2.5rem; display: grid; gap: 0.35rem; }
-  input, textarea { font: inherit; padding: 0.55rem 0.75rem; border: 1px solid var(--line, #dde3e1); border-radius: 8px; background: var(--bg, #fff); color: inherit; }
-  label { font-weight: 600; margin-top: 0.6rem; }
-  button { margin-top: 1rem; font: inherit; padding: 0.65rem 1.2rem; border: 0; border-radius: 8px; background: var(--accent, #2b59c3); color: #fff; cursor: pointer; justify-self: start; }
-  .notice { padding: 0.7rem 0.9rem; border-radius: 8px; margin: 0; }
-  .ok { background: #e7f6ec; color: #17603a; } .bad { background: #fdecec; color: #8a1f1f; }
-  .hp { position: absolute; left: -9999px; }
+  .btn-accent { background: var(--accent, #2b59c3); border-color: var(--accent, #2b59c3); color: #fff; font-weight: 600; }
+  .btn-accent:hover { background: var(--accent, #2b59c3); filter: brightness(0.92); color: #fff; }
 </style>
 {% if contact.enabled %}
-<form class="contact" method="post" action="/contact" id="contact">
-  {% if contact.sent %}<p class="notice ok" role="status">{{ 'contact.sent' | t: 'Thanks. Your message has been sent.' }}</p>{% endif %}
-  {% if contact.error != blank %}<p class="notice bad" role="alert">{{ contact.error }}</p>{% endif %}
-  <label for="c-name">{{ 'contact.name' | t: 'Your name' }}</label>
-  <input id="c-name" name="name" required maxlength="120" autocomplete="name">
-  <label for="c-email">{{ 'contact.email' | t: 'Your email' }}</label>
-  <input id="c-email" name="email" type="email" required maxlength="200" autocomplete="email">
-  <label for="c-msg">{{ 'contact.message' | t: 'Message' }}</label>
-  <textarea id="c-msg" name="message" rows="6" required maxlength="5000"></textarea>
-  <div class="hp" aria-hidden="true"><label for="c-web">Leave this empty</label><input id="c-web" name="website" tabindex="-1" autocomplete="off"></div>
-  <input type="hidden" name="t" value="{{ contact.token }}">
-  <input type="hidden" name="back" value="{{ request.path }}">
-  <button type="submit">{{ 'contact.send' | t: 'Send message' }}</button>
-</form>
+<div class="container py-4">
+  <form class="contact mx-auto" style="max-width: 36rem;" method="post" action="/contact" id="contact">
+    {% if contact.sent %}<p class="alert alert-success" role="status">{{ 'contact.sent' | t: 'Thanks. Your message has been sent.' }}</p>{% endif %}
+    {% if contact.error != blank %}<p class="alert alert-danger" role="alert">{{ contact.error }}</p>{% endif %}
+    <div class="mb-3">
+      <label class="form-label" for="c-name">{{ 'contact.name' | t: 'Your name' }}</label>
+      <input class="form-control" id="c-name" name="name" required maxlength="120" autocomplete="name">
+    </div>
+    <div class="mb-3">
+      <label class="form-label" for="c-email">{{ 'contact.email' | t: 'Your email' }}</label>
+      <input class="form-control" id="c-email" name="email" type="email" required maxlength="200" autocomplete="email">
+    </div>
+    <div class="mb-3">
+      <label class="form-label" for="c-msg">{{ 'contact.message' | t: 'Message' }}</label>
+      <textarea class="form-control" id="c-msg" name="message" rows="6" required maxlength="5000"></textarea>
+    </div>
+    <div class="position-absolute" style="left:-9999px" aria-hidden="true"><label for="c-web">Leave this empty</label><input id="c-web" name="website" tabindex="-1" autocomplete="off"></div>
+    <input type="hidden" name="t" value="{{ contact.token }}">
+    <input type="hidden" name="back" value="{{ request.path }}">
+    <button type="submit" class="btn btn-accent px-4">{{ 'contact.send' | t: 'Send message' }}</button>
+  </form>
+</div>
 {% endif %}

@@ -1,0 +1,33 @@
+<script type="application/json" data-cms="meta">
+{
+  "title": "Stats row",
+  "description": "A row of trust-building numbers."
+}
+</script>
+<style>
+  .stats-section { background: var(--soft, #f5f7f6); border-top: 1px solid var(--line, #dde3e1); border-bottom: 1px solid var(--line, #dde3e1); }
+  .stat-number { font-size: 2.25rem; font-weight: 700; color: var(--accent, #2b59c3); }
+  .stat-label { color: var(--muted, #5d7076); font-size: 0.95rem; }
+</style>
+<section class="stats-section py-5">
+  <div class="container">
+    <div class="row text-center g-4">
+      <div class="col-6 col-lg-3">
+        <div class="stat-number">10+</div>
+        <div class="stat-label">{{ 'stats.years' | t: 'Years in business' }}</div>
+      </div>
+      <div class="col-6 col-lg-3">
+        <div class="stat-number">200+</div>
+        <div class="stat-label">{{ 'stats.projects' | t: 'Projects delivered' }}</div>
+      </div>
+      <div class="col-6 col-lg-3">
+        <div class="stat-number">40+</div>
+        <div class="stat-label">{{ 'stats.clients' | t: 'Happy clients' }}</div>
+      </div>
+      <div class="col-6 col-lg-3">
+        <div class="stat-number">15+</div>
+        <div class="stat-label">{{ 'stats.countries' | t: 'Countries served' }}</div>
+      </div>
+    </div>
+  </div>
+</section>

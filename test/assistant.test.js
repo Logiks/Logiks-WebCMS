@@ -236,6 +236,188 @@ describe('token thrift', () => {
   });
 });
 
+describe('replies that run out of room', () => {
+  const cut = (content) => ({ content, stop_reason: 'max_tokens', usage });
+  const text = (t) => ({ type: 'text', text: t });
+  const half = { type: 'tool_use', id: 'toolu_cut', name: 'write_file', input: {} };
+  const stored = async (svc, id) => (await svc.get(id, adm)).messages;
+  const page = (title) => `---\ntitle: "${title}"\n---\n<p>${title}</p>\n`;
+
+  test('there is room for a whole page in one reply', async () => {
+    const { svc, client } = withClient([say('ok')]);
+    const s = await svc.create(adm);
+    await svc.sendMessage(s.id, 'hi', adm);
+    assert.ok(
+      client.calls[0].max_tokens >= 16000,
+      `room for a whole page: ${client.calls[0].max_tokens}`,
+    );
+  });
+
+  test('a reply that is cut off is continued by the assistant, not by the person', async () => {
+    const { svc, client } = withClient([
+      cut([text('First half of the answer')]),
+      say('and the second half.'),
+    ]);
+    const s = await svc.create(adm);
+    const out = await svc.sendMessage(s.id, 'explain', adm);
+    assert.equal(client.calls.length, 2);
+    const last = client.calls[1].messages;
+    assert.match(last.at(-1).content, /^\[auto\] Your reply was cut off/);
+    assert.equal(last.at(-2).content[0].text, 'First half of the answer');
+    const all = JSON.stringify(out.messages);
+    assert.ok(!all.includes('cut short'), 'the person is not asked to do anything');
+    assert.equal((await stored(svc, s.id)).length, 4);
+  });
+
+  test('a tool call cut off half way is dropped and redone in smaller steps', async () => {
+    const { svc, client } = withClient([
+      cut([half]),
+      callTools({
+        name: 'write_file',
+        input: { path: 'pages/ast-big-1.html', content: page('Part one') },
+      }),
+      say('done'),
+    ]);
+    const s = await svc.create(adm);
+    await svc.sendMessage(s.id, 'build a big page', adm);
+    const nudge = client.calls[1].messages.at(-1).content;
+    assert.match(nudge, /cut off before it finished, so it changed nothing/);
+    assert.match(nudge, /smaller steps/);
+    // The broken call is not in what is sent back (it could never be answered), so the conversation stays valid.
+    assert.ok(!JSON.stringify(client.calls[1].messages).includes('toolu_cut'));
+    assert.ok(node.ctx.siteFiles.get('pages/ast-big-1.html'));
+    await node.ctx.siteFiles.remove('pages/ast-big-1.html', null);
+  });
+
+  test('it gives up after three tries, and then says so', async () => {
+    const { svc, client } = withClient([
+      cut([text('a')]),
+      cut([text('b')]),
+      cut([text('c')]),
+      cut([text('d')]),
+    ]);
+    const s = await svc.create(adm);
+    const out = await svc.sendMessage(s.id, 'endless', adm);
+    assert.equal(client.calls.length, 4);
+    assert.match(JSON.stringify(out.messages.at(-1)), /cut short/);
+  });
+
+  test('the nudges are never shown and never start a new turn', async () => {
+    const { svc } = withClient([cut([text('x')]), say('y')]);
+    const s = await svc.create(adm);
+    await svc.sendMessage(s.id, 'one', adm);
+    const msgs = await stored(svc, s.id);
+    const autos = msgs.filter(
+      (m) => typeof m.content === 'string' && m.content.startsWith('[auto] '),
+    );
+    assert.equal(autos.length, 1);
+    // Ten real turns plus their nudges still count as ten turns when deciding what to resend.
+    const history = [];
+    for (let i = 0; i < 10; i++)
+      history.push(
+        { role: 'user', content: `q${i}` },
+        { role: 'assistant', content: [text('a')] },
+        { role: 'user', content: '[auto] Continue exactly where you stopped.' },
+        { role: 'assistant', content: [text('b')] },
+      );
+    const out = compactHistory(history, history.length);
+    assert.equal(
+      out.filter((m) => typeof m.content === 'string' && !m.content.startsWith('[auto]')).length,
+      8,
+    );
+  });
+});
+
+describe('long replies are streamed (the SDK refuses a long non-streaming request)', () => {
+  // The real SDK, with only the network replaced: this is the exact failure ("Streaming is required for operations
+  // that may take longer than 10 minutes") that a large output cap causes if requests are not streamed.
+  const sse = (text) =>
+    [
+      [
+        'message_start',
+        {
+          type: 'message_start',
+          message: {
+            id: 'm1',
+            type: 'message',
+            role: 'assistant',
+            model: 'x',
+            content: [],
+            stop_reason: null,
+            stop_sequence: null,
+            usage: { input_tokens: 5, output_tokens: 1 },
+          },
+        },
+      ],
+      [
+        'content_block_start',
+        { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } },
+      ],
+      [
+        'content_block_delta',
+        { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text } },
+      ],
+      ['content_block_stop', { type: 'content_block_stop', index: 0 }],
+      [
+        'message_delta',
+        {
+          type: 'message_delta',
+          delta: { stop_reason: 'end_turn', stop_sequence: null },
+          usage: { output_tokens: 3 },
+        },
+      ],
+      ['message_stop', { type: 'message_stop' }],
+    ]
+      .map(([e, d]) => `event: ${e}\ndata: ${JSON.stringify(d)}\n\n`)
+      .join('');
+
+  test('a real SDK client completes an assistant turn at the configured output cap', async () => {
+    const { default: Anthropic } = await import('@anthropic-ai/sdk');
+    const sent = [];
+    const client = new Anthropic({
+      apiKey: 'test-key',
+      fetch: async (_url, init) => {
+        sent.push(JSON.parse(init.body));
+        return new globalThis.Response(sse('Hello from a streamed reply'), {
+          status: 200,
+          headers: { 'content-type': 'text/event-stream' },
+        });
+      },
+    });
+    const svc = createAssistant(node.ctx, { client });
+    const s = await svc.create(adm);
+    const out = await svc.sendMessage(s.id, 'hi', adm);
+    assert.equal(sent.length, 1, 'the request actually went out');
+    assert.equal(sent[0].stream, true);
+    assert.ok(sent[0].max_tokens > 21_000 ? sent[0].stream : true);
+    assert.match(JSON.stringify(out.messages), /Hello from a streamed reply/);
+    assert.equal(out.session.usage.output, 3);
+  });
+
+  test('a client that can stream is streamed; one that cannot is called normally', async () => {
+    const calls = [];
+    const streaming = {
+      messages: {
+        stream: (params) => {
+          calls.push(['stream', params.max_tokens]);
+          return { finalMessage: async () => say('streamed') };
+        },
+        create: async () => {
+          throw new Error('create must not be used when streaming is available');
+        },
+      },
+    };
+    const svc = createAssistant(node.ctx, { client: streaming });
+    const s = await svc.create(adm);
+    await svc.sendMessage(s.id, 'hi', adm);
+    assert.equal(calls.length, 1);
+    const { svc: plain, client } = withClient([say('plain')]);
+    const s2 = await plain.create(adm);
+    await plain.sendMessage(s2.id, 'hi', adm);
+    assert.equal(client.calls.length, 1);
+  });
+});
+
 describe('choosing the model', () => {
   test('a chat uses its own model when one is chosen, otherwise the installation default', async () => {
     const { svc, client } = withClient([say('a'), say('b'), say('c')]);

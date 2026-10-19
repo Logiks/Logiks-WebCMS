@@ -4,6 +4,8 @@ import { HttpError, parse } from '../../core/http/errors.js';
 import { docs } from '../../core/http/docs.js';
 import { actorOf, requirePermission } from '../../core/http/middleware.js';
 
+const mirrorBody = z.object({ url: z.string().url().max(2000) });
+
 const librariesBody1 = z.object({
   name: z.string().max(191),
   version: z.string().max(64).default('latest'),
@@ -48,6 +50,24 @@ export default function librariesRoutes(ctx) {
       res.json(await libraries.importList(req.body ?? {}, actorOf(req)));
     },
   );
+
+  // Files from a CDN, downloaded once and served by the site itself (D-076).
+  r.get('/libraries/mirrors', requirePermission('libraries.read'), async (_req, res) => {
+    res.json({ mirrors: await libraries.mirrors.list() });
+  });
+  r.post(
+    '/libraries/mirrors',
+    requirePermission('libraries.manage'),
+    docs({ body: mirrorBody }),
+    async (req, res) => {
+      const { url } = parse(mirrorBody, req.body);
+      res.status(201).json(await libraries.mirrors.mirror(url, actorOf(req)));
+    },
+  );
+  r.delete('/libraries/mirrors/:id', requirePermission('libraries.manage'), async (req, res) => {
+    await libraries.mirrors.remove(Number(req.params.id), actorOf(req));
+    res.status(204).end();
+  });
 
   r.get('/libraries/search', requirePermission('libraries.manage'), async (req, res) => {
     res.json({ results: await libraries.search(req.query.q) });
@@ -94,6 +114,25 @@ export default function librariesRoutes(ctx) {
  */
 export function libraryPublicRoute(ctx) {
   const r = Router();
+  // GET /lib/_cdn/<id>/<file>: a file downloaded from a CDN. npm names cannot start with an underscore, so it never
+  // collides with a package.
+  r.get(/^\/lib\/(_cdn\/[0-9a-f]{12}\/[A-Za-z0-9._-]+)$/, async (req, res, next) => {
+    try {
+      const f = await ctx.libraries.mirrors.file(req.params[0]);
+      if (!f) return next();
+      res.set({
+        'Content-Type': f.mime,
+        'Cache-Control': 'public, max-age=31536000, immutable',
+        'X-Content-Type-Options': 'nosniff',
+        ...(f.mime === 'image/svg+xml'
+          ? { 'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; sandbox" }
+          : {}),
+      });
+      res.end(f.buf);
+    } catch (e) {
+      next(e);
+    }
+  });
   r.get(/^\/lib\/((?:@[^/@]+\/)?[^/@]+)@([^/]+)\/(.+)$/, async (req, res, next) => {
     try {
       const [name, version, rel] = [req.params[0], req.params[1], req.params[2]]; // Express has decoded them

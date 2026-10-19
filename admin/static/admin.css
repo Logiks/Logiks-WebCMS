@@ -1016,35 +1016,6 @@ body {
   flex-direction: column;
   gap: 0.5rem;
 }
-.chat-msg {
-  display: flex;
-}
-.chat-user {
-  justify-content: flex-end;
-}
-.chat-bubble {
-  max-width: 92%;
-  padding: 0.45rem 0.7rem;
-  border-radius: 0.6rem;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  font-size: 0.92rem;
-}
-.chat-user .chat-bubble {
-  background: var(--cobalt);
-  color: #fff;
-}
-.chat-assistant .chat-bubble {
-  background: var(--paper);
-}
-.chat-wait {
-  color: var(--muted);
-}
-.chat-tool {
-  font-size: 0.78rem;
-  color: var(--muted);
-  padding-left: 0.25rem;
-}
 .chat-form {
   padding: 0.6rem 0.75rem;
   border-top: 1px solid var(--line);
@@ -1097,12 +1068,6 @@ body {
   }
 }
 
-.chat-img {
-  display: block;
-  max-width: 100%;
-  margin-top: 0.4rem;
-  border-radius: 0.4rem;
-}
 .chat-thumbs {
   display: flex;
   gap: 0.4rem;

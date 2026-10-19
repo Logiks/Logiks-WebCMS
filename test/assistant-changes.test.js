@@ -231,6 +231,165 @@ describe('write tools', () => {
   });
 });
 
+describe('the site security policy', () => {
+  // The exact shapes that were blocked in the browser: CDN Bootstrap, Bootstrap Icons, Google Fonts, an embedded font.
+  const CDN_LAYOUT = `<!doctype html><html><head>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+<style>@font-face{font-family:x;src:url(data:font/truetype;charset=utf-8;base64,AAAA)}</style>
+</head><body>{{ content_for_layout }}<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script></body></html>`;
+
+  test('every blocked kind of asset is recognised, and ordinary links are not', async () => {
+    const { blockedAssets } = await import('../src/modules/assistant/validate.js');
+    const found = blockedAssets('themes/x/layouts/default.html', CDN_LAYOUT);
+    assert.equal(found.length, 5);
+    assert.ok(found.some((f) => /fonts\.googleapis/.test(f)));
+    assert.ok(found.some((f) => /bootstrap-icons/.test(f)));
+    assert.ok(found.some((f) => /embedded as data:/.test(f)));
+    assert.ok(found.some((f) => /script loaded from another site/.test(f)));
+    const fine = `<link rel="canonical" href="https://example.com/a"><link rel="stylesheet" href="/lib/bootstrap@5.3.3/dist/css/bootstrap.min.css"><a href="https://example.com">x</a><img src="https://example.com/a.png">`;
+    assert.deepEqual(blockedAssets('pages/a.html', fine), []);
+    assert.deepEqual(
+      blockedAssets('menus/main.json', CDN_LAYOUT),
+      [],
+      'only documents that load assets are checked',
+    );
+    assert.deepEqual(blockedAssets('@import', null), []);
+    assert.equal(
+      blockedAssets('pages/a.html', '<style>@import url("https://x.test/a.css");</style>').length,
+      1,
+    );
+  });
+
+  // These tests are about what happens when a CDN cannot be reached; they must never really go out to one.
+  const offline = async (fn) => {
+    const real = node.ctx.libraries.mirrors;
+    const down = async () => {
+      throw new Error(
+        'Could not download that file. This server needs internet access for this one step.',
+      );
+    };
+    node.ctx.libraries.mirrors = { mirror: down, mirrorData: down };
+    try {
+      return await fn();
+    } finally {
+      node.ctx.libraries.mirrors = real;
+    }
+  };
+
+  test('when the file cannot be downloaded, the write tells the assistant, so it fixes the page in the same turn', () =>
+    offline(async () => {
+      const { svc, client } = withClient([
+        callTools({
+          name: 'write_file',
+          input: { path: 'pages/ast-cdn.html', content: page('Cdn', CDN_LAYOUT.slice(0, 160)) },
+        }),
+        callTools({ name: 'validate_site' }),
+        say('I will switch to libraries'),
+      ]);
+      const s = await svc.create(adm);
+      const out = await svc.sendMessage(s.id, 'bootstrap please', adm);
+      const written = JSON.parse(client.calls[1].messages.at(-1).content[0].content);
+      assert.ok(written.blocked.length >= 1);
+      assert.match(written.hint, /install_library/);
+      assert.match(
+        written.why[0],
+        /internet access/,
+        'the reason it could not be fixed automatically',
+      );
+      const checked = JSON.parse(client.calls[2].messages.at(-1).content[0].content);
+      assert.equal(checked.ok, false);
+      assert.match(checked.problems[0].problem, /^blocked:/);
+      // And the person sees it even if the assistant ignores it.
+      assert.match(out.warnings[0].problem, /^blocked:/);
+      await svc.history.revert(out.commit.id, adm);
+    }));
+
+  test("a page that loads only the site's own files raises nothing", async () => {
+    const { svc, client } = withClient([
+      callTools({
+        name: 'write_file',
+        input: {
+          path: 'pages/ast-own.html',
+          content: page(
+            'Own',
+            `<link rel="stylesheet" href="/lib/bootstrap@5.3.3/dist/css/bootstrap.min.css"><p>ok</p>`,
+          ),
+        },
+      }),
+      say('done'),
+    ]);
+    const s = await svc.create(adm);
+    const out = await svc.sendMessage(s.id, 'own files', adm);
+    assert.equal(JSON.parse(client.calls[1].messages.at(-1).content[0].content).blocked, undefined);
+    assert.deepEqual(out.warnings, []);
+    await svc.history.revert(out.commit.id, adm);
+  });
+
+  test('the assistant is told the policy up front', async () => {
+    const { svc, client } = withClient([say('ok')]);
+    const s = await svc.create(adm);
+    await svc.sendMessage(s.id, 'hi', adm);
+    assert.match(client.calls[0].system[0].text, /no internet/);
+    assert.ok(client.calls[0].tools.some((t) => t.name === 'install_library'));
+  });
+
+  test('list_libraries and install_library work through the Libraries module, with its permissions', async () => {
+    const real = node.ctx.libraries.install;
+    const seen = [];
+    node.ctx.libraries.install = async (opts) => {
+      seen.push(opts);
+      return {
+        name: opts.name,
+        version: '5.3.3',
+        autoload: opts.autoload,
+        include: opts.include ?? ['dist/css/x.css'],
+      };
+    };
+    try {
+      const { svc, client } = withClient([
+        callTools(
+          { name: 'list_libraries' },
+          {
+            name: 'install_library',
+            input: {
+              name: 'bootstrap',
+              include: ['dist/css/bootstrap.min.css', 'dist/js/bootstrap.bundle.min.js'],
+            },
+          },
+        ),
+        say('installed'),
+      ]);
+      const s = await svc.create(adm);
+      await svc.sendMessage(s.id, 'use bootstrap', adm);
+      const [listed, installed] = client.calls[1].messages
+        .at(-1)
+        .content.map((r) => JSON.parse(r.content));
+      assert.ok(Array.isArray(listed.libraries));
+      assert.equal(installed.version, '5.3.3');
+      assert.equal(installed.loadsOnEveryPage, true);
+      assert.deepEqual(seen[0].include, [
+        'dist/css/bootstrap.min.css',
+        'dist/js/bootstrap.bundle.min.js',
+      ]);
+      assert.match(installed.use, /library_url/);
+
+      const nope = withClient([
+        callTools({ name: 'install_library', input: { name: 'bootstrap' } }),
+        say('no'),
+      ]);
+      const who = only(9, 'admin.access', 'libraries.read');
+      const s2 = await nope.svc.create(who);
+      await nope.svc.sendMessage(s2.id, 'install', who);
+      assert.match(nope.client.calls[1].messages.at(-1).content[0].content, /libraries\.manage/);
+      assert.equal(seen.length, 1);
+    } finally {
+      node.ctx.libraries.install = real;
+    }
+  });
+});
+
 describe('history and revert', () => {
   test('the first entry is a baseline of the site as it was before the change', async () => {
     const { rows } = { rows: await node.ctx.db('site_commits').orderBy('id') };

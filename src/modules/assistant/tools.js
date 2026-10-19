@@ -87,6 +87,32 @@ export const TOOLS = [
     input_schema: { type: 'object', properties: {}, additionalProperties: false },
   },
   {
+    name: 'list_libraries',
+    description:
+      "The npm packages installed for the public site (System → Libraries) and which load on every page. The site's security policy blocks anything linked from another site, so a framework, icon set or web font must be one of these.",
+    input_schema: { type: 'object', properties: {}, additionalProperties: false },
+  },
+  {
+    name: 'install_library',
+    description:
+      "Install an npm package from the registry so the site serves it itself, and load it on every page. Use it for CSS frameworks, icon sets and web fonts instead of linking a CDN (which the site blocks): e.g. bootstrap with include ['dist/css/bootstrap.min.css','dist/js/bootstrap.bundle.min.js'], bootstrap-icons with ['font/bootstrap-icons.min.css'], @fontsource/inter with ['400.css','600.css']. Reference a file elsewhere with {{ 'pkg/path' | library_url }}. Check list_libraries first. (A CDN link in a page is also downloaded into the site automatically when you write it, but installing the package is cleaner.) Not covered by Revert (remove it under System → Libraries).",
+    input_schema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'npm package name.' },
+        version: { type: 'string', description: 'Exact version or tag; default latest.' },
+        include: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Files inside the package to load on every page (.css, .js).',
+        },
+        autoload: { type: 'boolean', description: 'Load on every page (default true).' },
+      },
+      required: ['name'],
+      additionalProperties: false,
+    },
+  },
+  {
     name: 'generate_image',
     description:
       'Generate a picture with the configured image provider and save it to the media library. Returns its URL (src) to use in a page or component. Costs money per call: only when an image is actually needed, and describe it fully in one prompt.',

@@ -2375,6 +2375,10 @@ document.addEventListener('alpine:init', () => {
     picked: [],
     fileFilter: '',
     report: '',
+    mirrors: [],
+    mirrorUrl: '',
+    mirrorReport: '',
+    mirrorBusy: false,
     loaded: false,
     busy: false,
     error: '',
@@ -2403,7 +2407,41 @@ document.addEventListener('alpine:init', () => {
       const r = await api('GET', '/admin/libraries');
       this.libraries = r.libraries;
       this.allowScripts = r.allowScripts;
+      this.mirrors = (await api('GET', '/admin/libraries/mirrors')).mirrors;
       this.loaded = true;
+    },
+    /** Download a CDN file into the site; its address on this site is then listed to copy. */
+    async downloadMirror() {
+      this.mirrorBusy = true;
+      this.busy = true;
+      this.error = '';
+      this.mirrorReport = '';
+      try {
+        const r = await api('POST', '/admin/libraries/mirrors', { url: this.mirrorUrl.trim() });
+        this.mirrorUrl = '';
+        this.mirrorReport =
+          `Use ${r.url}` +
+          (r.via === 'npm' ? ' (installed from npm)' : '') +
+          (r.note ? ` — ${r.note}` : '') +
+          (r.failed?.length
+            ? ` — ${r.failed.length} file(s) it refers to could not be downloaded.`
+            : '');
+        await this.load();
+      } catch (e) {
+        this.error = e.message;
+      } finally {
+        this.mirrorBusy = false;
+        this.busy = false;
+      }
+    },
+    async removeMirror(m) {
+      if (!confirm(`Remove ${m.localUrl}? Pages that use it will lose that file.`)) return;
+      try {
+        await api('DELETE', `/admin/libraries/mirrors/${m.id}`);
+        await this.load();
+      } catch (e) {
+        this.error = e.message;
+      }
     },
     async search() {
       if (!this.q.trim()) return;
@@ -4340,6 +4378,8 @@ document.addEventListener('alpine:init', () => {
     delete_file: 'Deleted a file',
     validate_site: 'Checked the pages',
     generate_image: 'Generated a picture',
+    list_libraries: 'Looked at the libraries',
+    install_library: 'Installed a library',
   };
 
   Alpine.data('assistantPanel', () => ({
@@ -4364,6 +4404,14 @@ document.addEventListener('alpine:init', () => {
       if (!(await this.mountFragment('assistant', 'panel'))) return;
       this.loadBudget();
       this.loadModels();
+      // "Ask the assistant" from Search hands over what was typed.
+      const takePrefill = (text) => {
+        this.draft = text;
+        window.__assistantPrefill = null;
+        this.$nextTick(() => document.getElementById('chat-input')?.focus());
+      };
+      window.addEventListener('assistant-ask', (e) => takePrefill(e.detail));
+      if (window.__assistantPrefill) takePrefill(window.__assistantPrefill);
       try {
         await this.loadSessions();
         let id = null;
@@ -4393,8 +4441,10 @@ document.addEventListener('alpine:init', () => {
       const out = [];
       for (const m of messages) {
         if (m.role === 'user') {
-          if (typeof m.content === 'string') out.push({ kind: 'user', text: m.content });
-          else if (m.content.some((b) => b.type === 'text'))
+          if (typeof m.content === 'string') {
+            // "[auto] …" is the system asking the assistant to carry on after a cut-off reply, not the person.
+            if (!m.content.startsWith('[auto] ')) out.push({ kind: 'user', text: m.content });
+          } else if (m.content.some((b) => b.type === 'text'))
             out.push({
               kind: 'user',
               text: m.content.find((b) => b.type === 'text').text,
@@ -5807,6 +5857,607 @@ document.addEventListener('alpine:init', () => {
   }));
 
   // ───────── settings ─────────
+  // ───────── Search (D-078): find a screen, a setting or a task by what you want to do ─────────
+  // Words people use for a screen, beyond its menu label. Keyed by the menu id.
+  const SCREEN_WORDS = {
+    overview: 'dashboard home status health summary',
+    pages: 'site pages edit html layout page manager',
+    components: 'component blocks sections reusable widgets template',
+    pageDesigner: 'ai build page design generate landing',
+    services: 'api endpoint data query sql script service',
+    seo: 'search engine title description meta og twitter schema json-ld',
+    terms: 'categories tags taxonomy',
+    media: 'images files upload library pictures photos',
+    'media-generator': 'ai image generate picture dall-e imagen stability',
+    'media-analytics': 'media usage unused files',
+    plugins: 'plugin extensions add-ons install',
+    'analytics-overview': 'traffic visitors page views statistics stats',
+    'analytics-active': 'live now online users right now',
+    'analytics-pages': 'popular pages views',
+    'analytics-sessions': 'visits sessions',
+    'analytics-users': 'visitors users behaviour',
+    audit: 'log who changed what history security events',
+    'content-activity': 'content log editors who edited published',
+    events: 'event log webhooks fired',
+    themes: 'theme switch activate change look design skin install duplicate clone export',
+    customize: 'theme options colors colours fonts custom css style branding',
+    'theme-editor': 'theme files layout template css edit code header footer',
+    menus: 'navigation menu header footer links nav',
+    requirements: 'requirements documentation readme spec brief project',
+    history: 'change history git commit diff revert undo push versions',
+    locales: 'translations languages wording text locale i18n',
+    redirects: 'redirect 301 302 moved urls',
+    messages: 'contact form messages inbox enquiries',
+    sitemap: 'sitemap xml robots search engines urls',
+    libraries: 'npm packages cdn bootstrap fonts icons javascript css jquery download',
+    dbms: 'database tables sql query browse rows',
+    api: 'api keys tokens public api openapi swagger documentation external',
+    modules: 'modules switch on off enable disable features',
+    settings: 'configuration options preferences',
+    users: 'people accounts invite password reset lock unlock staff',
+    roles: 'permissions access rights roles administrator editor',
+    cluster: 'servers nodes health version drift',
+    system: 'queue jobs failed cache redis runtime health',
+    updates: 'update upgrade git pull restart deploy release servers',
+    webhooks: 'webhook notify http callback integrations post',
+    scheduler: 'schedule cron recurring tasks jobs timer automation',
+  };
+  // Words for a whole Settings section.
+  const SETTINGS_WORDS = {
+    general: 'site name maintenance mode language locale timezone',
+    security:
+      'csp content security policy cors headers hsts password lockout session cookies rate limit https',
+    site: 'website url domain canonical head scripts analytics code',
+    login: 'sign in page logo background welcome branding',
+    mail: 'email smtp sender outgoing messages server',
+    ai: 'anthropic claude api key model assistant',
+    media_generator: 'image generation openai google stability keys',
+    assistant: 'assistant git push remote token limits budget summaries',
+    seo: 'search engines twitter facebook verification tags',
+    themes: 'theme scripts javascript allow',
+    libraries: 'npm registry packages scripts cdn',
+    cache: 'cache ttl pages speed performance redis',
+    updates: 'update git remote branch restart migrations',
+    features: 'features services public api switches',
+    analytics: 'analytics tracking retention privacy',
+  };
+  // Words for one particular setting, where its label does not say what people would call it.
+  const FIELD_WORDS = {
+    'security.csp_img_sources':
+      'content security policy csp images pictures external allow cdn blocked',
+    'security.csp_connect_sources':
+      'content security policy csp connect fetch xhr api external allow',
+    'security.cors_origins': 'cors cross origin allowed public api browsers',
+    'security.session_ttl_hours': 'sign out logged out stay signed in timeout expire',
+    'security.max_login_attempts': 'brute force lock locked out wrong password',
+  };
+  // Tasks in plain words, pointing at the place that does them. `go` is a menu id or `settings/<section>/<field>`.
+  const TASKS = [
+    [
+      'Change the Content Security Policy',
+      'settings/security/csp_img_sources',
+      'csp content security policy script style font image connect sources blocked cdn headers',
+      'Allow extra image or connect sources. Scripts, styles and fonts load from the site itself: add them under System → Libraries.',
+    ],
+    [
+      'Load Bootstrap, icons or fonts without a CDN',
+      'libraries',
+      'bootstrap icons fonts cdn google fonts npm download offline',
+      'Install the npm package, or download a CDN file into the site.',
+    ],
+    [
+      'Switch the site to another theme',
+      'themes',
+      'theme switch activate change design look skin',
+      '',
+    ],
+    [
+      'Change colours, fonts or add custom CSS',
+      'customize',
+      'colours colors fonts custom css style branding look theme options',
+      '',
+    ],
+    [
+      'Edit a theme’s layout, header or footer',
+      'theme-editor',
+      'theme layout header footer template css edit code files',
+      '',
+    ],
+    [
+      'Copy a theme to edit it',
+      'themes',
+      'duplicate clone copy theme built-in read-only',
+      'Built-in themes are read-only. Duplicate one to get a copy you can edit.',
+    ],
+    ['Edit a page', 'pages', 'edit page html content layout', ''],
+    ['Build a whole page with AI', 'pageDesigner', 'ai build new page landing design generate', ''],
+    [
+      'Add or change a reusable block',
+      'components',
+      'component block section widget reusable template',
+      '',
+    ],
+    ['Change the navigation menu', 'menus', 'menu navigation header footer links nav', ''],
+    [
+      'Add a redirect from an old address',
+      'redirects',
+      'redirect 301 302 moved old url address',
+      '',
+    ],
+    [
+      'Translate the site or change its wording',
+      'locales',
+      'translate translation language wording text locale',
+      '',
+    ],
+    [
+      'Edit SEO titles and descriptions',
+      'seo',
+      'seo title description meta search engine open graph',
+      '',
+    ],
+    ['Change the sitemap or robots.txt', 'sitemap', 'sitemap robots search engines crawl', ''],
+    ['Upload images and files', 'media', 'upload images pictures photos files library', ''],
+    [
+      'Generate an image with AI',
+      'media-generator',
+      'ai generate image picture dall-e imagen stability',
+      '',
+    ],
+    [
+      'Change the site name or turn on maintenance mode',
+      'settings/general/maintenance',
+      'site name maintenance mode offline under construction',
+      '',
+    ],
+    [
+      'Set up outgoing email (SMTP)',
+      'settings/mail',
+      'email smtp mail server sender password reset invite',
+      '',
+    ],
+    [
+      'Add the Anthropic key or choose the AI model',
+      'settings/ai',
+      'anthropic claude key api model ai assistant',
+      '',
+    ],
+    [
+      'Add keys for image generation',
+      'settings/media_generator',
+      'openai google stability image generation key',
+      '',
+    ],
+    [
+      'Set assistant token limits or git push',
+      'settings/assistant',
+      'assistant tokens limit budget git push remote token summaries',
+      '',
+    ],
+    [
+      'Review or undo what the assistant changed',
+      'history',
+      'assistant changes diff revert undo git commit history push',
+      '',
+    ],
+    [
+      'Read or edit the site requirements',
+      'requirements',
+      'requirements spec documentation project brief readme',
+      '',
+    ],
+    [
+      'Add a person or reset a password',
+      'users',
+      'invite add new user admin account person staff password reset unlock',
+      '',
+    ],
+    ['Decide who can do what', 'roles', 'roles permissions access rights administrator editor', ''],
+    [
+      'Change password rules, lockout or session length',
+      'settings/security/password_min_length',
+      'password rules lockout session length sign in attempts rate limit',
+      '',
+    ],
+    [
+      'Brand the sign-in page',
+      'settings/login',
+      'login sign in page logo background welcome branding',
+      '',
+    ],
+    [
+      'Create an API key for another app',
+      'api',
+      'api key token external integration public api openapi',
+      '',
+    ],
+    [
+      'Send events to another system (webhooks)',
+      'webhooks',
+      'webhook notify callback http integration event',
+      '',
+    ],
+    [
+      'Run something on a schedule',
+      'scheduler',
+      'schedule cron recurring timer automation job',
+      '',
+    ],
+    [
+      'Update or restart a server',
+      'updates',
+      'update upgrade restart deploy git pull release server',
+      '',
+    ],
+    [
+      'Check that all servers are healthy',
+      'cluster',
+      'cluster servers nodes health version drift',
+      '',
+    ],
+    ['See who changed what', 'audit', 'audit log who changed history events security', ''],
+    ['Browse the database or run SQL', 'dbms', 'database sql query tables rows browse', ''],
+    [
+      'See visitors and traffic',
+      'analytics-overview',
+      'traffic visitors statistics analytics page views',
+      '',
+    ],
+    [
+      'Read messages from the contact form',
+      'messages',
+      'contact form messages inbox enquiries',
+      '',
+    ],
+    ['Switch features on or off', 'modules', 'modules features switch enable disable on off', ''],
+    ['Clear or tune the cache', 'settings/cache', 'cache clear ttl speed performance', ''],
+    [
+      'Make the site faster',
+      'settings/cache',
+      'faster speed performance slow load fast cache',
+      'Page and data caching.',
+    ],
+  ];
+  const STOP = new Set([
+    'how',
+    'to',
+    'do',
+    'i',
+    'my',
+    'the',
+    'a',
+    'an',
+    'of',
+    'in',
+    'on',
+    'for',
+    'can',
+    'where',
+    'is',
+    'what',
+    'and',
+    'or',
+    'with',
+    'it',
+    'me',
+    'we',
+  ]);
+  const SOFT = new Set([
+    'change',
+    'set',
+    'edit',
+    'manage',
+    'update',
+    'add',
+    'make',
+    'find',
+    'open',
+    'show',
+    'configure',
+    'setup',
+    'new',
+    'create',
+    'turn',
+    'use',
+    'get',
+  ]);
+  const words = (s) =>
+    String(s)
+      .toLowerCase()
+      .normalize('NFKD')
+      .replace(/[^a-z0-9]+/g, ' ')
+      .trim()
+      .split(' ')
+      .filter(Boolean);
+  /** 2 = matches at the start of a word, 1 = somewhere inside, 0 = no. */
+  const hit = (hay, t) =>
+    hay.startsWith(t) || hay.includes(` ${t}`) ? 2 : hay.includes(t) ? 1 : 0;
+  /** One slip (a missing, extra or changed letter) against any word: forgives typos like "securty". */
+  const near = (t, toks) =>
+    t.length >= 5 &&
+    toks.some((w) => {
+      if (Math.abs(w.length - t.length) > 1) return false;
+      let i = 0;
+      let j = 0;
+      let edits = 0;
+      while (i < t.length && j < w.length) {
+        if (t[i] === w[j]) (i++, j++);
+        else if (++edits > 1) return false;
+        else if (t.length > w.length) i++;
+        else if (t.length < w.length) j++;
+        else (i++, j++);
+      }
+      return edits + (t.length - i) + (w.length - j) <= 1;
+    });
+  /** How well one entry answers the query tokens (0 = not at all). Every non-soft token must match somewhere. */
+  function rank(e, tokens) {
+    let total = 0;
+    let matched = 0;
+    let required = 0;
+    let requiredMatched = 0;
+    for (const t of tokens) {
+      const s = hit(e.title_, t)
+        ? 6 + hit(e.title_, t) * 2
+        : hit(e.words_, t)
+          ? 3 + hit(e.words_, t)
+          : hit(e.path_, t)
+            ? 3
+            : hit(e.sub_, t)
+              ? 2
+              : near(t, words(e.title_))
+                ? 2.5
+                : near(t, e.toks_)
+                  ? 1.5
+                  : 0;
+      if (!SOFT.has(t)) required++;
+      if (s) {
+        matched++;
+        if (!SOFT.has(t)) requiredMatched++;
+      }
+      total += s;
+    }
+    if (!matched) return 0;
+    // Every word that matters must match; in a longer question, two thirds is enough ("undo what the AI changed").
+    if (requiredMatched < required && !(required >= 3 && requiredMatched / required >= 0.66))
+      return 0;
+    if (e.title_.startsWith(tokens[0])) total += 3;
+    return total + (e.type === 'task' ? 2 : e.type === 'screen' ? 1 : 0) - e.title_.length / 200;
+  }
+
+  Alpine.data('commandSearch', () => {
+    /** @type {any[]} */
+    let index = [];
+    let settingsLoaded = false;
+    return {
+      open: false,
+      q: '',
+      active: 0,
+      results: [],
+      settings: null,
+      /** The words to highlight in what is shown. */
+      marks: [],
+      async show() {
+        this.open = true;
+        this.q = '';
+        this.active = 0;
+        this.build();
+        this.refresh();
+        this.$nextTick(() => document.getElementById('cmdk-q')?.focus());
+        if (!settingsLoaded && this.root().can('settings.read')) {
+          settingsLoaded = true;
+          try {
+            const { namespaces } = await api('GET', '/admin/settings');
+            this.addSettings(namespaces);
+            this.build();
+            this.refresh();
+          } catch {
+            settingsLoaded = false; // try again next time it is opened
+          }
+        }
+      },
+      hide() {
+        this.open = false;
+      },
+      root: () => Alpine.$data(document.body),
+      /** Screens this person can open, from the menu itself, so nothing is offered that they could not reach. */
+      build() {
+        const root = this.root();
+        const out = [];
+        for (const n of root.nav) {
+          for (const c of n.items ?? [n])
+            out.push(
+              this.entry({
+                type: 'screen',
+                title: c.label,
+                path: n.items ? n.label : '',
+                go: `#/${c.id}`,
+                icon: n.icon || 'bi-compass',
+                words: SCREEN_WORDS[c.id] ?? '',
+              }),
+            );
+        }
+        const reachable = (go) => {
+          if (go.startsWith('settings')) {
+            // A settings task only when the person may read settings, and (once known) when that section exists.
+            return (
+              root.can('settings.read') &&
+              (!this.settings || this.settings.some((n) => n.namespace === go.split('/')[1]))
+            );
+          }
+          return root.nav.some((n) => (n.items ?? [n]).some((c) => c.id === go));
+        };
+        for (const [title, go, w, sub] of TASKS)
+          if (reachable(go))
+            out.push(
+              this.entry({
+                type: 'task',
+                title,
+                sub,
+                path: this.where(go, root),
+                go: `#/${go}`,
+                icon: 'bi-lightbulb',
+                words: w,
+              }),
+            );
+        index = [...out, ...index.filter((e) => e.type === 'setting')];
+      },
+      where(go, root) {
+        if (go.startsWith('settings')) {
+          const ns = this.settings?.find((n) => n.namespace === go.split('/')[1]);
+          return ns ? `Settings → ${ns.title}` : 'Settings';
+        }
+        for (const n of root.nav)
+          for (const c of n.items ?? [n])
+            if (c.id === go) return n.items ? `${n.label} → ${c.label}` : n.label;
+        return '';
+      },
+      addSettings(namespaces) {
+        this.settings = namespaces;
+        const out = [];
+        for (const ns of namespaces) {
+          const sectionWords = `${SETTINGS_WORDS[ns.namespace] ?? ''} ${ns.namespace.replace(/_/g, ' ')}`;
+          out.push(
+            this.entry({
+              type: 'setting',
+              title: `${ns.title} settings`,
+              sub: ns.description || '',
+              path: 'Settings',
+              go: `#/settings/${ns.namespace}`,
+              icon: 'bi-sliders',
+              words: sectionWords,
+            }),
+          );
+          for (const f of ns.fields) {
+            if (f.hidden) continue;
+            out.push(
+              this.entry({
+                type: 'setting',
+                title: f.label,
+                sub: f.help || '',
+                path: `Settings → ${ns.title}`,
+                go: `#/settings/${ns.namespace}/${f.key}`,
+                icon: 'bi-sliders',
+                // The section's own words belong to the section (and the path), not to every field in it.
+                words: `${f.key.replace(/_/g, ' ')} ${FIELD_WORDS[`${ns.namespace}.${f.key}`] ?? ''}`,
+              }),
+            );
+          }
+        }
+        index = [...index.filter((e) => e.type !== 'setting'), ...out];
+      },
+      entry(e) {
+        return {
+          ...e,
+          title_: words(e.title).join(' '),
+          words_: words(e.words || '').join(' '),
+          path_: words(e.path || '').join(' '),
+          sub_: words(e.sub || '').join(' '),
+          toks_: words(`${e.title} ${e.words || ''}`),
+        };
+      },
+      refresh() {
+        const tokens = words(this.q).filter((t) => !STOP.has(t));
+        this.marks = tokens;
+        this.active = 0;
+        if (!tokens.length) {
+          this.results = index
+            .filter((e) => e.type === 'task')
+            .slice(0, 8)
+            .map((e) => ({ ...e, group: 'Common tasks' }));
+          return;
+        }
+        const ranked = index
+          .map((e) => ({ e, s: rank(e, tokens) }))
+          .filter((x) => x.s > 0)
+          .sort((a, b) => b.s - a.s)
+          .slice(0, 12)
+          .map((x) => ({
+            ...x.e,
+            group: x.e.type === 'task' ? 'Tasks' : x.e.type === 'screen' ? 'Screens' : 'Settings',
+          }));
+        // Keep the groups together but in the order the best match of each appears.
+        const order = [...new Set(ranked.map((r) => r.group))];
+        this.results = order.flatMap((g) => ranked.filter((r) => r.group === g));
+        if (
+          this.root().can('admin.access') &&
+          this.q.trim().length >= 3 &&
+          !this.root().disabledModules.includes('assistant')
+        )
+          this.results.push({
+            type: 'ask',
+            group: 'Ask',
+            title: `Ask the assistant: “${this.q.trim()}”`,
+            sub: 'Describe what you want and the assistant can do it for you.',
+            path: '',
+            icon: 'bi-stars',
+            go: '',
+          });
+      },
+      /** Escaped text with the searched words marked: only escaped text is ever put into the page. */
+      hl(text) {
+        const s = String(text ?? '');
+        if (!this.marks.length) return esc(s);
+        const re = new RegExp(
+          `(${this.marks
+            .map((m) => m.replace(/[^a-z0-9]/g, ''))
+            .filter(Boolean)
+            .join('|')})`,
+          'gi',
+        );
+        return s
+          .split(re)
+          .map((part, i) => (i % 2 ? `<mark>${esc(part)}</mark>` : esc(part)))
+          .join('');
+      },
+      showGroup(i) {
+        return i === 0 || this.results[i - 1].group !== this.results[i].group;
+      },
+      move(d) {
+        if (!this.results.length) return;
+        this.active = (this.active + d + this.results.length) % this.results.length;
+        this.$nextTick(() =>
+          document.getElementById(`cmdk-r${this.active}`)?.scrollIntoView?.({ block: 'nearest' }),
+        );
+      },
+      choose(r = this.results[this.active]) {
+        if (!r) return;
+        this.hide();
+        if (r.type === 'ask') {
+          window.__assistantPrefill = this.q.trim();
+          this.root().toggleChat(true);
+          window.dispatchEvent(
+            new CustomEvent('assistant-ask', { detail: window.__assistantPrefill }),
+          );
+          return;
+        }
+        const m = /^#\/settings\/([^/]+)\/([^/]+)$/.exec(r.go);
+        if (m) {
+          window.__settingsFocus = { ns: m[1], key: m[2] };
+          location.hash = `#/settings/${m[1]}`;
+          window.dispatchEvent(new CustomEvent('settings-focus'));
+        } else location.hash = r.go;
+      },
+      onKey(e) {
+        const typing =
+          /^(INPUT|TEXTAREA|SELECT)$/.test(e.target?.tagName ?? '') || e.target?.isContentEditable;
+        if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+          e.preventDefault();
+          this.open ? this.hide() : this.show();
+        } else if (
+          !this.open &&
+          e.key === '/' &&
+          !typing &&
+          !e.metaKey &&
+          !e.ctrlKey &&
+          !e.altKey
+        ) {
+          e.preventDefault();
+          this.show();
+        } else if (this.open && e.key === 'Escape') this.hide();
+      },
+    };
+  });
+
   Alpine.data('settingsPage', () => ({
     ...H,
     loaded: false,
@@ -5836,6 +6487,24 @@ document.addEventListener('alpine:init', () => {
           ? want
           : this.namespaces[0]?.namespace;
       this.loaded = true;
+      window.addEventListener('settings-focus', () => this.focusField());
+      this.focusField();
+    },
+
+    /** Arriving from Search: open that section, scroll to the one setting and flash it. */
+    async focusField() {
+      const want = window.__settingsFocus;
+      if (!want || !this.namespaces.length) return;
+      window.__settingsFocus = null;
+      if (this.namespaces.some((n) => n.namespace === want.ns)) this.select(want.ns);
+      await this.$nextTick();
+      await new Promise((r) => setTimeout(r, 60));
+      const el = document.getElementById(`f-${want.ns}-${want.key}`);
+      if (!el) return;
+      el.scrollIntoView?.({ block: 'center' });
+      el.classList.add('flash');
+      setTimeout(() => el.classList.remove('flash'), 2400);
+      el.querySelector('input, select, textarea')?.focus({ preventScroll: true });
     },
 
     async reload() {

@@ -4,6 +4,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { z } from 'zod';
 import { now } from '../../core/db/index.js';
 import { HttpError, notFound, parse } from '../../core/http/errors.js';
+import { createMirror } from './mirror.js';
 import { TarballError, readTarball, verifyIntegrity } from './tarball.js';
 
 const CHANNEL = 'libraries:changed';
@@ -73,7 +74,7 @@ const importSchema = z.object({
  *
  * The installed list lives in memory on each server, reloaded over the bus and healed by polling (as themes are).
  * Scripts are off unless Settings → Libraries allows them: package JavaScript runs on the admin's own address.
- * @param {{env: any, db: any, settings: any, bus: any, audit: any, cache: any, log: any, fetch?: typeof fetch}} deps
+ * @param {{env: any, db: any, settings: any, bus: any, audit: any, cache: any, log: any, fetch?: typeof fetch, lookup?: (host: string) => Promise<{address: string}[]>}} deps
  */
 export function createLibraries({
   env,
@@ -84,6 +85,7 @@ export function createLibraries({
   cache,
   log,
   fetch: fetchImpl = fetch,
+  lookup,
 }) {
   /** @type {any[]} */
   let libs = [];
@@ -654,6 +656,8 @@ export function createLibraries({
       return { installed, failed };
     },
   };
+  /** Files downloaded from a CDN once and served by the site itself (docs/DECISIONS.md D-076). */
+  svc.mirrors = createMirror({ db, audit, settings, fetchImpl, libraries: svc, lookup });
   return svc;
 }
 

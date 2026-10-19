@@ -216,3 +216,27 @@ test('Themes: a bad id is refused with the reason, and the dialog stays open', a
   b.click(btn(page(), 'Create copy'));
   await wait(() => /already exists/.test(page().querySelector('.modal-card').textContent));
 });
+
+test('Libraries: files downloaded from a CDN are listed with the address to use, and can be removed', async () => {
+  const { createMirror } = await import('../src/modules/libraries/mirror.js');
+  const m = createMirror({
+    db: node.ctx.db,
+    audit: node.ctx.audit,
+    settings: node.ctx.settings,
+    libraries: node.ctx.libraries,
+    lookup: async () => [{ address: '93.184.216.34' }],
+    fetchImpl: async () =>
+      new globalThis.Response('a{}', { status: 200, headers: { 'content-type': 'text/css' } }),
+  });
+  const r = await m.mirror('https://cdn.example.test/ui-mirror.css', { id: 1 });
+  b.go('#/libraries');
+  const page = () => b.$('section[x-data="librariesPage"]');
+  await wait(() => page() && page().textContent.includes(r.url));
+  assert.ok(page().querySelector('#mirror-url'), 'the download form is there');
+  assert.match(page().textContent, /Downloaded from/);
+  b.win.confirm = () => true;
+  const row = () => [...page().querySelectorAll('tr')].find((x) => x.textContent.includes(r.url));
+  b.click(btn(row(), 'Remove'));
+  await wait(() => !page().textContent.includes(r.url));
+  assert.equal((await fetch(`${node.url}${r.url}`)).status, 404);
+});

@@ -16,17 +16,17 @@
     Describe what you want for the site, or ask for a change. Decisions are written into <a href="#/requirements">System → Requirements</a>; every change is recorded in <a href="#/history">System → Change history</a> and can be reverted.
   </div>
   <template x-for="(it, i) in items" :key="i">
-    <div class="chat-msg" :class="'chat-' + it.kind">
-      <template x-if="it.kind === 'tool'"><span class="chat-tool"><i class="bi bi-gear"></i> <span x-text="it.text"></span></span></template>
+    <div class="ac-msg" :class="'ac-' + it.kind">
+      <template x-if="it.kind === 'tool'"><span class="ac-tool"><i class="bi bi-check2-circle"></i><span x-text="it.text"></span></span></template>
       <template x-if="it.kind !== 'tool'">
-        <div class="chat-bubble">
-          <div x-text="it.text"></div>
-          <template x-for="u in (it.images || [])" :key="u"><img class="chat-img" :src="u" alt="Picture in the chat" loading="lazy"></template>
+        <div class="ac-bubble">
+          <div class="ac-text" x-text="it.text" x-show="it.text"></div>
+          <template x-for="u in (it.images || [])" :key="u"><img class="ac-img" :src="u" alt="Picture in the chat" loading="lazy"></template>
         </div>
       </template>
     </div>
   </template>
-  <div class="chat-msg chat-assistant" x-show="busy"><div class="chat-bubble chat-wait">Working…</div></div>
+  <div class="ac-msg ac-assistant" x-show="busy"><div class="ac-bubble ac-wait"><span class="ac-dots"><i></i><i></i><i></i></span> Working…</div></div>
 </div>
 <div class="cc-warn" x-show="warnings.length" role="alert">
   <div class="cc-warn-title"><i class="bi bi-exclamation-triangle"></i> These pages may be broken</div>

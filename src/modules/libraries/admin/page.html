@@ -62,3 +62,24 @@
             <span class="muted small">Ticked stylesheets and scripts load on every page, in this order, when the library is set to load.</span>
           </div>
         </div>
+        <div class="panel mt-3">
+          <div class="panel-h">Files from a CDN</div>
+          <div class="p-3" x-show="can('libraries.manage')">
+            <div class="muted small mb-2">Paste the address of a stylesheet, script, font or image on a CDN (for example a Google Fonts or jsDelivr link). It is downloaded once and served from this site, so the live site never depends on the CDN or on internet access. A stylesheet’s fonts come with it. An npm package on jsDelivr or unpkg is installed from npm instead.</div>
+            <form class="d-flex gap-2 flex-wrap" @submit.prevent="downloadMirror()">
+              <label class="visually-hidden" for="mirror-url">CDN address</label>
+              <input id="mirror-url" class="form-control" style="max-width:36rem" type="url" placeholder="https://fonts.googleapis.com/css2?family=Inter:wght@400;600" x-model="mirrorUrl">
+              <button class="btn btn-primary" :disabled="busy || !mirrorUrl" x-text="mirrorBusy ? 'Downloading…' : 'Download into the site'"></button>
+            </form>
+            <div class="alert alert-success small mt-2 mb-0" x-show="mirrorReport" x-text="mirrorReport"></div>
+          </div>
+          <div class="empty" x-show="loaded && !mirrors.length">Nothing downloaded from a CDN yet.</div>
+          <table class="table" x-show="mirrors.length"><thead><tr><th>Use this address</th><th>Downloaded from</th><th>Size</th><th></th></tr></thead><tbody>
+            <template x-for="m in mirrors" :key="m.id"><tr>
+              <td class="mono small" x-text="m.localUrl"></td>
+              <td class="small text-break" x-text="m.url"></td>
+              <td x-text="bytes(m.size)"></td>
+              <td class="text-end"><button class="btn btn-sm btn-outline-danger" x-show="can('libraries.manage')" @click="removeMirror(m)">Remove</button></td>
+            </tr></template>
+          </tbody></table>
+        </div>

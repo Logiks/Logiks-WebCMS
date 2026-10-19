@@ -14,6 +14,7 @@
   <link rel="stylesheet" href="/admin/vendor/plex-mono/latin-400.css">
   <link rel="stylesheet" href="/admin/vendor/plex-mono/latin-500.css">
   <link rel="stylesheet" href="/admin/static/admin.css">
+  <link rel="stylesheet" href="/admin/static/admin-ui.css">
   <script src="/admin/static/app.js" defer></script>
   <script src="/admin/vendor/alpine/cdn.min.js" defer></script>
 </head>
@@ -135,12 +136,14 @@
   <div class="mobile-topbar">
     <button type="button" class="menu-btn" @click="sidebarOpen = true" aria-label="Open menu" aria-controls="sidebar" :aria-expanded="sidebarOpen"><i class="bi bi-list"></i></button>
     <span class="mobile-brand" x-text="siteName || 'Admin'"></span>
+    <button type="button" class="topbar-search" @click="$dispatch('open-search')" aria-label="Search screens, settings and tasks"><i class="bi bi-search"></i></button>
     <a class="topbar-site-link" href="/" target="_blank" rel="noopener" aria-label="View site" title="View site"><i class="bi bi-box-arrow-up-right"></i></a>
   </div>
   <div class="sidebar-backdrop" x-show="sidebarOpen" x-cloak @click="sidebarOpen = false"></div>
   <aside class="sidebar" id="sidebar" :class="{open: sidebarOpen}">
     <button type="button" class="sidebar-close" @click="sidebarOpen = false" aria-label="Close menu"><i class="bi bi-x-lg"></i></button>
-    <div class="brand"><span x-text="siteName || 'Admin'"></span><small>Admin console</small></div>
+    <div class="brand"><div class="brand-text"><span x-text="siteName || 'Admin'"></span><small>Admin console</small></div></div>
+    <button type="button" class="nav-search" @click="$dispatch('open-search'); sidebarOpen = false" aria-label="Search screens, settings and tasks"><i class="bi bi-search" aria-hidden="true"></i><span>Search</span><kbd>⌘K</kbd></button>
     <nav>
       <template x-for="n in nav" :key="n.id">
         <div class="nav-item-x">
@@ -549,6 +552,35 @@
     </template>
 
   </main>
+
+
+  <!-- Search (D-078): Ctrl/Cmd+K, or "/" -->
+  <div class="cmdk-host" x-data="commandSearch" @keydown.window="onKey($event)" @open-search.window="show()">
+    <div class="cmdk" x-show="open" style="display:none" @click.self="hide()">
+      <div class="cmdk-card" role="dialog" aria-modal="true" aria-label="Search the admin" @keydown.arrow-down.prevent="move(1)" @keydown.arrow-up.prevent="move(-1)" @keydown.enter.prevent="choose()">
+        <div class="cmdk-input">
+          <i class="bi bi-search" aria-hidden="true"></i>
+          <label class="visually-hidden" for="cmdk-q">Search screens, settings and tasks</label>
+          <input id="cmdk-q" type="text" role="combobox" aria-expanded="true" aria-controls="cmdk-list" :aria-activedescendant="results.length ? 'cmdk-r' + active : null" autocomplete="off" spellcheck="false" placeholder="Search screens, settings and tasks…  e.g. content security policy" x-model="q" @input="refresh()">
+          <kbd>Esc</kbd>
+        </div>
+        <div class="cmdk-list" id="cmdk-list" role="listbox">
+          <div class="cmdk-empty" x-show="!results.length">Nothing matches “<span x-text="q"></span>”. Try other words, such as what you want to do.</div>
+          <template x-for="(r, i) in results" :key="r.type + r.go + i">
+            <div>
+              <div class="cmdk-group" x-show="showGroup(i)" x-text="r.group"></div>
+              <button type="button" class="cmdk-item" :class="{active: i === active}" :id="'cmdk-r' + i" role="option" :aria-selected="i === active" @mousemove="active = i" @click="choose(r)">
+                <i class="bi" :class="r.icon" aria-hidden="true"></i>
+                <div class="cmdk-main"><div class="cmdk-title" x-html="hl(r.title)"></div><div class="cmdk-sub" x-show="r.sub" x-html="hl(r.sub)"></div></div>
+                <span class="cmdk-path" x-text="r.path"></span>
+              </button>
+            </div>
+          </template>
+        </div>
+        <div class="cmdk-foot"><span><kbd>↑</kbd> <kbd>↓</kbd> move</span><span><kbd>Enter</kbd> open</span><span><kbd>Esc</kbd> close</span></div>
+      </div>
+    </div>
+  </div>
 
   <!-- The assistant (D-071): docked at the right, so the page beside it stays usable -->
   <template x-if="chatShown">

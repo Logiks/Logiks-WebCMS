@@ -1,4 +1,20 @@
 ---
-description: The home page.
+description: OpenLogiks — open-source software, cloud infrastructure and developer tools for modern teams.
 ---
-{% render "home" %}
+{% assign heading = 'home.hero.heading' | t: 'Open-source software for modern teams' %}
+{% seo title: heading %}
+{% render "hero",
+  heading: heading,
+  text: 'home.hero.text' | t: 'OpenLogiks designs and builds custom software, cloud infrastructure and developer tools, so your team can ship reliable products faster.',
+  button_label: 'home.hero.button' | t: 'Explore our services',
+  button_url: '/services',
+  eyebrow: 'home.hero.eyebrow' | t: 'Open-source · Cloud-native · Built for devs',
+  variant: 'split'
+%}
+{% render "features" %}
+{% render "stats" %}
+{% render "cta",
+  heading: 'home.cta.heading' | t: 'Have a project in mind?',
+  button_label: 'home.cta.button' | t: 'Get in touch',
+  button_url: '/contact'
+%}

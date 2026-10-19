@@ -1,6 +1,66 @@
 import { siteGlobals } from '../site/public.js';
 
 const MAX_PAGES = 40;
+
+// The public site's Content Security Policy lets a page load CSS, scripts and fonts only from the site itself
+// (src/core/http/securityHeaders.js). Anything else is silently blocked by the browser, which is how a page ends up
+// unstyled with a console full of errors, so it is caught here, when it is written, instead.
+const DOC_WITH_ASSETS = /^(pages|components|themes)\//;
+const REMOTE = /^(?:https?:)?\/\//i;
+
+/**
+ * Everything in a document that makes the browser load something from outside the site: a stylesheet/preload link, a
+ * script, a CSS import rule, a font in a font-face rule, or a font embedded as a data: URL.
+ * @param {string} path
+ * @param {string|null} text
+ * @returns {{kind: 'link'|'script'|'import'|'font'|'data-font', url: string, what: string}[]}
+ */
+export function externalAssets(path, text) {
+  if (!text || !DOC_WITH_ASSETS.test(path)) return [];
+  /** @type {Map<string, {kind: any, url: string, what: string}>} */
+  const found = new Map();
+  const add = (kind, url, what) => found.set(`${kind}|${url}`, { kind, url, what });
+  for (const m of text.matchAll(/<link\b[^>]*>/gi)) {
+    // Only a link that makes the browser load something is a problem; canonical/alternate/preconnect are not.
+    const href = /\bhref\s*=\s*["']((?:https?:)?\/\/[^"']+)["']/i.exec(m[0])?.[1];
+    if (href && /\brel\s*=\s*["']?[^"'>]*\b(stylesheet|preload|modulepreload)\b/i.test(m[0]))
+      add('link', href, 'a stylesheet or font linked from another site');
+  }
+  for (const m of text.matchAll(
+    /<script\b[^>]*\bsrc\s*=\s*["']((?:https?:)?\/\/[^"']+)["'][^>]*>/gi,
+  ))
+    add('script', m[1], 'a script loaded from another site');
+  for (const m of text.matchAll(/@import\s+(?:url\(\s*)?["']?((?:https?:)?\/\/[^"')\s]+)/gi))
+    add('import', m[1], 'a stylesheet imported from another site');
+  for (const block of text.matchAll(/@font-face\s*\{[^}]*\}/gi))
+    for (const m of block[0].matchAll(/url\(\s*["']?([^"')\s]+)/gi))
+      if (REMOTE.test(m[1])) add('font', m[1], 'a font loaded from another site');
+  for (const m of text.matchAll(
+    /url\(\s*["']?(data:(?:font\/|application\/(?:x-)?font)[^"')\s]+)/gi,
+  ))
+    add('data-font', m[1], 'a font embedded as data:');
+  return [...found.values()];
+}
+
+/**
+ * What in a document the site's Content Security Policy would block, as short messages. Empty for documents that
+ * cannot load assets.
+ * @param {string} path
+ * @param {string|null} text
+ * @returns {string[]}
+ */
+export function blockedAssets(path, text) {
+  return [
+    ...new Set(
+      externalAssets(path, text).map((a) =>
+        a.kind === 'data-font' ? a.what : `${a.what}: ${a.url.slice(0, 90)}`,
+      ),
+    ),
+  ];
+}
+
+export const BLOCKED_HINT =
+  "These are blocked by the site's security policy (only the site's own files load), and could not be downloaded into the site. Install the package with install_library (bootstrap, bootstrap-icons, @fontsource/inter…), or use a system font stack and inline SVG icons.";
 const DYNAMIC = /\[[^\]]+\]/; // a [param] / [...rest] page needs sample values this check does not invent
 
 /**
@@ -40,13 +100,38 @@ export function createValidator(ctx) {
     });
   }
 
-  return {
+  const svc = {
     /**
      * @param {string[]} [changed] document paths that changed; pages are re-checked when any page, component, locale
      *        or theme file is among them, and nothing is rendered for a change that cannot affect a page.
      */
+    /**
+     * @param {string[]} [changed]
+     * @param {(path: string) => Promise<string|null>} [read] reads a document, so what was written can be scanned
+     * @returns {Promise<any>}
+     */
+    async check(changed, read) {
+      const blocked = [];
+      if (read)
+        for (const path of changed ?? []) {
+          const text = await read(path).catch(() => null);
+          for (const what of blockedAssets(path, text))
+            blocked.push({ path, problem: `blocked: ${what}` });
+        }
+      const rendered = await svc.render(changed);
+      const problems = [...blocked, ...(rendered.problems ?? [])];
+      return problems.length
+        ? {
+            ok: false,
+            checked: rendered.checked,
+            problems,
+            ...(blocked.length ? { hint: BLOCKED_HINT } : {}),
+          }
+        : { ok: true, checked: rendered.checked };
+    },
+
     /** @returns {Promise<any>} */
-    async check(changed) {
+    async render(changed) {
       const affects =
         !changed ||
         changed.some(
@@ -77,4 +162,5 @@ export function createValidator(ctx) {
         : { ok: true, checked: files.length };
     },
   };
+  return svc;
 }
