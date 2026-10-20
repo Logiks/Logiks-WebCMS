@@ -132,13 +132,16 @@ export function createPublicData(ctx) {
     types() {
       return {
         body: {
-          types: content.registry.types().map((t) => ({
-            id: t.id,
-            label: t.label,
-            plural: t.plural,
-            hierarchical: t.hierarchical,
-            taxonomies: t.taxonomies,
-          })),
+          types: content.registry
+            .types()
+            .filter((t) => !ctx.features?.typeOff(t.id))
+            .map((t) => ({
+              id: t.id,
+              label: t.label,
+              plural: t.plural,
+              hierarchical: t.hierarchical,
+              taxonomies: t.taxonomies,
+            })),
         },
         tags: [],
         entries: [],
@@ -147,6 +150,7 @@ export function createPublicData(ctx) {
 
     async list(typeId, q, o) {
       const type = content.registry.type(typeId);
+      if (ctx.features?.typeOff(type.id)) throw notFound('Nothing is published here.');
       const locale = await localeOf(q.locale ?? o.locale);
       const perPage = int(q.per_page, 10, 1, 50);
       const page = int(q.page, 1, 1, 100000);
@@ -188,6 +192,7 @@ export function createPublicData(ctx) {
 
     async item(typeId, path, q, o) {
       const type = content.registry.type(typeId);
+      if (ctx.features?.typeOff(type.id)) throw notFound('Nothing is published at that address.');
       const locale = await localeOf(q.locale ?? o.locale);
       let e = /^[a-z0-9][a-z0-9/_-]*$/.test(path)
         ? await content.findPublished(type.id, path, locale)
@@ -229,6 +234,8 @@ export function createPublicData(ctx) {
 
     async term(taxonomy, slug, q, o) {
       content.registry.taxonomy(taxonomy);
+      if (ctx.features?.taxonomyOff(taxonomy))
+        throw notFound(`There is no ${taxonomy} "${slug.slice(0, 40)}".`);
       const t = await content.termBySlug(taxonomy, slug);
       if (!t) throw notFound(`There is no ${taxonomy} "${slug.slice(0, 40)}".`);
       return {

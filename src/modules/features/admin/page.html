@@ -1,0 +1,49 @@
+        <div class="page-head"><h1>Features</h1><p>Turn parts of your site on or off. A feature that is off is hidden from your site and from this menu; what you created with it is kept.</p></div>
+        <div class="alert alert-danger" role="alert" x-show="error" x-text="error"></div>
+        <div class="panel">
+          <table class="table"><thead><tr><th>Feature</th><th>Includes</th><th></th></tr></thead><tbody>
+            <template x-for="f in features" :key="f.id">
+              <tr>
+                <td>
+                  <strong x-text="f.label"></strong>
+                  <div class="muted small" x-text="f.description"></div>
+                  <div class="muted small" x-show="f.requires.length">Needs <span x-text="labels(f.requires)"></span>.</div>
+                </td>
+                <td class="muted small">
+                  <span x-show="!f.ready">Not available yet.</span>
+                  <span x-show="f.ready && f.modules.length" x-text="f.modules.map(m => m.label).join(', ')"></span>
+                  <span x-show="f.ready && !f.modules.length">Site pages and components.</span>
+                </td>
+                <td class="text-nowrap">
+                  <span class="tag" :class="f.enabled ? 'ok' : 'warn'" x-text="f.enabled ? 'On' : 'Off'"></span>
+                  <template x-if="can('features.manage')">
+                    <button type="button" class="btn btn-sm btn-outline-secondary ms-1" :disabled="busy === f.id || (!f.enabled && !f.ready)" @click="ask(f)" x-text="f.enabled ? 'Turn off' : 'Turn on'"></button>
+                  </template>
+                </td>
+              </tr>
+            </template>
+          </tbody></table>
+        </div>
+
+        <div class="modal-x" x-show="asking" style="display:none" role="dialog" aria-modal="true" aria-labelledby="feature-ask-title" @keydown.escape.window="cancel()">
+          <template x-if="asking">
+            <div class="modal-card" style="max-width:30rem">
+              <h2 class="h5" id="feature-ask-title" x-text="(asking.enable ? 'Turn on ' : 'Turn off ') + asking.label + '?'"></h2>
+              <template x-if="asking.blockedBy.length">
+                <div class="alert alert-warning" role="alert">
+                  <template x-for="b in asking.blockedBy" :key="b"><div x-text="b"></div></template>
+                </div>
+              </template>
+              <template x-if="!asking.blockedBy.length">
+                <div>
+                  <p x-text="asking.text"></p>
+                  <p x-show="asking.pulls.length">This also turns on <strong x-text="labels(asking.pulls)"></strong>.</p>
+                </div>
+              </template>
+              <div class="d-flex gap-2 justify-content-end">
+                <button type="button" class="btn btn-outline-secondary" @click="cancel()">Cancel</button>
+                <button type="button" class="btn btn-primary" :disabled="!canConfirm" @click="confirm()" x-text="(asking.enable ? 'Turn on ' : 'Turn off ') + asking.label"></button>
+              </div>
+            </div>
+          </template>
+        </div>

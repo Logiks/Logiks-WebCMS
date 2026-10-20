@@ -51,8 +51,8 @@ test('Content lives under its own menu group, with a link per content type', asy
       .$$('.nav-sub')
       .filter(b.visible)
       .flatMap((g) => [...g.querySelectorAll('.nav-sub-link')].map((a) => a.textContent.trim()));
-  await wait(() => links().includes('Pages'));
-  assert.deepEqual(links(), ['Pages', 'Posts', 'Categories and tags', 'AI Research']);
+  await wait(() => links().includes('Content pages'));
+  assert.deepEqual(links(), ['Content pages', 'Posts', 'Categories and tags', 'AI Research']);
   b.click(b.button('Content'));
 });
 
@@ -63,9 +63,11 @@ test('write a page: title, a paragraph with formatting, a heading, a list; save;
       /Nothing here yet/.test(sec('contentList')?.textContent ?? '') &&
       b.visible(sec('contentList').querySelector('.empty')),
   );
-  assert.equal(b.$('.nav-sub-link.active').textContent.trim(), 'Pages');
+  assert.equal(b.$('.nav-sub-link.active').textContent.trim(), 'Content pages');
   b.click(
-    [...sec('contentList').querySelectorAll('a')].find((a) => /New page/.test(a.textContent)),
+    [...sec('contentList').querySelectorAll('a')].find((a) =>
+      /New content page/.test(a.textContent),
+    ),
   );
   await wait(() => b.$('#e-title'));
   setValue(b.$('#e-title'), 'Hello from the editor');
@@ -186,7 +188,9 @@ test('a scheduled entry needs a future time, and the message shows next to the f
   b.go('#/content/page');
   await wait(() => sec('contentList'));
   b.click(
-    [...sec('contentList').querySelectorAll('a')].find((a) => /New page/.test(a.textContent)),
+    [...sec('contentList').querySelectorAll('a')].find((a) =>
+      /New content page/.test(a.textContent),
+    ),
   );
   await wait(() => b.$('#e-title'));
   setValue(b.$('#e-title'), 'Timed page');
@@ -242,7 +246,9 @@ test('media: upload files, describe an image, use it in a page through the picke
   b.go('#/content/page');
   await wait(() => sec('contentList'));
   b.click(
-    [...sec('contentList').querySelectorAll('a')].find((a) => /New page/.test(a.textContent)),
+    [...sec('contentList').querySelectorAll('a')].find((a) =>
+      /New content page/.test(a.textContent),
+    ),
   );
   await wait(() => b.$('#e-title'));
   setValue(b.$('#e-title'), 'With picture');
@@ -506,7 +512,7 @@ test('an author sees only what they can use, and can only save drafts', async ()
       .$$('.nav-sub')
       .filter(a.visible)
       .flatMap((g) => [...g.querySelectorAll('.nav-sub-link')].map((x) => x.textContent.trim()));
-    assert.deepEqual(links, ['Pages', 'Posts']);
+    assert.deepEqual(links, ['Content pages', 'Posts']);
     a.go('#/content/post/new');
     await wait(() => a.$('#e-status'));
     assert.deepEqual(

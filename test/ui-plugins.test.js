@@ -75,12 +75,13 @@ const groupLinks = () =>
     .filter(b.visible)
     .flatMap((g) => [...g.querySelectorAll('.nav-sub-link')].map((a) => a.textContent.trim()));
 
-test('Applications group starts with just Plugin Manager (Plugin Editor is a button inside it, not its own nav entry, D-063)', async () => {
+test('Plugin Manager is under Settings (Plugin Editor is a button inside it, not its own nav entry, D-063); Applications has no group until a plugin has a screen', async () => {
   b.go('#/overview');
-  await wait(() => b.button('Applications'));
-  b.click(b.button('Applications'));
+  await wait(() => b.button('Settings'));
+  assert.equal(b.button('Applications'), undefined, 'no plugin screens, no Applications group');
+  b.click(b.button('Settings'));
   await wait(() => groupLinks().length);
-  assert.deepEqual(groupLinks(), ['Plugin Manager']);
+  assert.deepEqual(groupLinks(), ['All settings', 'Features', 'Plugin Manager']);
 });
 
 test('installing and enabling a plugin from the admin adds its own nav item and screen; disabling removes it', async () => {
@@ -99,8 +100,9 @@ test('installing and enabling a plugin from the admin adds its own nav item and 
   b.click(enableBtn());
   await wait(() => /Disable/.test(row().textContent));
 
-  // #/plugins is itself inside Applications, so syncRoute() already keeps the group open here (D-059's
-  // auto-open-on-navigate behaviour) — no need to click the group header, which would only toggle it shut.
+  // The plugin's own entry appears under Applications, which only exists now: open it.
+  await wait(() => b.button('Applications'));
+  b.click(b.button('Applications'));
   await wait(() => groupLinks().includes('UI Plugin'));
 
   b.click([...b.$$('.nav-sub-link')].find((a) => a.textContent.trim() === 'UI Plugin'));

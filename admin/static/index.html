@@ -282,6 +282,10 @@
     </template>
 
     <!-- System: Modules -->
+    <template x-if="route === 'features'">
+      <section x-data="featuresPage"></section>
+    </template>
+
     <template x-if="route === 'modules'">
       <section x-data="modulesPage"></section>
     </template>

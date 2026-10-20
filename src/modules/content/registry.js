@@ -198,8 +198,9 @@ export function defineCoreContent(registry) {
     noindex: { type: 'boolean', label: 'Hide from search engines' },
   };
   registry.defineType('page', {
-    label: 'Page',
-    plural: 'Pages',
+    // "Content pages", not "Pages": Webmaster → Site pages are a different thing (template files for developers).
+    label: 'Content page',
+    plural: 'Content pages',
     icon: 'bi-file-earmark-text',
     hierarchical: true,
     routing: 'root',

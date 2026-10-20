@@ -649,7 +649,13 @@ document.addEventListener('alpine:init', () => {
               label: t.plural,
               perm: `content.${t.id}.read`,
             })),
-            { id: 'terms', label: 'Categories and tags', perm: 'content.terms.manage' },
+            {
+              id: 'terms',
+              label: 'Categories and tags',
+              perm: 'content.terms.manage',
+              // Only when a content type that is on uses categories or tags (they go with the blog).
+              show: this.contentTypes.some((t) => t.taxonomies.length > 0),
+            },
             { id: 'research', label: 'AI Research', module: 'research', perm: 'research.read' },
           ],
         },
@@ -671,15 +677,13 @@ document.addEventListener('alpine:init', () => {
           ],
         },
         {
-          // Installed plugins (docs/DECISIONS.md D-060): the Plugin Manager itself, then one menu entry per
-          // enabled plugin the signed-in user may open (this.pluginNav, loaded from GET /admin/plugins/menu).
+          // Installed plugins (docs/DECISIONS.md D-060): one menu entry per enabled plugin the signed-in user may
+          // open (this.pluginNav, loaded from GET /admin/plugins/menu). The Plugin Manager itself is under Settings
+          // (D-102), so this group only exists while some plugin has a screen.
           id: 'applications',
           label: 'Applications',
           icon: 'bi-grid-3x3-gap',
           items: [
-            // Plugin Editor is reached from a button inside Plugin Manager itself (not its own nav entry) — its
-            // route stays reachable via syncRoute()'s special-case below, the same way 'account' is.
-            { id: 'plugins', label: 'Plugin Manager', perm: 'plugins.read' },
             ...this.pluginNav.map((p) => ({
               id: `plugin-${p.slug}`,
               label: p.label,
@@ -780,7 +784,19 @@ document.addEventListener('alpine:init', () => {
             { id: 'modules', label: 'Modules', perm: 'cluster.read' },
           ],
         },
-        { id: 'settings', label: 'Settings', icon: 'bi-sliders', perm: 'settings.read' },
+        {
+          // A group so Features (whole subsystems: Blog, eCommerce…, D-100) sits beside the settings it replaces the guesswork of.
+          id: 'settings-group',
+          label: 'Settings',
+          icon: 'bi-sliders',
+          items: [
+            { id: 'settings', label: 'All settings', perm: 'settings.read' },
+            { id: 'features', label: 'Features', perm: 'features.read' },
+            // Plugin Editor is reached from a button inside Plugin Manager itself (not its own nav entry) — its
+            // route stays reachable via syncRoute()'s special-case, the same way 'account' is.
+            { id: 'plugins', label: 'Plugin Manager', perm: 'plugins.read' },
+          ],
+        },
         {
           id: 'security',
           label: 'Security',
@@ -814,7 +830,9 @@ document.addEventListener('alpine:init', () => {
       if (!this.user) return [];
       // `module` ties an entry to an optional module; while that is switched off the entry is not offered.
       const allowed = (n) =>
-        this.can(n.perm) && !(n.module && this.disabledModules.includes(n.module));
+        this.can(n.perm) &&
+        n.show !== false &&
+        !(n.module && this.disabledModules.includes(n.module));
       return entries
         .map((n) => (n.items ? { ...n, items: n.items.filter(allowed) } : n))
         .filter((n) => (n.items ? n.items.length : allowed(n)));
@@ -939,7 +957,11 @@ document.addEventListener('alpine:init', () => {
     },
 
     async init() {
-      window.addEventListener('modules-changed', () => this.loadModuleState());
+      // A module or feature was switched: the menu's entries and the content types it lists may both have changed.
+      window.addEventListener('modules-changed', () => {
+        this.loadModuleState();
+        this.loadTypes();
+      });
       window.addEventListener('pick-media', (e) => this.openPicker(e.detail.resolve));
       window.addEventListener('hashchange', () => {
         this.hash = location.hash;
@@ -949,7 +971,7 @@ document.addEventListener('alpine:init', () => {
       });
       window.addEventListener('toast', (e) => this.pushToast(e.detail.msg, e.detail.type));
       window.addEventListener('signed-out', () => this.setUser(null));
-      // A plugin's own screen (or the Plugin Manager) enabling/disabling one changes the Applications group.
+      // A plugin's own screen (or the Plugin Manager) enabling/disabling one changes the Applications group (and Plugin Manager sits under Settings).
       window.addEventListener('plugins-changed', () => this.loadPlugins());
       try {
         const info = await api('GET', '/public/info');
@@ -3984,6 +4006,18 @@ document.addEventListener('alpine:init', () => {
     toggle(id) {
       this.open = this.open === id ? '' : id;
     },
+    /** The list split by category (D-095), "Platform" first; modules with no category are the platform itself. */
+    get groups() {
+      const by = new Map();
+      for (const m of this.modules) {
+        const c = m.category || 'Platform';
+        if (!by.has(c)) by.set(c, []);
+        by.get(c).push(m);
+      }
+      return [...by.entries()]
+        .sort(([a], [b]) => (a === 'Platform' ? -1 : b === 'Platform' ? 1 : a.localeCompare(b)))
+        .map(([name, modules]) => ({ name, modules }));
+    },
     error: '',
     busy: '',
     /** Flip a module from what the list says now. The server says what to do first if others need it. */
@@ -4000,6 +4034,76 @@ document.addEventListener('alpine:init', () => {
         window.dispatchEvent(new window.Event('modules-changed'));
       } catch (e) {
         this.error = e.message;
+      } finally {
+        this.busy = '';
+      }
+    },
+  }));
+
+  // ───────── Settings → Features (docs/DECISIONS.md D-100): switch whole subsystems on and off ─────────
+  Alpine.data('featuresPage', () => ({
+    ...H,
+    features: [],
+    loaded: false,
+    error: '',
+    busy: '',
+    /** The feature a confirmation is open for, with what the server says switching it would do. */
+    asking: null,
+    async init() {
+      if (!(await this.mountFragment('features', 'page'))) return;
+      await this.load();
+    },
+    async load() {
+      this.features = (await api('GET', '/admin/features')).features;
+      this.loaded = true;
+    },
+    label(id) {
+      return this.features.find((f) => f.id === id)?.label ?? id;
+    },
+    /** The labels of a list of feature ids, as one phrase: "Customer accounts, eCommerce". */
+    labels(ids) {
+      return ids.map((id) => this.label(id)).join(', ');
+    },
+    /** Ask first: what will change, or what blocks it. */
+    async ask(f) {
+      this.error = '';
+      const enable = !f.enabled;
+      try {
+        const plan = await api('GET', `/admin/features/${f.id}/plan?enabled=${enable}`);
+        this.asking = {
+          id: f.id,
+          label: f.label,
+          enable,
+          text: enable ? f.whenOn : f.whenOff,
+          pulls: plan.features.filter((x) => x !== f.id),
+          blockedBy: plan.blockedBy,
+        };
+      } catch (e) {
+        this.error = e.message;
+      }
+    },
+    cancel() {
+      this.asking = null;
+    },
+    /** A real boolean: Alpine treats '' and 0 as "present" for a disabled attribute. */
+    get canConfirm() {
+      return !!this.asking && this.asking.blockedBy.length === 0 && !this.busy;
+    },
+    async confirm() {
+      const a = this.asking;
+      if (!a || !this.canConfirm) return;
+      this.busy = a.id;
+      this.error = '';
+      try {
+        this.features = (
+          await api('PUT', `/admin/features/${a.id}`, { enabled: a.enable })
+        ).features;
+        toast(`${a.label} is ${a.enable ? 'on' : 'off'}.`);
+        this.asking = null;
+        window.dispatchEvent(new window.Event('modules-changed'));
+      } catch (e) {
+        this.error = e.message;
+        this.asking = null;
       } finally {
         this.busy = '';
       }
@@ -4179,7 +4283,7 @@ document.addEventListener('alpine:init', () => {
     },
   }));
 
-  // ───────── Applications → Plugin Manager (docs/DECISIONS.md D-060) ─────────
+  // ───────── Settings → Plugin Manager (docs/DECISIONS.md D-060, D-102) ─────────
   Alpine.data('pluginsPage', () => ({
     ...H,
     plugins: [],
@@ -6927,7 +7031,13 @@ document.addEventListener('alpine:init', () => {
       'contact form messages inbox enquiries',
       '',
     ],
-    ['Switch features on or off', 'modules', 'modules features switch enable disable on off', ''],
+    [
+      'Switch features on or off',
+      'features',
+      'features blog ecommerce support payment switch enable disable on off',
+      '',
+    ],
+    ['Switch modules on or off', 'modules', 'modules switch enable disable on off', ''],
     ['Clear or tune the cache', 'settings/cache', 'cache clear ttl speed performance', ''],
     [
       'Make the site faster',

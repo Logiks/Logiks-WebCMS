@@ -164,6 +164,79 @@ describe('installing a plugin from a zip', () => {
   });
 });
 
+describe('plugin migrations run once, however often the version changes', () => {
+  const enable = (slug) => admin.post(`/api/admin/plugins/${slug}/enable`).send({});
+  const disable = (slug) => admin.post(`/api/admin/plugins/${slug}/disable`).send({});
+  const names = async (slug) =>
+    (await node.ctx.db('plugin_migrations').where({ plugin_slug: slug }).orderBy('id')).map(
+      (r) => r.name,
+    );
+  const hasColumn = (table, col) => node.ctx.db.schema.hasColumn(table, col);
+
+  test('a single default-export migrate.js is not run again after a version bump (Weather Demo 1.0.0 → 1.3.0)', async () => {
+    await install(admin, zipOf(BASE({ slug: 'legacy-mig', version: '1.0.0' })));
+    // BASE's migrate.js creates plugin_hello_pings; give this plugin its own table name.
+    const own = (v) =>
+      zipOf({
+        ...BASE({ slug: 'legacy-mig', version: v }),
+        'migrate.js':
+          "export default async function (db) {\n  await db.schema.createTable('plugin_legacy_mig_t', (t) => { t.increments('id'); });\n}\n",
+      });
+    await install(admin, own('1.0.0'));
+    assert.equal((await enable('legacy-mig')).status, 200);
+    assert.equal(await node.ctx.db.schema.hasTable('plugin_legacy_mig_t'), true);
+    await disable('legacy-mig');
+    await install(admin, own('1.3.0'));
+    const again = await enable('legacy-mig');
+    assert.equal(again.status, 200, JSON.stringify(again.body));
+    assert.deepEqual(await names('legacy-mig'), ['1.0.0']);
+  });
+
+  test('named migrations each run once: a new version adds only the new ones', async () => {
+    const pkg = (v, extra = '') =>
+      zipOf({
+        ...BASE({ slug: 'named-mig', version: v }),
+        'migrate.js': `export const migrations = [
+  { name: '001-create', up: async (db) => { await db.schema.createTable('plugin_named_mig_t', (t) => { t.increments('id'); }); } },
+${extra}];\n`,
+      });
+    await install(admin, pkg('1.0.0'));
+    assert.equal((await enable('named-mig')).status, 200);
+    assert.deepEqual(await names('named-mig'), ['001-create']);
+    assert.equal(await hasColumn('plugin_named_mig_t', 'label'), false);
+
+    await disable('named-mig');
+    await install(
+      admin,
+      pkg(
+        '1.1.0',
+        "  { name: '002-label', up: async (db) => { await db.schema.alterTable('plugin_named_mig_t', (t) => { t.string('label', 60); }); } },\n",
+      ),
+    );
+    const again = await enable('named-mig');
+    assert.equal(again.status, 200, JSON.stringify(again.body));
+    assert.deepEqual(await names('named-mig'), ['001-create', '002-label']);
+    assert.equal(await hasColumn('plugin_named_mig_t', 'label'), true);
+
+    await disable('named-mig');
+    assert.equal((await enable('named-mig')).status, 200);
+    assert.deepEqual(await names('named-mig'), ['001-create', '002-label'], 'nothing runs twice');
+  });
+
+  test('a migration that fails is rolled back and says which one', async () => {
+    const bad = zipOf({
+      ...BASE({ slug: 'bad-mig' }),
+      'migrate.js':
+        "export const migrations = [{ name: '001-boom', up: async () => { throw new Error('boom'); } }];\n",
+    });
+    await install(admin, bad);
+    const r = await enable('bad-mig');
+    assert.notEqual(r.status, 200);
+    assert.match(JSON.stringify(r.body), /001-boom/);
+    assert.deepEqual(await names('bad-mig'), []);
+  });
+});
+
 describe('a disk-sourced plugin', () => {
   test('is discovered by scanning plugins/, can be enabled, and cannot be uninstalled through the admin', async () => {
     const dir = path.join(node.env.PLUGINS_DIR, 'diskplug');

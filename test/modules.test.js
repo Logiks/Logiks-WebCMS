@@ -167,3 +167,23 @@ describe('contract: every module’s admin routes exist and answer', () => {
     }
   });
 });
+
+describe('module manifest: category, feature and defaultOff', () => {
+  test('a module can start switched off, but only an optional one', () => {
+    const m = parseManifest({
+      id: 'shop',
+      label: 'Shop',
+      optional: true,
+      defaultOff: true,
+      category: 'eCommerce',
+      feature: 'ecommerce',
+    });
+    assert.equal(m.defaultOff, true);
+    assert.equal(m.category, 'eCommerce');
+    assert.throws(
+      () => parseManifest({ id: 'shop', label: 'Shop', defaultOff: true }),
+      /only an optional module can start switched off/,
+    );
+    assert.equal(parseManifest({ id: 'x', label: 'X' }).defaultOff, false);
+  });
+});

@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { forbidden, parse } from '../../core/http/errors.js';
+import { HttpError, forbidden, parse } from '../../core/http/errors.js';
 import { docs } from '../../core/http/docs.js';
 import { actorOf } from '../../core/http/middleware.js';
 
@@ -42,7 +42,7 @@ export default function contentRoutes(ctx) {
     res.json({
       types: content.registry
         .types()
-        .filter((t) => req.user.can(`content.${t.id}.read`))
+        .filter((t) => req.user.can(`content.${t.id}.read`) && !ctx.features.typeOff(t.id))
         .map((t) => ({
           ...content.registry.describe(t.id),
           can: Object.fromEntries(
@@ -65,6 +65,20 @@ export default function contentRoutes(ctx) {
   r.get('/content/summary', async (req, res) => {
     res.json(await content.dashboardSummary(actorOf(req)));
   });
+
+  // A type or taxonomy of a feature that is switched off (the blog's posts, categories and tags) is not reachable.
+  const featureOff = () =>
+    new HttpError(
+      404,
+      'feature_disabled',
+      'That is part of a feature that is switched off. Turn it on under Settings → Features.',
+    );
+  r.param('type', (_req, _res, next, type) =>
+    ctx.features.typeOff(type) ? next(featureOff()) : next(),
+  );
+  r.param('tax', (_req, _res, next, tax) =>
+    ctx.features.taxonomyOff(tax) ? next(featureOff()) : next(),
+  );
 
   r.get('/content/types/:type/entries', async (req, res) => {
     const { status, q, parentId, termId, locale, limit, offset } = req.query;

@@ -2,6 +2,14 @@ import { HttpError } from '../http/errors.js';
 import { parseManifest } from './manifest.js';
 
 const disabled = (/** @type {any} */ ctx) => new Set(ctx.settings.get('modules.disabled') ?? []);
+const optedIn = (/** @type {any} */ ctx) => new Set(ctx.settings.get('modules.enabled') ?? []);
+
+/**
+ * Switched off by an administrator (or never switched on, for a default-off module)? Optional modules only.
+ * @param {any} m @param {any} ctx
+ */
+const isOff = (m, ctx) =>
+  Boolean(m.optional && (m.defaultOff ? !optedIn(ctx).has(m.id) : disabled(ctx).has(m.id)));
 
 /** Answer for a module that is switched off, from any route it owns. */
 const moduleOff = (/** @type {string} */ label) =>
@@ -191,14 +199,22 @@ export function createModuleRegistry() {
     isEnabled(/** @type {string} */ id, /** @type {any} */ ctx) {
       const m = mods.get(id);
       if (!m) return false;
-      if (m.optional && disabled(ctx).has(id)) return false;
+      if (isOff(m, ctx)) return false;
       return m.enabled ? Boolean(m.enabled(ctx)) : true;
     },
 
     /** Not switched off by an administrator (ignores feature flags, which are a separate switch). */
     isOn(/** @type {string} */ id, /** @type {any} */ ctx) {
       const m = mods.get(id);
-      return Boolean(m && !(m.optional && disabled(ctx).has(id)));
+      return Boolean(m && !isOff(m, ctx));
+    },
+
+    /** Ids of every optional module that is off right now, default-off ones included: what the admin menu hides. */
+    offList(/** @type {any} */ ctx) {
+      return [...mods.values()]
+        .filter((m) => isOff(m, ctx))
+        .map((m) => m.id)
+        .sort();
     },
 
     /** Modules that list `id` in `requires` and are switched on: what must be switched off first. */
@@ -223,6 +239,7 @@ export function createModuleRegistry() {
           `${m.label} is part of the core and can't be switched off.`,
         );
       const off = disabled(ctx);
+      const opted = optedIn(ctx);
       if (on) {
         const needs = m.requires.filter((r) => !this.isOn(r, ctx));
         if (needs.length)
@@ -232,6 +249,7 @@ export function createModuleRegistry() {
             `${m.label} needs ${needs.map((n) => mods.get(n)?.label ?? n).join(', ')}, which ${needs.length > 1 ? 'are' : 'is'} switched off. Turn ${needs.length > 1 ? 'them' : 'it'} on first.`,
           );
         off.delete(id);
+        if (m.defaultOff) opted.add(id);
       } else {
         const deps = this.dependents(id, ctx);
         if (deps.length)
@@ -241,10 +259,11 @@ export function createModuleRegistry() {
             `${deps.map((d) => mods.get(d)?.label ?? d).join(', ')} ${deps.length > 1 ? 'need' : 'needs'} ${m.label}. Switch ${deps.length > 1 ? 'those' : 'that'} off first.`,
           );
         off.add(id);
+        opted.delete(id);
       }
       await ctx.settings.update(
         'modules',
-        { values: { disabled: [...off].sort() } },
+        { values: { disabled: [...off].sort(), enabled: [...opted].sort() } },
         actor,
         { internal: true }, // the field is hidden from the settings API; only this method writes it
       );
@@ -302,7 +321,10 @@ export function createModuleRegistry() {
           requires: m.requires,
           enabled: this.isEnabled(id, ctx),
           optional: m.optional,
-          switchedOff: m.optional && disabled(ctx).has(id), // off by an administrator, as opposed to behind a feature flag
+          category: m.category ?? null,
+          feature: m.feature ?? null,
+          defaultOff: m.defaultOff,
+          switchedOff: isOff(m, ctx), // off by an administrator (or not yet opted in), as opposed to behind a feature flag
           dependents: this.dependents(id, ctx),
           provides: {
             ...m.provides,

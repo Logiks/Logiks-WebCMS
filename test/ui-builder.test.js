@@ -21,12 +21,12 @@ const setValue = (el, v) => {
   el.dispatchEvent(new b.win.Event('change', { bubbles: true }));
 };
 
-test('Webmaster is in the menu, with Pages and Components', async () => {
+test('Webmaster is in the menu, with Site pages and Components', async () => {
   b.go('#/overview');
   const navText = () =>
     `${b.$$('nav a, aside a, nav button, aside button').map((a) => a.textContent.trim())}`;
   // Wait for the nav to actually be populated (permissions loaded, items rendered), not just the sidebar element to exist.
-  await wait(() => /Pages/.test(navText()));
+  await wait(() => /Site pages/.test(navText()));
   assert.match(navText(), /Components/);
 });
 

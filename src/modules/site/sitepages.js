@@ -58,8 +58,12 @@ export function createSitePages(ctx) {
   const { siteFiles, themes, settings, log } = ctx;
   /** @type {Map<string, any>} one compiled bundle per (site version, theme, theme hash) */
   const bundles = new Map();
-  /** @type {{version: number, table: any} | null} */
+  /** @type {{version: number, features: number, table: any} | null} */
   let routing = null;
+  // Features (D-100) are built after the site, so they are read when needed: a page or component of a feature that is off
+  // is not routed and renders as nothing. Nothing in the tree is deleted or changed.
+  const featureVersion = () => ctx.features?.version ?? 0;
+  const gated = (/** @type {string} */ file) => Boolean(ctx.features?.fileOff(file));
 
   const limits = () => ({
     renderMs: settings.get('themes.render_ms'),
@@ -70,7 +74,8 @@ export function createSitePages(ctx) {
 
   function buildTable() {
     const snap = siteFiles.snapshot();
-    if (routing?.version === snap.version) return routing.table;
+    if (routing?.version === snap.version && routing.features === featureVersion())
+      return routing.table;
     const fronts = new Map();
     const statics = new Map(); // "/about" → file
     const dynamic = []; // { file, segs: [{lit}|{param}|{rest}] }
@@ -79,7 +84,7 @@ export function createSitePages(ctx) {
     const byTerm = new Map(); // taxonomy → dynamic page for its terms
     let own = null; // `entry: own`
     for (const [file, f] of snap.files) {
-      if (!file.startsWith('pages/')) continue;
+      if (!file.startsWith('pages/') || gated(file)) continue;
       let front;
       try {
         front = parsePage(f.content).front;
@@ -118,7 +123,7 @@ export function createSitePages(ctx) {
         a.file.localeCompare(b.file),
     );
     const table = { fronts, statics, dynamic, fixed, byType, byTerm, own };
-    routing = { version: snap.version, table };
+    routing = { version: snap.version, features: featureVersion(), table };
     return table;
   }
 
@@ -172,6 +177,7 @@ export function createSitePages(ctx) {
         if (t.fronts.get(r.file)?.entry === 'own') {
           const reg = ctx.content.registry;
           if (!(reg.has(params.type) && reg.type(params.type).routing === 'own')) continue;
+          if (ctx.features?.typeOff(params.type)) continue; // e.g. posts while the Blog is off
         }
         return { file: r.file, params };
       }
@@ -180,6 +186,7 @@ export function createSitePages(ctx) {
 
     /** The page that shows this entry and the address it lives at: { file, params, url } or null. The address has no language prefix. */
     routeForEntry(e) {
+      if (ctx.features?.typeOff(e.type)) return null;
       const t = buildTable();
       if (e.type === 'page' && e.path === settings.get('site.home_page') && t.statics.has('/'))
         return { file: t.statics.get('/'), params: {}, url: '/' };
@@ -342,7 +349,7 @@ export function createSitePages(ctx) {
     // A preview's draft content never touches the shared bundle cache: it is rebuilt fresh and thrown away after the render.
     const key = overlay
       ? null
-      : `${snap.version}|${rt.id}|${rt.hash}|${limits().renderMs}|${limits().memoryMb}`;
+      : `${snap.version}|${rt.id}|${rt.hash}|${limits().renderMs}|${limits().memoryMb}|f${featureVersion()}`;
     const hit = key && bundles.get(key);
     if (hit) return hit;
 
@@ -370,8 +377,12 @@ export function createSitePages(ctx) {
     /** @type {Map<string, {front: any, body: string}>} */
     const pages = new Map();
     for (const [p, f] of overlay ? overlaid(snap.files, overlay) : snap.files) {
-      if (p.startsWith('components/')) add(p, `site:${p}`, f.content, p);
-      else {
+      if (p.startsWith('components/')) {
+        // A component of a feature that is off renders as nothing, so a page that includes it (the home page's latest
+        // posts) still works. Its styles and endpoints are not registered either.
+        if (gated(p)) files.set(p, '');
+        else add(p, `site:${p}`, f.content, p);
+      } else {
         try {
           pages.set(p, parsePage(f.content));
         } catch (e) {

@@ -47,6 +47,16 @@ export const moduleManifest = z
     kind: z.enum(['core', 'plugin']).default('core'),
     /** true: an administrator may switch it off (System → Modules). Off hides its screens and API and stops its background work. */
     optional: z.boolean().default(false),
+    /**
+     * true: the module starts switched OFF and an administrator opts in (D-095). Only meaningful for an optional module.
+     * Stored as an opt-in list (`modules.enabled`), the mirror of `modules.disabled`, so a new default-on module never
+     * turns off an existing install and a new default-off module never turns on.
+     */
+    defaultOff: z.boolean().default(false),
+    /** The group System → Modules lists it under ("eCommerce", "Support"); modules without one are "Platform". */
+    category: z.string().min(1).max(40).optional(),
+    /** The feature (Settings → Features, D-100) this module belongs to. Switching the feature on switches it on. */
+    feature: id.optional(),
     version: z
       .string()
       .regex(/^\d+\.\d+\.\d+$/, 'use a version such as 1.0.0')
@@ -88,7 +98,11 @@ export const moduleManifest = z
       })
       .default({ admin: [] }),
   })
-  .strict();
+  .strict()
+  .refine((m) => !m.defaultOff || m.optional, {
+    path: ['defaultOff'],
+    message: 'only an optional module can start switched off',
+  });
 
 /** @typedef {z.infer<typeof moduleManifest>} ModuleManifest */
 

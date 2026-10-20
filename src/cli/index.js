@@ -138,6 +138,10 @@ async function main() {
         if (Number(n) === 0) {
           // A brand-new installation only: site pages win over content pages, so never seed a site that is already in use.
           await ctx.siteFiles.seedDefaults(path.join(ROOT, 'site', 'defaults'), null);
+          // Subsystems are opt-in on a new install (Settings → Features, D-100). Existing installs keep the blog they have.
+          await ctx.settings.update('featureset', { values: { enabled: [] } }, null, {
+            internal: true,
+          });
           const email = flags.email || process.env.ADMIN_EMAIL || 'admin@example.com';
           const password = flags.password || process.env.ADMIN_PASSWORD || randomPassword();
           await ctx.users.createInitialAdmin({ email, password });

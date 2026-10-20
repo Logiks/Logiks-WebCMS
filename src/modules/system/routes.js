@@ -60,9 +60,11 @@ export default function systemRoutes(ctx) {
   r.get(
     '/system/modules/state',
     requirePermission('admin.access'),
-    docs({ response: z.object({ disabled: z.array(z.string()) }) }),
+    docs({
+      response: z.object({ disabled: z.array(z.string()), featuresOff: z.array(z.string()) }),
+    }),
     (_req, res) => {
-      res.json({ disabled: ctx.settings.get('modules.disabled') ?? [] });
+      res.json({ disabled: ctx.modules.offList(ctx), featuresOff: ctx.features.offList() });
     },
   );
 
@@ -74,7 +76,7 @@ export default function systemRoutes(ctx) {
     async (req, res) => {
       const { enabled } = parse(toggleBody, req.body);
       await ctx.modules.setEnabled(req.params.id, enabled, ctx, actorOf(req));
-      res.json({ disabled: ctx.settings.get('modules.disabled') ?? [] });
+      res.json({ disabled: ctx.modules.offList(ctx) });
     },
   );
 

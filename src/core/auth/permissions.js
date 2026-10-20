@@ -158,6 +158,8 @@ export function defineCorePermissions(permissions) {
     'cluster.read': 'View cluster, queue and cache status',
     'cache.flush': 'Flush the cache',
     'modules.manage': 'Switch optional modules on or off',
+    'features.read': 'See which features (Blog, eCommerce…) are on',
+    'features.manage': 'Switch features on or off',
     'jobs.manage': 'Retry or discard failed background jobs',
     'system.update': 'Check for and install application updates (git pull)',
     'system.restart': 'Restart servers',

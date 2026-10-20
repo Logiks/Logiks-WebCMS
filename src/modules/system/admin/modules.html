@@ -2,8 +2,11 @@
         <div class="alert alert-danger" role="alert" x-show="error" x-text="error"></div>
         <div class="panel">
           <div class="empty" x-show="loaded && !modules.length">No modules found.</div>
-          <table class="table" x-show="modules.length"><thead><tr><th>Module</th><th>Version</th><th>Needs</th><th>Adds</th><th></th></tr></thead><tbody>
-            <template x-for="m in modules" :key="m.id">
+          <template x-for="g in groups" :key="g.name">
+          <div>
+          <h2 class="h6 mt-3 mb-2" x-show="groups.length > 1" x-text="g.name"></h2>
+          <table class="table" x-show="g.modules.length"><thead><tr><th>Module</th><th>Version</th><th>Needs</th><th>Adds</th><th></th></tr></thead><tbody>
+            <template x-for="m in g.modules" :key="m.id">
               <tr>
                 <td>
                   <button type="button" class="btn btn-link p-0 text-start" :aria-expanded="open === m.id" @click="toggle(m.id)" x-text="m.label"></button>
@@ -28,4 +31,6 @@
               </tr>
             </template>
           </tbody></table>
+          </div>
+          </template>
         </div>

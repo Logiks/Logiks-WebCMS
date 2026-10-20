@@ -429,6 +429,24 @@ export function defineCoreSettings(registry) {
     order: 41,
     fields: {
       disabled: { type: 'list', label: 'Switched-off modules', default: [], hidden: true },
+      // The mirror for modules that start off (eCommerce, Support): listed here once an administrator opts in.
+      enabled: { type: 'list', label: 'Switched-on opt-in modules', default: [], hidden: true },
+    },
+  });
+
+  // Which features (Settings → Features, D-100) are on. The default is what an existing install has: the blog and content pages. A new
+  // install starts with none (the CLI setup writes an empty list). Written only by ctx.features.
+  registry.define('featureset', {
+    title: 'Feature switches',
+    description: 'Which features are on. Change these under Settings → Features.',
+    order: 42,
+    fields: {
+      enabled: {
+        type: 'list',
+        label: 'Features that are on',
+        default: ['blog', 'pages'],
+        hidden: true,
+      },
     },
   });
 

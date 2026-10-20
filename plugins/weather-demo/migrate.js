@@ -6,6 +6,9 @@
  * @param {import('knex').Knex} db
  */
 export default async function (db) {
+  // Idempotent on purpose: the table may already be there (a restored database, a plugin re-installed after its
+  // tracking row was lost), and a second createTable is a hard failure.
+  if (await db.schema.hasTable('plugin_weather_demo_log')) return;
   await db.schema.createTable('plugin_weather_demo_log', (t) => {
     t.increments('id');
     t.string('city', 120).notNullable();

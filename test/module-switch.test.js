@@ -204,3 +204,52 @@ describe('plugins are modules', () => {
     await until(() => !node.ctx.modules.has('plugin-second-plug'));
   });
 });
+
+describe('modules that start switched off (eCommerce, Support — D-095)', () => {
+  const shop = (id, requires = []) => ({
+    id,
+    label: id,
+    requires,
+    optional: true,
+    defaultOff: true,
+    category: 'eCommerce',
+    feature: 'ecommerce',
+  });
+  const listed = async () => (await admin.get('/api/admin/system/modules')).body.modules;
+
+  before(() => {
+    node.ctx.modules.registerDynamic(shop('shop-a'));
+    node.ctx.modules.registerDynamic(shop('shop-b', ['shop-a']));
+  });
+  after(() => node.ctx.modules.unregister('shop-a'));
+
+  test('they are off until an administrator opts in, and the menu is told so', async () => {
+    assert.deepEqual(await state(), ['shop-a', 'shop-b']);
+    const m = (await listed()).find((x) => x.id === 'shop-a');
+    assert.equal(m.enabled, false);
+    assert.equal(m.switchedOff, true);
+    assert.equal(m.category, 'eCommerce');
+    assert.equal(m.feature, 'ecommerce');
+    assert.equal(m.defaultOff, true);
+  });
+
+  test('opting in is saved, needs what the module requires, and can be undone', async () => {
+    const early = await toggle('shop-b', true);
+    assert.equal(early.status, 422);
+    assert.match(early.body.error.message, /shop-b needs shop-a, which is switched off/);
+
+    assert.equal((await toggle('shop-a', true)).status, 200);
+    assert.equal((await toggle('shop-b', true)).status, 200);
+    assert.deepEqual(await state(), []);
+    assert.deepEqual(node.ctx.settings.get('modules.enabled'), ['shop-a', 'shop-b']);
+    assert.deepEqual(node.ctx.settings.get('modules.disabled'), []);
+
+    const used = await toggle('shop-a', false);
+    assert.equal(used.status, 422);
+    assert.match(used.body.error.message, /shop-b needs shop-a/);
+    assert.equal((await toggle('shop-b', false)).status, 200);
+    assert.equal((await toggle('shop-a', false)).status, 200);
+    assert.deepEqual(await state(), ['shop-a', 'shop-b']);
+    assert.deepEqual(node.ctx.settings.get('modules.enabled'), []);
+  });
+});

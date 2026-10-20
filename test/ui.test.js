@@ -99,7 +99,6 @@ test('signing in shows the shell with navigation for an administrator', async ()
       'Webmaster',
       'Content',
       'Media Manager',
-      'Applications',
       'Analytics',
       'Logs',
       'Appearance',
@@ -109,13 +108,13 @@ test('signing in shows the shell with navigation for an administrator', async ()
       'Operations',
       'Automation',
     ],
-    'top level: two links and eleven groups',
+    'top level: one link and eleven groups (Applications only appears once a plugin has a screen)',
   );
   assert.deepEqual(subLinks(), [], 'groups start collapsed on Overview');
 
   click(button('Content'));
   await until(() => subLinks().length);
-  assert.deepEqual(subLinks(), ['Pages', 'Posts', 'Categories and tags', 'AI Research']);
+  assert.deepEqual(subLinks(), ['Content pages', 'Posts', 'Categories and tags', 'AI Research']);
   click(button('Content'));
   await until(() => subLinks().length === 0);
 

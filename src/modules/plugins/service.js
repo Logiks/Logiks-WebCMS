@@ -429,39 +429,81 @@ export function createPlugins(ctx, { pluginsDir }) {
     active.set(p.slug, { row: p, router, manifest: p.manifest, adminDir: path.join(dir, 'admin') });
   }
 
+  /**
+   * A plugin's schema changes (D-103). `migrate.js` may export
+   *   `migrations = [{ name: '001-create-log', up: async (db, dialect) => {...} }, ...]`
+   * — each named migration runs once, ever, however often the plugin's version changes — or, as older plugins do, a
+   * single `default` function, which runs once the first time the plugin is enabled (it is NOT run again for a later
+   * version: re-running a `createTable` is exactly the "table already exists" failure this replaced). Each migration
+   * is its own transaction; a failure names the migration and leaves the earlier ones applied.
+   */
   async function runMigration(p, actor) {
     const dir = path.join(pluginsDir, p.slug);
     const migratePath = path.join(dir, 'migrate.js');
     if (!(await exists(migratePath))) return;
-    const already = await db('plugin_migrations')
-      .where({ plugin_slug: p.slug, name: p.version })
-      .first();
-    if (already) return;
     const mod = await import(
       `${pathToFileURL(migratePath).href}?v=${encodeURIComponent(p.version)}`
     );
-    if (typeof mod.default !== 'function') return;
-    await db.transaction(async (trx) => {
-      await mod.default(trx, ctx.dialect);
-      // `batch` is a 32-bit integer column: the plugin's migration count (not a timestamp — epoch milliseconds overflow it on
-      // PostgreSQL and MySQL strict mode; SQLite never noticed).
-      const [{ n }] = await trx('plugin_migrations')
-        .where({ plugin_slug: p.slug })
-        .count({ n: '*' });
-      await trx('plugin_migrations').insert({
-        plugin_slug: p.slug,
-        name: p.version,
-        batch: Number(n) + 1,
-        applied_at: now(),
+    const bad = (/** @type {string} */ m) =>
+      new HttpError(422, 'invalid_plugin', `${p.slug}'s migrate.js: ${m}`);
+    /** @type {{name: string | null, up: Function}[]} */
+    let list = [];
+    if (Array.isArray(mod.migrations)) {
+      const seen = new Set();
+      for (const m of mod.migrations) {
+        if (!m || typeof m.name !== 'string' || !/^[\w.-]{1,120}$/.test(m.name))
+          throw bad(
+            'each migration needs a name (letters, numbers, dots, dashes), such as "001-create-log".',
+          );
+        if (typeof m.up !== 'function') throw bad(`migration "${m.name}" has no up() function.`);
+        if (seen.has(m.name)) throw bad(`two migrations are named "${m.name}".`);
+        seen.add(m.name);
+        list.push({ name: m.name, up: m.up });
+      }
+    } else if (typeof mod.default === 'function') list = [{ name: null, up: mod.default }];
+    if (!list.length) return;
+
+    const applied = new Set(
+      (await db('plugin_migrations').where({ plugin_slug: p.slug }).select('name')).map(
+        (r) => r.name,
+      ),
+    );
+    for (const m of list) {
+      // A single default export is recorded under the version it first ran at, so "ran before" means "any row exists".
+      if (m.name === null ? applied.size > 0 : applied.has(m.name)) continue;
+      const name = m.name ?? p.version;
+      try {
+        await db.transaction(async (trx) => {
+          await m.up(trx, ctx.dialect);
+          // `batch` is a 32-bit integer column: the plugin's migration count (not a timestamp — epoch milliseconds overflow it on
+          // PostgreSQL and MySQL strict mode; SQLite never noticed).
+          const [{ n }] = await trx('plugin_migrations')
+            .where({ plugin_slug: p.slug })
+            .count({ n: '*' });
+          await trx('plugin_migrations').insert({
+            plugin_slug: p.slug,
+            name,
+            batch: Number(n) + 1,
+            applied_at: now(),
+          });
+        });
+      } catch (e) {
+        if (e instanceof HttpError) throw e;
+        throw new HttpError(
+          422,
+          'plugin_migration_failed',
+          `${p.name}: migration "${name}" failed — ${e.message}. Nothing from it was kept; fix the migration and enable the plugin again.`,
+        );
+      }
+      applied.add(name);
+      await audit.log({
+        actor,
+        action: 'plugin.migrated',
+        entity: 'plugin',
+        entityId: p.slug,
+        meta: { version: p.version, migration: name },
       });
-    });
-    await audit.log({
-      actor,
-      action: 'plugin.migrated',
-      entity: 'plugin',
-      entityId: p.slug,
-      meta: { version: p.version },
-    });
+    }
   }
 
   const svc = {
