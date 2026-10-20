@@ -2,7 +2,18 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { HttpError } from '../../core/http/errors.js';
-import { auditPage, fontsReady, pageReport, referenceTokens, sweepScroll } from './inspect.js';
+import {
+  auditPage,
+  focusInfo,
+  fontsReady,
+  installVitals,
+  pageReport,
+  prepareFocus,
+  readVitals,
+  referenceTokens,
+  settleAnimations,
+  sweepScroll,
+} from './inspect.js';
 
 const VIEWPORTS = {
   desktop: { width: 1280, height: 800, mobile: false },
@@ -289,7 +300,7 @@ export function createVisual({ settings, log, web, launch, origin }) {
     /**
      * A screenshot of one page of THIS site, plus what is mechanically wrong with it. Pass `path` for a live page, or
      * `html` (a rendered draft) to look at something not saved yet. Everything outside this site is blocked.
-     * @param {{ path?: string, html?: string, viewport?: 'desktop'|'tablet'|'mobile', origin?: string, audit?: {text: boolean}, shot?: 'full'|'top'|false, quality?: number }} o
+     * @param {{ path?: string, html?: string, viewport?: 'desktop'|'tablet'|'mobile', origin?: string, audit?: {text: boolean, vitals?: boolean, throttle?: boolean}, shot?: 'full'|'top'|false, quality?: number }} o
      */
     async capture({
       path: pagePath,
@@ -324,6 +335,20 @@ export function createVisual({ settings, log, web, launch, origin }) {
         try {
           const page = await ctx.newPage();
           page.setDefaultTimeout(NAV_TIMEOUT);
+          if (audit?.vitals) {
+            await page.addInitScript(installVitals);
+            if (audit.throttle) {
+              // A mid-range phone on 4G: this is what Core Web Vitals budgets are written for.
+              const cdp = await ctx.newCDPSession(page);
+              await cdp.send('Network.emulateNetworkConditions', {
+                offline: false,
+                latency: 150,
+                downloadThroughput: (1.6 * 1024 * 1024) / 8,
+                uploadThroughput: (750 * 1024) / 8,
+              });
+              await cdp.send('Emulation.setCPUThrottlingRate', { rate: 4 });
+            }
+          }
           await page.route('**/*', (route) => {
             const u = route.request().url();
             if (u.startsWith('data:') || u.startsWith('blob:') || u.startsWith(site))
@@ -357,6 +382,8 @@ export function createVisual({ settings, log, web, launch, origin }) {
           }
           await page.evaluate(fontsReady).catch(() => {});
           await page.evaluate(sweepScroll).catch(() => {});
+          if (audit) await page.evaluate(settleAnimations).catch(() => {});
+          const vitals = audit?.vitals ? await page.evaluate(readVitals).catch(() => null) : null;
           const report = await page.evaluate(pageReport);
           const audited = audit ? await page.evaluate(auditPage, audit) : null;
           const top = shot === 'top';
@@ -374,6 +401,7 @@ export function createVisual({ settings, log, web, launch, origin }) {
           return {
             jpeg,
             status,
+            vitals,
             audit: audited,
             viewport,
             width: vp.width,
@@ -468,6 +496,205 @@ export function createVisual({ settings, log, web, launch, origin }) {
             clip: { x: 0, y: 0, width: 1280, height: 1400 },
           });
           return { tokens, jpeg, url: page.url(), mode: 'browser', note: '' };
+        } finally {
+          await ctx.close().catch(() => {});
+        }
+      });
+    },
+
+    /**
+     * Walk the page with the Tab key, the way a keyboard user does, and report what is wrong (D-087): focus you cannot see,
+     * traps, controls only a mouse can use, no skip link.
+     * @returns {Promise<{ stops: number, findings: { severity: string, rule: string, message: string, key: string }[] }>}
+     */
+    async keyboard({ path: pagePath, origin: from }) {
+      const site = new URL(from || origin()).origin;
+      return slot(async (b) => {
+        const ctx = await b.newContext({
+          viewport: { width: 1280, height: 800 },
+          serviceWorkers: 'block',
+        });
+        try {
+          const page = await ctx.newPage();
+          page.setDefaultTimeout(NAV_TIMEOUT);
+          await page.route('**/*', (route) => {
+            const u = route.request().url();
+            return u.startsWith(site) || u.startsWith('data:') ? route.continue() : route.abort();
+          });
+          await page.goto(site + pagePath, { waitUntil: 'load' });
+          await page.evaluate(settleAnimations).catch(() => {});
+          const prep = await page.evaluate(prepareFocus);
+          const stops = [];
+          for (let i = 0; i < 70; i++) {
+            await page.keyboard.press('Tab');
+            const f = await page.evaluate(focusInfo);
+            if (f.body) {
+              if (stops.length) break; // focus left the page: one full lap
+              continue;
+            }
+            stops.push(f);
+          }
+          const findings = [];
+          const add = (severity, rule, message, key = '') =>
+            findings.push({ severity, rule, message, key });
+          const last = stops.slice(-10);
+          if (stops.length >= 10 && new Set(last.map((s) => s.i)).size <= 2)
+            add(
+              'error',
+              'keyboard-trap',
+              `Keyboard focus gets stuck: the last ${last.length} Tab presses only moved between ${[...new Set(last.map((s) => s.name || s.tag))].join(' and ')}.`,
+              last[0].name,
+            );
+          const hidden = stops.filter((s) => !s.visible);
+          if (hidden.length)
+            add(
+              'warn',
+              'focus-invisible',
+              `${hidden.length} control(s) show nothing when they have keyboard focus (for example “${hidden[0].name || hidden[0].tag}”).`,
+              hidden[0].name || hidden[0].tag,
+            );
+          if (stops.length && !(stops[0].tag === 'a' && stops[0].href.startsWith('#')))
+            add('info', 'skip-link', 'The first Tab stop is not a “skip to content” link.', '');
+          if (prep.mouseOnlyCount)
+            add(
+              'warn',
+              'not-keyboard-accessible',
+              `${prep.mouseOnlyCount} control(s) react to a mouse click but cannot be reached with the keyboard (for example ${prep.mouseOnly[0]}).`,
+              prep.mouseOnly[0],
+            );
+          if (prep.positiveTabindex)
+            add(
+              'warn',
+              'tabindex-positive',
+              `${prep.positiveTabindex} element(s) use a positive tabindex, which scrambles the natural order.`,
+              '',
+            );
+          let jumps = 0;
+          for (let i = 1; i < stops.length; i++) if (stops[i].top < stops[i - 1].top - 400) jumps++;
+          if (jumps > 3)
+            add(
+              'info',
+              'focus-order',
+              `Tab order jumps back up the page ${jumps} times, so it may not follow the visual order.`,
+              String(jumps),
+            );
+          return { stops: stops.length, findings };
+        } finally {
+          await ctx.close().catch(() => {});
+        }
+      });
+    },
+
+    /**
+     * Run a saved journey as a visitor would (D-087). `steps` come from `parseSteps()`. Everything outside the site is blocked.
+     * @param {{ steps: any[], origin?: string }} o
+     */
+    async journey({ steps, origin: from }) {
+      const site = new URL(from || origin()).origin;
+      return slot(async (b) => {
+        const ctx = await b.newContext({
+          viewport: { width: 1280, height: 800 },
+          serviceWorkers: 'block',
+        });
+        const results = [];
+        let jpeg = null;
+        let lastStatus = null;
+        try {
+          const page = await ctx.newPage();
+          page.setDefaultTimeout(8000);
+          await page.route('**/*', (route) => {
+            const u = route.request().url();
+            return u.startsWith(site) || u.startsWith('data:') ? route.continue() : route.abort();
+          });
+          page.on('response', (r) => {
+            if (r.request().isNavigationRequest() && r.frame() === page.mainFrame())
+              lastStatus = r.status();
+          });
+          const target = (label) =>
+            page
+              .getByRole('button', { name: label })
+              .or(page.getByRole('link', { name: label }))
+              .or(page.getByText(label, { exact: false }))
+              .first();
+          const field = (label) =>
+            page
+              .getByLabel(label)
+              .or(page.getByPlaceholder(label))
+              .or(page.locator(`[name="${label}"]`))
+              .first();
+          for (const st of steps) {
+            const t0 = Date.now();
+            try {
+              switch (st.action) {
+                case 'goto':
+                  await page.goto(site + st.value, { waitUntil: 'load' });
+                  break;
+                case 'click':
+                  await (
+                    st.value.startsWith('css=')
+                      ? page.locator(st.value.slice(4)).first()
+                      : target(st.value)
+                  ).click();
+                  await page.waitForLoadState('load').catch(() => {});
+                  break;
+                case 'fill':
+                  await field(st.target).fill(st.value);
+                  break;
+                case 'press':
+                  await page.keyboard.press(st.value);
+                  await page.waitForLoadState('load').catch(() => {});
+                  break;
+                case 'wait':
+                  await page.waitForTimeout(Math.min(5000, Number(st.value) || 0));
+                  break;
+                case 'expect-text':
+                  await page
+                    .getByText(st.value, { exact: false })
+                    .first()
+                    .waitFor({ state: 'visible' });
+                  break;
+                case 'expect-no-text':
+                  if (await page.getByText(st.value, { exact: false }).first().isVisible())
+                    throw new Error(`“${st.value}” is on the page.`);
+                  break;
+                case 'expect-url':
+                  if (!page.url().includes(st.value))
+                    throw new Error(
+                      `The address is ${page.url().replace(site, '')}, not one containing “${st.value}”.`,
+                    );
+                  break;
+                case 'expect-status':
+                  if (lastStatus !== Number(st.value))
+                    throw new Error(`The page answered ${lastStatus}, not ${st.value}.`);
+                  break;
+                case 'expect-selector':
+                  await page.locator(st.value).first().waitFor({ state: 'visible' });
+                  break;
+                case 'expect-title':
+                  if (!(await page.title()).includes(st.value))
+                    throw new Error(`The page title is “${await page.title()}”.`);
+                  break;
+                default:
+                  throw new Error(`Unknown step “${st.action}”.`);
+              }
+              results.push({ line: st.line, ok: true, ms: Date.now() - t0 });
+            } catch (e) {
+              const why = String(e.message).split('\n')[0].slice(0, 200);
+              results.push({
+                line: st.line,
+                ok: false,
+                ms: Date.now() - t0,
+                error: /Timeout/.test(why) ? `Not found on the page within 8 seconds.` : why,
+              });
+              jpeg = await page.screenshot({ type: 'jpeg', quality: 50 }).catch(() => null);
+              break;
+            }
+          }
+          return {
+            ok: results.every((r) => r.ok) && results.length === steps.length,
+            results,
+            jpeg,
+          };
         } finally {
           await ctx.close().catch(() => {});
         }

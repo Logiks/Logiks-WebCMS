@@ -113,6 +113,7 @@ export async function startNode({ dbUrl, bus, env: extra = {}, seed = false, app
   const server = http.createServer(createApp(ctx));
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
   const url = `http://127.0.0.1:${server.address().port}`;
+  ctx.selfUrl = url;
   return {
     env,
     ctx,

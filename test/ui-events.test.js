@@ -50,7 +50,7 @@ test('Webhooks is in the menu, under Automation; Events moved to Logs (D-059)', 
       .flatMap((g) => [...g.querySelectorAll('.nav-sub-link')].map((a) => a.textContent.trim()));
   b.click(b.button('Automation'));
   await wait(() => groupLinks().length);
-  assert.deepEqual(groupLinks(), ['Webhooks', 'Scheduler', 'Testing']);
+  assert.deepEqual(groupLinks(), ['Webhooks', 'Scheduler', 'AI Testing']);
 });
 
 test('fire a test event from the Events screen and see it in the log', async () => {

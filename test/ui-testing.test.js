@@ -57,3 +57,58 @@ test('the run form is there for people who may run checks', async () => {
     ),
   );
 });
+
+test('AI Testing: the checks can be chosen, a report offers PDF and CSV, and journeys can be written and tried', async (t) => {
+  b.go('#/testing');
+  await wait(() => sec() && sec().querySelector('#t-run-h'));
+  assert.match(b.$('h1').textContent, /AI Testing/);
+  // every kind of check is listed, with the optional ones marked
+  await wait(() => sec().querySelectorAll('#t-checks input[type="checkbox"]').length >= 14);
+  assert.match(sec().querySelector('#t-checks').textContent, /Keyboard/);
+  assert.match(sec().querySelector('#t-checks').textContent, /opt-in/);
+  if (browser) {
+    await wait(() => sec().querySelector('a[href$="/export.pdf"]'));
+    assert.match(
+      sec().querySelector('a[href$="/export.pdf"]').getAttribute('href'),
+      /\/api\/admin\/testing\/runs\/\d+\/export\.pdf/,
+    );
+  }
+  // Journeys: write one and try it
+  const tab = [...sec().querySelectorAll('.nav-link')].find((x) => x.textContent === 'Journeys');
+  b.click(tab);
+  await wait(() =>
+    [...sec().querySelectorAll('button')].some((x) => x.textContent === 'New journey'),
+  );
+  b.click([...sec().querySelectorAll('button')].find((x) => x.textContent === 'New journey'));
+  await wait(() => sec().querySelector('#t-j-name'));
+  const set = (el, v) => {
+    el.value = v;
+    el.dispatchEvent(new b.win.Event('input', { bubbles: true }));
+  };
+  set(sec().querySelector('#t-j-name'), 'Home loads');
+  set(sec().querySelector('#t-j-steps'), 'goto /aa-ui\nexpect text Two');
+  sec()
+    .querySelector('form[aria-labelledby="t-j-h"]')
+    .dispatchEvent(new b.win.Event('submit', { bubbles: true, cancelable: true }));
+  await wait(() =>
+    [...sec().querySelectorAll('.list-group-item button')].some(
+      (x) => x.textContent === 'Home loads',
+    ),
+  );
+  b.click([...sec().querySelectorAll('button')].find((x) => x.textContent === 'Try it now'));
+  await wait(() => /passed|stopped/.test(sec().textContent));
+  assert.match(sec().textContent, /Try it now: Home loads/);
+  // a mistake in the steps is explained, not saved
+  b.click(
+    [...sec().querySelectorAll('.list-group-item button')].find(
+      (x) => x.textContent === 'Home loads',
+    ),
+  );
+  await wait(() => sec().querySelector('#t-j-steps'));
+  set(sec().querySelector('#t-j-steps'), 'fly away');
+  sec()
+    .querySelector('form[aria-labelledby="t-j-h"]')
+    .dispatchEvent(new b.win.Event('submit', { bubbles: true, cancelable: true }));
+  await wait(() => /not a step|Start the journey/.test(sec().textContent));
+  t.diagnostic('journeys ok');
+});

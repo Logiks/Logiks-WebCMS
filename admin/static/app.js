@@ -131,10 +131,16 @@ const H = {
    * Pin the assistant chat to one thing (a document path such as pages/about.html, or plugins/<slug>) and open it, so
    * "this page" in the chat means what is on screen here (D-085).
    */
-  askAssistant(path) {
-    window.__assistantFocus = path;
+  askAssistant(path, prefill = '') {
     Alpine.$data(document.body).toggleChat(true);
-    window.dispatchEvent(new CustomEvent('assistant-focus', { detail: path }));
+    if (path) {
+      window.__assistantFocus = path;
+      window.dispatchEvent(new CustomEvent('assistant-focus', { detail: path }));
+    }
+    if (prefill) {
+      window.__assistantPrefill = prefill;
+      window.dispatchEvent(new CustomEvent('assistant-ask', { detail: prefill }));
+    }
   },
   can(perm) {
     const p = auth.user?.permissions || [];
@@ -801,7 +807,7 @@ document.addEventListener('alpine:init', () => {
           items: [
             { id: 'webhooks', label: 'Webhooks', module: 'webhooks', perm: 'webhooks.read' },
             { id: 'scheduler', label: 'Scheduler', module: 'scheduler', perm: 'scheduler.read' },
-            { id: 'testing', label: 'Testing', module: 'testing', perm: 'testing.read' },
+            { id: 'testing', label: 'AI Testing', module: 'testing', perm: 'testing.read' },
           ],
         },
       ];
@@ -5206,6 +5212,14 @@ document.addEventListener('alpine:init', () => {
     browser: { ok: true, reason: '' },
     running: null,
     form: { viewports: ['mobile', 'tablet', 'desktop'], maxPages: 40, spelling: true },
+    checkList: [], // every kind of check: [{ id, label, browser, optIn, always }]
+    chosen: [], // the ones ticked for the next run
+    showChecks: false,
+    tab: 'reports', // reports | journeys
+    journeys: [],
+    jform: null, // the journey being edited: { id, name, steps, enabled }
+    jresult: null, // how a "Try it now" went
+    jbusy: false,
     filter: { severity: '', category: '', viewport: '', q: '' },
     limit: 500,
     loaded: false,
@@ -5230,6 +5244,10 @@ document.addEventListener('alpine:init', () => {
           api('GET', '/admin/testing/runs'),
         ]);
         this.browser = st.browser;
+        if (!this.checkList.length) {
+          this.checkList = st.checks;
+          this.chosen = [...st.defaults];
+        }
         this.runs = rs.runs;
         const was = this.running;
         this.running = st.running;
@@ -5312,6 +5330,120 @@ document.addEventListener('alpine:init', () => {
         .sort((a, b) => b.errors - a.errors || b.warns - a.warns || a.path.localeCompare(b.path))
         .map((g, i) => ({ ...g, open: i < 2 }));
     },
+    /** Tick or untick a check; checks that need a browser are marked when this server has none. */
+    toggleCheck(id) {
+      this.chosen = this.chosen.includes(id)
+        ? this.chosen.filter((x) => x !== id)
+        : [...this.chosen, id];
+    },
+    get phase() {
+      return this.running?.summary?.phase || '';
+    },
+    /** Open the assistant on the page with what was found, so one click starts the fix. */
+    async fixWithAssistant(g) {
+      let file = null;
+      try {
+        file = (await api('GET', `/admin/testing/resolve?path=${encodeURIComponent(g.path)}`)).file;
+      } catch {
+        /* no pin: the message still names the page */
+      }
+      const lines = g.items
+        .filter((f) => f.severity !== 'info')
+        .slice(0, 12)
+        .map((f) => `- ${f.message}`);
+      this.askAssistant(
+        file,
+        `The site check found these problems on ${g.path}${file ? '' : ' (it is generated from content, so find where it comes from first)'}:\n${lines.join('\n')}\nPlease fix them, then look at the page to confirm.`,
+      );
+    },
+    baselineUrl(g, f) {
+      return `/api/admin/testing/baselines/shot?viewport=${f.viewport}&path=${encodeURIComponent(g.path)}`;
+    },
+    /** Take the page's current look as the one future runs compare with. */
+    async acceptLook(g, f) {
+      this.busy = true;
+      this.error = '';
+      try {
+        await api('POST', '/admin/testing/baselines/accept', {
+          path: g.path,
+          viewport: f.viewport,
+        });
+        toast('New look accepted. Future checks compare with it.');
+      } catch (e) {
+        this.error = e.message;
+      } finally {
+        this.busy = false;
+      }
+    },
+    pdfUrl() {
+      return this.current ? `/api/admin/testing/runs/${this.current.run.id}/export.pdf` : '#';
+    },
+
+    // ───── journeys ─────
+    async openJourneys() {
+      this.tab = 'journeys';
+      this.jresult = null;
+      try {
+        this.journeys = (await api('GET', '/admin/testing/journeys')).journeys;
+      } catch (e) {
+        this.error = e.message;
+      }
+    },
+    newJourney() {
+      this.jresult = null;
+      this.jform = {
+        id: null,
+        name: '',
+        steps: 'goto /\nexpect text ',
+        enabled: true,
+      };
+    },
+    editJourney(j) {
+      this.jresult = null;
+      this.jform = { ...j };
+    },
+    async saveJourney() {
+      this.jbusy = true;
+      this.error = '';
+      const f = this.jform;
+      try {
+        const body = { name: f.name, steps: f.steps, enabled: f.enabled };
+        if (f.id) await api('PUT', `/admin/testing/journeys/${f.id}`, body);
+        else await api('POST', '/admin/testing/journeys', body);
+        this.jform = null;
+        await this.openJourneys();
+        toast('Journey saved.');
+      } catch (e) {
+        this.error = e.message;
+      } finally {
+        this.jbusy = false;
+      }
+    },
+    async removeJourney(j) {
+      if (!window.confirm(`Delete the journey “${j.name}”?`)) return;
+      try {
+        await api('DELETE', `/admin/testing/journeys/${j.id}`);
+        this.jform = null;
+        await this.openJourneys();
+      } catch (e) {
+        this.error = e.message;
+      }
+    },
+    async tryJourney(j) {
+      this.jbusy = true;
+      this.jresult = null;
+      this.error = '';
+      try {
+        this.jresult = {
+          name: j.name,
+          ...(await api('POST', `/admin/testing/journeys/${j.id}/try`)),
+        };
+      } catch (e) {
+        this.error = e.message;
+      } finally {
+        this.jbusy = false;
+      }
+    },
     shotUrl(viewport, path) {
       return `/api/admin/testing/runs/${this.current.run.id}/shot?viewport=${viewport}&path=${encodeURIComponent(path)}`;
     },
@@ -5345,6 +5477,7 @@ document.addEventListener('alpine:init', () => {
           viewports: this.form.viewports,
           maxPages: this.form.maxPages,
           spelling: this.form.spelling,
+          checks: this.chosen,
         });
         this.running = run;
         await this.refresh();

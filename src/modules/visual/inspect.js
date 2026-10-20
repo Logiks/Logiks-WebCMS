@@ -1,5 +1,5 @@
 // @ts-nocheck -- these functions run in the browser page and use its DOM freely; the server side is type-checked.
-/* global document, window, getComputedStyle, location, performance, NodeFilter */
+/* global document, window, getComputedStyle, location, performance, NodeFilter, PerformanceObserver */
 /**
  * Functions that run INSIDE the browser page (Playwright serialises them), so they must be self-contained: no imports,
  * no closure over module variables. Each returns plain JSON.
@@ -615,6 +615,18 @@ export function auditPage(opts) {
       );
   }
 
+  const blockers = document.querySelectorAll(
+    'head script[src]:not([async]):not([defer]):not([type="module"])',
+  ).length;
+  if (blockers > 1)
+    add(
+      'performance',
+      'info',
+      'render-blocking',
+      `${blockers} scripts in the head block the page from showing until they load (add defer).`,
+      String(blockers),
+    );
+
   // ── text for the spelling check, and the site's own links ──
   let text = '';
   if (opts?.text) {
@@ -648,11 +660,52 @@ export function auditPage(opts) {
       /* not a link we can follow */
     }
   }
+  // Facts about the page that checks across pages need (duplicates, canonical, structured data, forms…).
+  const external = new Set();
+  for (const a of document.querySelectorAll('a[href]')) {
+    try {
+      const u = new URL(a.href, location.href);
+      if (/^https?:$/.test(u.protocol) && u.origin !== origin) external.add(u.href.split('#')[0]);
+    } catch {
+      /* not a link */
+    }
+  }
+  const meta = {
+    title,
+    description: desc,
+    lang: de.lang || '',
+    canonical: document.querySelector('link[rel="canonical"]')?.getAttribute('href') || '',
+    noindex: /noindex/i.test(
+      document.querySelector('meta[name="robots"]')?.getAttribute('content') || '',
+    ),
+    hreflang: [...document.querySelectorAll('link[rel="alternate"][hreflang]')].map((l) => ({
+      lang: l.getAttribute('hreflang'),
+      href: l.getAttribute('href'),
+    })),
+    jsonld: [...document.querySelectorAll('script[type="application/ld+json"]')]
+      .slice(0, 6)
+      .map((s) => s.textContent.slice(0, 20000)),
+    forms: [...document.forms].slice(0, 6).map((f) => ({
+      action: f.getAttribute('action') || '',
+      method: (f.getAttribute('method') || 'get').toLowerCase(),
+      fields: [...f.elements]
+        .filter((e) => e.name)
+        .map((e) => e.name)
+        .slice(0, 20),
+    })),
+    renderBlocking: [
+      ...document.querySelectorAll(
+        'head script[src]:not([async]):not([defer]):not([type="module"])',
+      ),
+    ].length,
+  };
   const nav = /** @type {any} */ (performance.getEntriesByType('navigation')[0]);
   const resources = /** @type {any[]} */ (performance.getEntriesByType('resource'));
   return {
     findings,
     text,
+    meta,
+    external: [...external].slice(0, 100),
     lang: de.lang || '',
     links: [...links.keys()],
     perf: {
@@ -660,5 +713,115 @@ export function auditPage(opts) {
       requests: resources.length + 1,
       bytes: resources.reduce((n, r) => n + (r.transferSize || 0), 0) + (nav?.transferSize || 0),
     },
+  };
+}
+
+/** Let entrance animations finish (and stop endless ones) so a screenshot shows the settled page, not a frame of it. */
+export async function settleAnimations() {
+  for (const a of document.getAnimations?.() ?? []) {
+    try {
+      const t = a.effect?.getComputedTiming?.();
+      if (t && t.iterations === Infinity) a.cancel();
+      else a.finish();
+    } catch {
+      /* some animations cannot be finished; leave them */
+    }
+  }
+  await new Promise((r) => setTimeout(r, 120));
+}
+
+/** Installed before the page loads: collects the numbers behind Core Web Vitals. */
+export function installVitals() {
+  window.__vitals = { lcp: 0, cls: 0, tbt: 0 };
+  const watch = (type, fn) => {
+    try {
+      new PerformanceObserver((l) => l.getEntries().forEach(fn)).observe({ type, buffered: true });
+    } catch {
+      /* this browser does not report it */
+    }
+  };
+  watch('largest-contentful-paint', (e) => (window.__vitals.lcp = e.startTime));
+  watch('layout-shift', (e) => {
+    if (!e.hadRecentInput) window.__vitals.cls += e.value;
+  });
+  watch('longtask', (e) => (window.__vitals.tbt += Math.max(0, e.duration - 50)));
+}
+export const readVitals = () => window.__vitals || null;
+
+/** Marks every keyboard-reachable element and records how it looks when NOT focused; also counts mouse-only controls. */
+export function prepareFocus() {
+  const sig = (el) => {
+    const cs = getComputedStyle(el);
+    return [
+      cs.outlineStyle,
+      cs.outlineWidth,
+      cs.outlineColor,
+      cs.boxShadow,
+      cs.backgroundColor,
+      cs.borderColor,
+      cs.textDecorationLine,
+      cs.color,
+    ].join('|');
+  };
+  const sel =
+    'a[href], button, input:not([type="hidden"]), select, textarea, summary, [tabindex]:not([tabindex="-1"]), [contenteditable="true"]';
+  const els = [...document.querySelectorAll(sel)].filter((e) => {
+    const r = e.getBoundingClientRect();
+    return (
+      r.width > 0 && r.height > 0 && !e.disabled && getComputedStyle(e).visibility !== 'hidden'
+    );
+  });
+  els.forEach((e, i) => {
+    e.setAttribute('data-test-i', String(i));
+    e.__base = sig(e);
+  });
+  const reachable = new Set(els);
+  const mouseOnly = [
+    ...document.querySelectorAll(
+      '[onclick], [role="button"], [role="link"], [role="tab"], [role="menuitem"]',
+    ),
+  ].filter((e) => {
+    const r = e.getBoundingClientRect();
+    if (r.width === 0 || r.height === 0) return false;
+    return !reachable.has(e) && ![...reachable].some((f) => f.contains(e) || e.contains(f));
+  });
+  return {
+    focusable: els.length,
+    mouseOnly: mouseOnly.slice(0, 5).map((e) => e.tagName.toLowerCase() + (e.id ? `#${e.id}` : '')),
+    mouseOnlyCount: mouseOnly.length,
+    positiveTabindex: [...document.querySelectorAll('[tabindex]')].filter(
+      (e) => Number(e.getAttribute('tabindex')) > 0,
+    ).length,
+  };
+}
+
+/** What has keyboard focus right now, and whether it shows that it has. */
+export function focusInfo() {
+  const e = document.activeElement;
+  if (!e || e === document.body || e === document.documentElement) return { body: true };
+  const cs = getComputedStyle(e);
+  const sig = [
+    cs.outlineStyle,
+    cs.outlineWidth,
+    cs.outlineColor,
+    cs.boxShadow,
+    cs.backgroundColor,
+    cs.borderColor,
+    cs.textDecorationLine,
+    cs.color,
+  ].join('|');
+  const outline = cs.outlineStyle !== 'none' && parseFloat(cs.outlineWidth) > 0;
+  const r = e.getBoundingClientRect();
+  return {
+    i: e.getAttribute('data-test-i'),
+    name: (e.getAttribute('aria-label') || e.textContent || e.getAttribute('name') || e.id || '')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 40),
+    tag: e.tagName.toLowerCase(),
+    href: e.getAttribute('href') || '',
+    visible: outline || (e.__base !== undefined && e.__base !== sig),
+    top: Math.round(r.top + window.scrollY),
+    inView: r.bottom > 0 && r.top < window.innerHeight,
   };
 }

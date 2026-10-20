@@ -1,9 +1,9 @@
 /** Settings → Testing (docs/DECISIONS.md D-086). */
 export function defineTestingSettings(registry) {
   registry.define('testing', {
-    title: 'Testing',
+    title: 'AI Testing',
     description:
-      'Site-wide checks under Automation → Testing: layout, responsiveness, accessibility, SEO, content and spelling. They run in a real browser (see Visual check).',
+      'Site-wide checks under Automation → AI Testing: layout, responsiveness, accessibility, SEO, content and spelling. They run in a real browser (see Visual check).',
     order: 37,
     fields: {
       viewports: {
@@ -37,6 +37,105 @@ export function defineTestingSettings(registry) {
         label: 'Words that are spelled correctly',
         default: [],
         help: 'Brand names, British spellings you use on purpose, product words. One per line.',
+      },
+      checks: {
+        type: 'list',
+        label: 'Checks to run',
+        default: [
+          'performance',
+          'keyboard',
+          'security',
+          'redirects',
+          'seo',
+          'search',
+          'content',
+          'plugins',
+          'languages',
+          'cluster',
+          'journeys',
+        ],
+        help: 'One per line. Available: performance, keyboard, regression, security, redirects, seo, forms, search, content, plugins, languages, cluster, external, journeys. Page checks (layout, accessibility, SEO, content, spelling, links) always run. “forms” sends a test contact message and deletes it; “external” and “regression” are off unless listed.',
+        validate: (v) => {
+          const ok = [
+            'performance',
+            'keyboard',
+            'regression',
+            'security',
+            'redirects',
+            'seo',
+            'forms',
+            'search',
+            'content',
+            'plugins',
+            'languages',
+            'cluster',
+            'external',
+            'journeys',
+          ];
+          const bad = (Array.isArray(v) ? v : []).filter((x) => !ok.includes(x));
+          return bad.length ? `Not a check: ${bad.join(', ')}.` : null;
+        },
+      },
+      budget_lcp_ms: {
+        type: 'number',
+        label: 'Speed budget: main content appears within (ms)',
+        default: 2500,
+        min: 100,
+        max: 20000,
+        help: 'Largest contentful paint. 2500 is “good” by Google’s measure. On phones the page is loaded on a throttled 4G connection.',
+      },
+      budget_cls: {
+        type: 'number',
+        label: 'Speed budget: layout shift',
+        default: 0.1,
+        min: 0,
+        max: 1,
+        int: false,
+        help: 'How much the page jumps while loading. 0.1 or less is good.',
+      },
+      budget_tbt_ms: {
+        type: 'number',
+        label: 'Speed budget: blocked by scripts (ms)',
+        default: 300,
+        min: 50,
+        max: 5000,
+        help: 'Total blocking time.',
+      },
+      budget_page_kb: {
+        type: 'number',
+        label: 'Speed budget: page weight (KB)',
+        default: 3000,
+        min: 100,
+        max: 50000,
+      },
+      regression_percent: {
+        type: 'number',
+        label: 'Visual change that counts (%)',
+        default: 2,
+        min: 0.1,
+        max: 50,
+        int: false,
+        help: 'How much of the top of a page may look different from its accepted version before it is reported.',
+      },
+      error_threshold: {
+        type: 'number',
+        label: 'Alert when errors exceed',
+        default: 0,
+        min: 0,
+        help: '0 means never alert. Above that, a finished run sends the “testing.threshold_exceeded” event (for Webhooks) and emails the address below.',
+      },
+      notify_email: {
+        type: 'string',
+        label: 'Email for alerts',
+        format: 'email',
+        default: '',
+        help: 'Needs email set up under Settings → Mail.',
+      },
+      check_on_publish: {
+        type: 'boolean',
+        label: 'Check pages as they are published',
+        default: false,
+        help: 'A quick check of a page right after it is saved or published: layout, accessibility, SEO, spelling and links of that page alone.',
       },
       screenshots: {
         type: 'boolean',

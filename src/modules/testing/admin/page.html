@@ -1,11 +1,17 @@
 <div class="page-head d-flex justify-content-between align-items-end flex-wrap gap-2">
-  <div><h1>Testing</h1><p>Opens the site's pages in a real browser at phone, tablet and desktop sizes and checks layout, responsiveness, accessibility, SEO, content, spelling and links. Each run is kept as a report you can come back to.</p></div>
+  <div><h1>AI Testing</h1><p>Opens the site's pages in a real browser at phone, tablet and desktop sizes and checks layout, responsiveness, accessibility, SEO, content, spelling and links. Each run is kept as a report you can come back to.</p></div>
 </div>
 <div class="alert alert-danger" role="alert" x-show="error" x-text="error"></div>
 <div class="alert alert-info" x-show="loaded && !browser.ok">
   <strong>Basic checks only.</strong> No browser was found on this server, so each page's HTML is checked (titles, headings, pictures, links, forms, spelling, placeholder text, broken links) but not how it looks: layout, sideways scrolling, colour contrast, phone tap targets and pictures of pages need Chrome or Chromium. <span class="d-block small mt-1" x-text="browser.reason"></span>
 </div>
 
+<ul class="nav nav-tabs mb-3" role="tablist">
+  <li class="nav-item"><button type="button" class="nav-link" :class="{active: tab === 'reports'}" role="tab" :aria-selected="tab === 'reports'" @click="tab = 'reports'">Reports</button></li>
+  <li class="nav-item"><button type="button" class="nav-link" :class="{active: tab === 'journeys'}" role="tab" :aria-selected="tab === 'journeys'" @click="openJourneys()">Journeys</button></li>
+</ul>
+
+<div x-show="tab === 'reports'">
 <section class="panel p-3 mb-3" x-show="can('testing.run')" aria-labelledby="t-run-h">
   <h2 class="h6" id="t-run-h">Run a check</h2>
   <form class="row g-3 align-items-end" @submit.prevent="start()">
@@ -28,12 +34,29 @@
       <button class="btn btn-primary" :disabled="busy || !!running || (browser.ok && !form.viewports.length)" x-text="running ? 'A check is running…' : 'Run check now'"></button>
     </div>
   </form>
+  <div class="mt-3">
+    <button type="button" class="btn btn-sm btn-outline-secondary" @click="showChecks = !showChecks" :aria-expanded="showChecks" aria-controls="t-checks" x-text="(showChecks ? 'Hide' : 'Choose') + ' the checks (' + chosen.length + ' on)'"></button>
+    <div id="t-checks" class="row g-1 mt-2" x-show="showChecks">
+      <template x-for="c in checkList" :key="c.id">
+        <div class="col-md-6">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" :id="'t-c-' + c.id" :checked="c.always || chosen.includes(c.id)" :disabled="c.always || (c.browser && !browser.ok)" @change="toggleCheck(c.id)">
+            <label class="form-check-label small" :for="'t-c-' + c.id">
+              <span x-text="c.label"></span>
+              <span class="tag" x-show="c.browser" x-text="browser.ok ? 'browser' : 'needs a browser'"></span>
+              <span class="tag warn" x-show="c.optIn" title="Off unless you tick it">opt-in</span>
+            </label>
+          </div>
+        </div>
+      </template>
+    </div>
+  </div>
   <p class="small muted mt-2 mb-0">Settings such as the default screen sizes, ignored words and a nightly schedule are under <a href="#/settings/testing">Settings → Testing</a>.</p>
 </section>
 
 <section class="panel p-3 mb-3" x-show="running" aria-live="polite">
   <div class="d-flex justify-content-between align-items-center gap-2 mb-2">
-    <strong>Checking the site…</strong>
+    <strong x-text="phase ? phase + '…' : 'Checking the site…'"></strong>
     <button type="button" class="btn btn-sm btn-outline-danger" x-show="can('testing.run')" :disabled="busy" @click="cancel(running.id)">Cancel</button>
   </div>
   <div class="progress" role="progressbar" :aria-valuenow="progress" aria-valuemin="0" aria-valuemax="100"><div class="progress-bar" :style="'width:' + progress + '%'"></div></div>
@@ -71,6 +94,7 @@
           <div class="small muted" x-text="current ? statusText(current.run) + ' · ' + new Date(current.run.createdAt).toLocaleString() : ''"></div>
         </div>
         <div class="d-flex gap-2">
+          <a class="btn btn-sm btn-outline-secondary" :href="pdfUrl()" x-show="current && current.run.summary">Download PDF</a>
           <a class="btn btn-sm btn-outline-secondary" :href="current ? '/api/admin/testing/runs/' + current.run.id + '/export' : '#'">Download CSV</a>
           <button type="button" class="btn btn-sm btn-outline-danger" x-show="can('testing.run') && current && !['queued','running'].includes(current.run.status)" :disabled="busy" @click="remove(current.run.id)">Delete</button>
         </div>
@@ -95,7 +119,7 @@
           <template x-for="c in categories" :key="c"><option :value="c" x-text="c"></option></template>
         </select>
         <label class="visually-hidden" for="t-f-vp">Screen</label>
-        <select id="t-f-vp" class="form-select form-select-sm w-auto" x-model="filter.viewport" @change="reload()"><option value="">All screens</option><option value="mobile">Phone</option><option value="tablet">Tablet</option><option value="desktop">Desktop</option><option value="html">Page source (no browser)</option><option value="site">Whole site</option></select>
+        <select id="t-f-vp" class="form-select form-select-sm w-auto" x-model="filter.viewport" @change="reload()"><option value="">All screens</option><option value="mobile">Phone</option><option value="tablet">Tablet</option><option value="desktop">Desktop</option><option value="html">Page source (no browser)</option><option value="journey">Journeys</option><option value="site">Whole site</option></select>
         <label class="visually-hidden" for="t-f-q">Search</label>
         <input id="t-f-q" class="form-control form-control-sm w-auto" placeholder="Search" x-model.debounce.300ms="filter.q" @input="reload()">
       </div>
@@ -109,6 +133,9 @@
             <span class="tag warn" x-show="g.warns" x-text="g.warns + ' warnings'"></span>
             <span class="tag" x-show="g.infos" x-text="g.infos + ' notes'"></span>
           </summary>
+          <div class="mt-1" x-show="assistantAvailable() && g.path.startsWith('/')">
+            <button type="button" class="btn btn-sm btn-outline-primary" @click="fixWithAssistant(g)"><i class="bi bi-stars"></i> Fix with the assistant</button>
+          </div>
           <div class="d-flex gap-2 flex-wrap my-2">
             <template x-for="s in g.shots" :key="s">
               <a :href="shotUrl(s, g.path)" target="_blank" rel="noopener"><img :src="shotUrl(s, g.path)" :alt="'Top of ' + g.path + ' on ' + s" loading="lazy" style="height:120px;border:1px solid var(--line,#ddd);border-radius:6px"></a>
@@ -122,6 +149,14 @@
                 <span class="tag ok" x-show="f.isNew === true">new</span>
                 <span x-text="f.message"></span>
                 <span class="small muted" x-text="'(' + f.category + ' · ' + f.rule + ')'"></span>
+                <div class="d-flex gap-2 align-items-start flex-wrap my-1" x-show="f.rule === 'visual-change'">
+                  <figure class="m-0"><img :src="baselineUrl(g, f)" :alt="'Accepted look of ' + g.path" style="height:120px;border:1px solid var(--line,#ddd);border-radius:6px"><figcaption class="small muted">Accepted</figcaption></figure>
+                  <figure class="m-0"><img :src="shotUrl(f.viewport, g.path)" :alt="'Current look of ' + g.path" style="height:120px;border:1px solid var(--line,#ddd);border-radius:6px"><figcaption class="small muted">Now</figcaption></figure>
+                  <button type="button" class="btn btn-sm btn-outline-secondary" x-show="can('testing.run')" :disabled="busy" @click="acceptLook(g, f)">Accept the new look</button>
+                </div>
+                <details class="small" x-show="f.detail && f.detail.steps"><summary>Steps</summary>
+                  <ol class="mb-0"><template x-for="st in (f.detail && f.detail.steps) || []" :key="st.line"><li :class="st.ok ? '' : 'text-danger'"><span class="mono" x-text="st.line"></span> <span x-text="st.ok ? '✓' : '✗ ' + st.error"></span></li></template></ol>
+                </details>
               </li>
             </template>
           </ul>
@@ -130,5 +165,65 @@
       <button type="button" class="btn btn-sm btn-outline-secondary" x-show="current && current.findings.length < current.total" @click="more()">Show more</button>
     </article>
     <div class="empty" x-show="!current && loaded && runs.length">Pick a report on the left.</div>
+  </div>
+</div>
+</div>
+
+<div x-show="tab === 'journeys'">
+  <div class="row g-3">
+    <div class="col-lg-5">
+      <div class="panel p-3">
+        <div class="d-flex justify-content-between align-items-center mb-2">
+          <h2 class="h6 mb-0">Journeys</h2>
+          <button type="button" class="btn btn-sm btn-primary" x-show="can('testing.run')" @click="newJourney()">New journey</button>
+        </div>
+        <p class="small muted">A journey clicks through the site the way a visitor would and checks what happens. Journeys run as part of every check that has “Journeys” ticked.</p>
+        <div class="empty" x-show="!journeys.length">No journeys yet.</div>
+        <div class="list-group list-group-flush">
+          <template x-for="j in journeys" :key="j.id">
+            <div class="list-group-item d-flex justify-content-between align-items-center gap-2">
+              <button type="button" class="btn btn-link p-0 text-start" @click="editJourney(j)" x-text="j.name"></button>
+              <span class="small muted" x-show="!j.enabled">off</span>
+              <button type="button" class="btn btn-sm btn-outline-secondary" x-show="can('testing.run')" :disabled="jbusy" @click="tryJourney(j)">Try it now</button>
+            </div>
+          </template>
+        </div>
+      </div>
+    </div>
+    <div class="col-lg-7">
+      <form class="panel p-3" x-show="jform" @submit.prevent="saveJourney()" aria-labelledby="t-j-h">
+        <h2 class="h6" id="t-j-h" x-text="jform && jform.id ? 'Edit journey' : 'New journey'"></h2>
+        <label class="form-label" for="t-j-name">Name</label>
+        <input id="t-j-name" class="form-control mb-2" maxlength="120" x-model="jform.name">
+        <label class="form-label" for="t-j-steps">Steps, one per line</label>
+        <textarea id="t-j-steps" class="form-control mono" rows="10" x-model="jform.steps"></textarea>
+        <details class="small mt-2"><summary>What steps can I write?</summary>
+<pre class="mb-0 small">goto /pricing                 open an address on this site
+click Buy now                 click the button or link with that text
+fill Email = a@example.com    type into the field with that label
+press Enter                   press a key
+wait 500                      pause (milliseconds)
+expect text Thank you         this text is visible
+expect no text Error          this text is not
+expect url /checkout          the address contains this
+expect status 200             the last page answered this
+expect selector .receipt      a CSS selector is visible
+expect title Checkout         the page title contains this
+# a line starting with # is a note</pre>
+          <p class="mt-1 mb-0">Without a browser on the server only <code>goto</code>, <code>click</code> on a link, and the <code>expect</code> steps can run.</p>
+        </details>
+        <div class="form-check mt-2"><input id="t-j-on" class="form-check-input" type="checkbox" x-model="jform.enabled"><label class="form-check-label" for="t-j-on">Run this journey in checks</label></div>
+        <div class="d-flex gap-2 mt-3">
+          <button class="btn btn-primary" :disabled="jbusy" x-text="jbusy ? 'Saving…' : 'Save journey'"></button>
+          <button type="button" class="btn btn-outline-secondary" @click="jform = null">Cancel</button>
+          <button type="button" class="btn btn-outline-danger ms-auto" x-show="jform && jform.id" @click="removeJourney(jform)">Delete</button>
+        </div>
+      </form>
+      <div class="panel p-3 mt-3" x-show="jresult" aria-live="polite">
+        <h2 class="h6" x-text="jresult ? 'Try it now: ' + jresult.name + (jresult.ok ? ' passed' : ' stopped') + (jresult.mode === 'basic' ? ' (without a browser)' : '') : ''"></h2>
+        <ol class="mb-2"><template x-for="st in (jresult && jresult.results) || []" :key="st.line"><li :class="st.ok ? '' : 'text-danger'"><span class="mono" x-text="st.line"></span> <span x-text="st.ok ? '✓ ' + st.ms + ' ms' : '✗ ' + st.error"></span></li></template></ol>
+        <img x-show="jresult && jresult.picture" :src="jresult && jresult.picture ? 'data:image/jpeg;base64,' + jresult.picture : ''" alt="Where the journey stopped" style="max-width:100%;border:1px solid var(--line,#ddd);border-radius:6px">
+      </div>
+    </div>
   </div>
 </div>

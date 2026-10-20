@@ -26,6 +26,8 @@ if (env.ROLE !== 'worker') {
   await new Promise((/** @type {(v?: any) => void} */ resolve) =>
     server.listen(env.PORT, env.HOST, resolve),
   );
+  // Where this process can reach its own site (checks that call this server directly, without the load balancer).
+  ctx.selfUrl = `http://127.0.0.1:${/** @type {any} */ (server.address()).port}`;
   log.info(
     { port: env.PORT, role: env.ROLE, node: env.nodeId, db: env.dbKind, redis: env.hasRedis },
     'web server listening',

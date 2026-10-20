@@ -326,8 +326,72 @@ export function auditHtml(html, { origin, path, text: wantText, ms, bytes }) {
   $('script[src]').each((_, el) => follow(assets, A(el).src));
   $('link[rel~="stylesheet"][href]').each((_, el) => follow(assets, A(el).href));
 
+  const external = new Set();
+  $('a[href]').each((_, el) => {
+    try {
+      const u = new URL(A(el).href, here);
+      if (/^https?:$/.test(u.protocol) && u.origin !== here.origin)
+        external.add(u.href.split('#')[0]);
+    } catch {
+      /* not a link */
+    }
+  });
+  const blockers = $('head script[src]')
+    .toArray()
+    .filter((e) => !('async' in A(e)) && !('defer' in A(e)) && A(e).type !== 'module').length;
+  if (blockers > 1)
+    add(
+      'performance',
+      'info',
+      'render-blocking',
+      `${blockers} scripts in the head block the page from showing until they load (add defer).`,
+      String(blockers),
+    );
+  if (here.protocol === 'https:') {
+    const insecure = $('img[src], script[src], link[href], iframe[src]')
+      .toArray()
+      .filter((e) => /^http:\/\//i.test(A(e).src || A(e).href || ''));
+    if (insecure.length)
+      add(
+        'security',
+        'error',
+        'mixed-content',
+        `${insecure.length} file(s) are loaded over plain http on an https page.`,
+        A(insecure[0]).src || A(insecure[0]).href,
+      );
+  }
+  const meta = {
+    title,
+    description: desc,
+    lang,
+    canonical: $('link[rel="canonical"]').attr('href') || '',
+    noindex: /noindex/i.test($('meta[name="robots"]').attr('content') || ''),
+    hreflang: $('link[rel="alternate"][hreflang]')
+      .toArray()
+      .map((l) => ({ lang: A(l).hreflang, href: A(l).href })),
+    jsonld: $('script[type="application/ld+json"]')
+      .toArray()
+      .slice(0, 6)
+      .map((s) => $(s).text().slice(0, 20000)),
+    forms: $('form')
+      .toArray()
+      .slice(0, 6)
+      .map((f) => ({
+        action: A(f).action || '',
+        method: (A(f).method || 'get').toLowerCase(),
+        fields: $(f)
+          .find('[name]')
+          .toArray()
+          .map((e) => A(e).name)
+          .slice(0, 20),
+      })),
+    renderBlocking: blockers,
+  };
+
   return {
     findings,
+    meta,
+    external: [...external].slice(0, 100),
     text: wantText
       ? plain
           .split('\n')

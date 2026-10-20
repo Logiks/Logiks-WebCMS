@@ -12,7 +12,7 @@ export default {
       log: ctx.log,
       web: () => ctx.research?.web,
       // The server calls itself: the public site is rendered by this very process.
-      origin: () => `http://127.0.0.1:${ctx.env.PORT}`,
+      origin: () => ctx.selfUrl || `http://127.0.0.1:${ctx.env.PORT}`,
     });
   },
 };
