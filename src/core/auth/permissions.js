@@ -144,6 +144,9 @@ export function defineCorePermissions(permissions) {
     // Runs literally anything the database engine allows — no keyword blocklist, no read-only restriction, same
     // trust tier as services.script. Never grant this in a seed role other than the wildcard administrator (D-047).
     'dbms.query': 'Run raw SQL in the database console',
+    // Copies the whole database (users, password hashes, encrypted secrets) to another server and can repoint this
+    // one at it — the same trust tier as dbms.query. Never in a seed role other than the wildcard administrator.
+    'dbms.migrate': 'Move the whole database to another database server (e.g. SQLite to MySQL)',
   });
   permissions.define('Applications', {
     'plugins.read': 'View installed plugins',

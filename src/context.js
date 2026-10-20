@@ -27,6 +27,7 @@ import { createLocalStorage } from './modules/media/storage.js';
 import { createMediaService } from './modules/media/service.js';
 import { createThemesService } from './modules/themes/service.js';
 import { createDbms } from './modules/dbms/service.js';
+import { createDbMover } from './modules/dbms/migrate.js';
 import { createEvents } from './modules/events/service.js';
 import { createWebhooks, registerWebhookJobs } from './modules/webhooks/service.js';
 import { createSearchService } from './modules/search/service.js';
@@ -264,6 +265,16 @@ export async function createContext({ env, bus: busOverride, log: logOverride, a
   const libraries = createLibraries({ env, db, settings, bus, audit, cache, log });
   await libraries.start();
   const dbms = createDbms({ db, dialect: dialect(db), audit });
+  const dbMover = createDbMover({
+    env,
+    db,
+    dialect: dialect(db),
+    cache,
+    audit,
+    log,
+    state,
+    appRoot: appRoot ?? fileURLToPath(new URL('..', import.meta.url)),
+  });
   const search = createSearchService({ db, dialect: dialect(db), content, log });
   search.attach();
   jobs.define('search.reindex', async () => {
@@ -343,6 +354,7 @@ export async function createContext({ env, bus: busOverride, log: logOverride, a
     siteFiles,
     libraries,
     dbms,
+    dbMover,
     events,
     webhooks,
     analytics,

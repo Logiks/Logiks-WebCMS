@@ -28,7 +28,7 @@ logs/
 data/
 temp/
 zold/
-cache/
+./cache/
 plugins/*
 
 # Runtime data

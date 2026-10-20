@@ -101,6 +101,54 @@ export default function dbmsRoutes(ctx) {
     },
   );
 
+  // ── Move the whole database to another engine/server (migrate.js) ──
+  const urlBody = z.object({
+    url: z.string().min(1).max(1000),
+    resume: z.boolean().default(false),
+  });
+  r.get('/dbms/move', requirePermission('dbms.migrate'), async (_req, res) => {
+    res.json(await ctx.dbMover.status());
+  });
+  r.post(
+    '/dbms/move/test',
+    requirePermission('dbms.migrate'),
+    docs({ body: urlBody }),
+    async (req, res) => {
+      res.json(await ctx.dbMover.test(parse(urlBody, req.body).url));
+    },
+  );
+  r.post(
+    '/dbms/move/start',
+    requirePermission('dbms.migrate'),
+    docs({ body: urlBody }),
+    async (req, res) => {
+      const { url, resume } = parse(urlBody, req.body);
+      res.status(202).json(await ctx.dbMover.start(url, actorOf(req), { resume }));
+    },
+  );
+  const switchBody = z.object({
+    url: z.string().min(1).max(1000),
+    restart: z.boolean().default(false),
+  });
+  r.post(
+    '/dbms/move/switch',
+    requirePermission('dbms.migrate'),
+    docs({ body: switchBody }),
+    async (req, res) => {
+      const { url, restart } = parse(switchBody, req.body);
+      res.json(await ctx.dbMover.switchTo(url, { restart }, actorOf(req)));
+    },
+  );
+  const discardBody = z.object({ url: z.string().max(1000).default('') });
+  r.post(
+    '/dbms/move/discard',
+    requirePermission('dbms.migrate'),
+    docs({ body: discardBody }),
+    async (req, res) => {
+      res.json(await ctx.dbMover.discard(parse(discardBody, req.body).url, actorOf(req)));
+    },
+  );
+
   r.get('/dbms/saved-queries', requirePermission('dbms.query'), async (_req, res) => {
     res.json({ queries: await dbms.listSavedQueries() });
   });

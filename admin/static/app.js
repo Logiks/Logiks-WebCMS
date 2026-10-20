@@ -6266,6 +6266,106 @@ document.addEventListener('alpine:init', () => {
     },
   }));
 
+  // ───────── Move database (System → Database → Move database) ─────────
+  Alpine.data('dbMovePanel', () => ({
+    ...H,
+    url: '',
+    tested: null,
+    st: { state: 'idle' },
+    busy: false,
+    error: '',
+    restart: true,
+    switched: null,
+    timer: null,
+    get running() {
+      return this.st.state === 'running';
+    },
+    get sourceKindLabel() {
+      return (
+        { sqlite: 'SQLite', mysql: 'MySQL', pg: 'PostgreSQL' }[this.st.sourceKind] ||
+        'this database'
+      );
+    },
+    get rowsTotal() {
+      return (this.st.tables || []).reduce((n, x) => n + x.source, 0);
+    },
+    get rowsDone() {
+      return (this.st.tables || []).reduce((n, x) => n + (x.done ? x.source : x.copied || 0), 0);
+    },
+    get skipped() {
+      return (this.st.objects || []).filter((o) => o.status === 'skipped');
+    },
+    get percent() {
+      return this.rowsTotal ? Math.round((this.rowsDone / this.rowsTotal) * 100) : 5;
+    },
+    get headline() {
+      return (
+        { running: 'Copying…', ready: 'Copied and checked', failed: 'The copy did not finish' }[
+          this.st.state
+        ] || ''
+      );
+    },
+    async init() {
+      await this.refresh();
+      this.timer = setInterval(() => this.running && this.refresh(), 1500);
+    },
+    destroy() {
+      clearInterval(this.timer);
+    },
+    async refresh() {
+      try {
+        this.st = await api('GET', '/admin/dbms/move');
+      } catch (e) {
+        this.error = e.message;
+      }
+    },
+    async run(fn) {
+      this.busy = true;
+      this.error = '';
+      try {
+        await fn();
+      } catch (e) {
+        this.error = e.message;
+      } finally {
+        this.busy = false;
+      }
+    },
+    test() {
+      return this.run(async () => {
+        this.tested = await api('POST', '/admin/dbms/move/test', { url: this.url });
+      });
+    },
+    start(resume = false) {
+      return this.run(async () => {
+        this.switched = null;
+        this.st = await api('POST', '/admin/dbms/move/start', { url: this.url, resume });
+      });
+    },
+    clear() {
+      return this.run(async () => {
+        this.st = await api('POST', '/admin/dbms/move/discard', { url: this.url });
+        this.tested = null;
+        this.switched = null;
+      });
+    },
+    switchNow() {
+      const what = this.restart ? ' and restart' : '';
+      if (
+        !confirm(
+          `Switch this server to the new database${what}? The old database is left as it is.`,
+        )
+      )
+        return;
+      return this.run(async () => {
+        this.switched = await api('POST', '/admin/dbms/move/switch', {
+          url: this.url,
+          restart: this.restart,
+        });
+        await this.refresh();
+      });
+    },
+  }));
+
   // ───────── database (System → Database, D-047) ─────────
   Alpine.data('dbmsPage', () => ({
     ...H,

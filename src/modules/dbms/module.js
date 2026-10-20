@@ -5,6 +5,9 @@ export default {
   label: 'Database',
   optional: true,
   description: 'Browse, edit and query the database.',
-  provides: { services: ['dbms'], permissions: ['dbms.read', 'dbms.write', 'dbms.query'] },
+  provides: {
+    services: ['dbms', 'dbMover'],
+    permissions: ['dbms.read', 'dbms.write', 'dbms.query', 'dbms.migrate'],
+  },
   routes: { admin: [dbmsRoutes] },
 };

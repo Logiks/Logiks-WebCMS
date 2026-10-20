@@ -164,13 +164,15 @@ export function dialect(knex) {
     async columnDetails(table) {
       if (kind === 'sqlite') {
         const rows = await knex.raw(`PRAGMA table_info("${table}")`);
+        const pkCount = rows.filter((r) => r.pk > 0).length;
         return rows.map((r) => ({
           name: r.name,
           type: r.type,
           nullable: !r.notnull,
           default: r.dflt_value,
           primaryKey: r.pk > 0,
-          autoIncrement: r.pk === 1 && /int/i.test(r.type),
+          // Only a single-column INTEGER key is the rowid alias; the first column of a composite key is not.
+          autoIncrement: pkCount === 1 && r.pk === 1 && /int/i.test(r.type),
         }));
       }
       if (kind === 'mysql') {
@@ -204,6 +206,100 @@ export function dialect(knex) {
         primaryKey: pk.has(r.column_name),
         autoIncrement: /^nextval\(/.test(r.column_default || ''),
       }));
+    },
+    /**
+     * Every foreign key in the database as { table, column, refTable, refColumn } — the database mover
+     * (`src/modules/dbms/migrate.js`) uses it to copy parents before children.
+     */
+    async foreignKeys() {
+      if (kind === 'sqlite') {
+        const out = [];
+        for (const t of await this.listTables()) {
+          if (t.view) continue;
+          for (const f of await knex.raw(`PRAGMA foreign_key_list("${t.name}")`))
+            out.push({ table: t.name, column: f.from, refTable: f.table, refColumn: f.to });
+        }
+        return out;
+      }
+      if (kind === 'mysql') {
+        const [rows] = await knex.raw(
+          'select table_name as t, column_name as c, referenced_table_name as rt, referenced_column_name as rc from information_schema.key_column_usage where table_schema = database() and referenced_table_name is not null',
+        );
+        return rows.map((r) => ({ table: r.t, column: r.c, refTable: r.rt, refColumn: r.rc }));
+      }
+      const { rows } = await knex.raw(
+        `select kcu.table_name as t, kcu.column_name as c, ccu.table_name as rt, ccu.column_name as rc
+           from information_schema.table_constraints tc
+           join information_schema.key_column_usage kcu on kcu.constraint_name = tc.constraint_name and kcu.table_schema = tc.table_schema
+           join information_schema.constraint_column_usage ccu on ccu.constraint_name = tc.constraint_name and ccu.table_schema = tc.table_schema
+          where tc.constraint_type = 'FOREIGN KEY' and tc.table_schema = 'public'`,
+      );
+      return rows.map((r) => ({ table: r.t, column: r.c, refTable: r.rt, refColumn: r.rc }));
+    },
+    /**
+     * Programmable objects that live beside the tables, as { kind, name, table?, sql }: 'view', 'trigger' and (where
+     * the engine lets us read them back faithfully) 'function'. `sql` is a runnable CREATE statement for THIS engine.
+     * Routines we can't rebuild (MySQL procedures) come back with `sql: null` so a mover can at least name them.
+     */
+    async objects() {
+      if (kind === 'sqlite') {
+        const rows = await knex.raw(
+          "select type, name, tbl_name, sql from sqlite_master where type in ('view','trigger') and sql is not null",
+        );
+        return rows.map((r) => ({
+          kind: r.type,
+          name: r.name,
+          table: r.type === 'trigger' ? r.tbl_name : undefined,
+          sql: r.sql,
+        }));
+      }
+      if (kind === 'mysql') {
+        const [[{ db: schema }]] = await knex.raw('select database() as db');
+        const [views] = await knex.raw(
+          'select table_name as n, view_definition as d from information_schema.views where table_schema = database()',
+        );
+        const [triggers] = await knex.raw(
+          'select trigger_name as n, event_object_table as t, action_timing as tm, event_manipulation as ev, action_statement as s from information_schema.triggers where trigger_schema = database()',
+        );
+        const [routines] = await knex.raw(
+          'select routine_name as n, routine_type as t from information_schema.routines where routine_schema = database()',
+        );
+        // MySQL prints view bodies with the schema name in front of every table; drop it so the view moves.
+        const unqualify = (sql) => sql.split(`\`${schema}\`.`).join('');
+        return [
+          ...views.map((v) => ({
+            kind: 'view',
+            name: v.n,
+            sql: `CREATE VIEW \`${v.n}\` AS ${unqualify(v.d)}`,
+          })),
+          ...triggers.map((t) => ({
+            kind: 'trigger',
+            name: t.n,
+            table: t.t,
+            sql: `CREATE TRIGGER \`${t.n}\` ${t.tm} ${t.ev} ON \`${t.t}\` FOR EACH ROW ${unqualify(t.s)}`,
+          })),
+          ...routines.map((r) => ({ kind: String(r.t).toLowerCase(), name: r.n, sql: null })),
+        ];
+      }
+      const { rows: views } = await knex.raw(
+        "select viewname as n, definition as d from pg_views where schemaname = 'public'",
+      );
+      const { rows: triggers } = await knex.raw(
+        `select t.tgname as n, c.relname as t, pg_get_triggerdef(t.oid) as s
+           from pg_trigger t join pg_class c on c.oid = t.tgrelid join pg_namespace ns on ns.oid = c.relnamespace
+          where not t.tgisinternal and ns.nspname = 'public'`,
+      );
+      const { rows: fns } = await knex.raw(
+        `select p.proname as n, pg_get_functiondef(p.oid) as s
+           from pg_proc p join pg_namespace ns on ns.oid = p.pronamespace
+          where ns.nspname = 'public' and p.prokind = 'f'
+            and not exists (select 1 from pg_depend d where d.objid = p.oid and d.deptype = 'e')`,
+      );
+      return [
+        ...fns.map((f) => ({ kind: 'function', name: f.n, sql: f.s })),
+        ...views.map((v) => ({ kind: 'view', name: v.n, sql: `CREATE VIEW "${v.n}" AS ${v.d}` })),
+        ...triggers.map((t) => ({ kind: 'trigger', name: t.n, table: t.t, sql: t.s })),
+      ];
     },
     /** A table's indexes: { name, columns, unique }[]. Same interpolation note as columnDetails. */
     async indexList(table) {

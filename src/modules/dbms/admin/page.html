@@ -5,6 +5,7 @@
           <button type="button" class="btn btn-outline-secondary" :class="{active: tab === 'tables'}" @click="tab = 'tables'">Tables</button>
           <button type="button" class="btn btn-outline-secondary" :class="{active: tab === 'table'}" x-show="selectedTable" @click="tab = 'table'" x-text="selectedTable"></button>
           <button type="button" class="btn btn-outline-secondary" :class="{active: tab === 'console'}" x-show="can('dbms.query')" @click="openConsole()">SQL console</button>
+          <button type="button" class="btn btn-outline-secondary" :class="{active: tab === 'move'}" x-show="can('dbms.migrate')" @click="tab = 'move'">Move database</button>
         </div>
 
         <template x-if="tab === 'tables'">
@@ -138,6 +139,104 @@
                     <div><button class="btn btn-sm btn-outline-danger" type="button" @click="deleteSavedQuery(q)" aria-label="Delete saved query">×</button></div>
                   </div>
                 </template>
+              </div>
+            </div>
+          </div>
+        </template>
+
+        <template x-if="tab === 'move'">
+          <div x-data="dbMovePanel" class="row g-3">
+            <div class="col-lg-8">
+              <div class="panel p-3 mb-3">
+                <h2 class="h5">Move to another database</h2>
+                <p class="small muted mb-2">
+                  Copies everything — content, users, settings, media records, logs — from the database this server uses now
+                  (<strong x-text="sourceKindLabel"></strong>) into a new, <strong>empty</strong> database on MySQL or PostgreSQL.
+                  Nothing is changed here until you press Switch, and nothing in the new database is ever overwritten.
+                </p>
+                <ol class="small muted ps-3 mb-0">
+                  <li>Create an empty database and a user for it on the new server.</li>
+                  <li>Put the site in maintenance mode (Settings → General) so nothing changes while it copies.</li>
+                  <li>Enter the connection string below, test it, then copy.</li>
+                  <li>When the checks pass, switch this server over. Do the same on every other server.</li>
+                </ol>
+              </div>
+
+              <div class="alert alert-danger" role="alert" x-show="error" x-text="error"></div>
+
+              <div class="panel p-3 mb-3">
+                <label class="form-label" for="mv-url">New database connection string</label>
+                <input id="mv-url" class="form-control mono" type="password" autocomplete="off" spellcheck="false"
+                       placeholder="mysql://user:password@host:3306/dbname" x-model="url" :disabled="running">
+                <div class="help small muted mt-1">mysql://user:password@host:3306/dbname or postgres://user:password@host:5432/dbname. It is used for this copy only and is not saved.</div>
+                <div class="d-flex flex-wrap gap-2 mt-3">
+                  <button type="button" class="btn btn-outline-secondary" :disabled="busy || running || !url.trim()" @click="test()">Test connection</button>
+                  <button type="button" class="btn btn-primary" :disabled="busy || running || !url.trim() || (tested && !tested.empty)" @click="start()">Copy data</button>
+                </div>
+                <div class="small mt-2" x-show="tested">
+                  <span x-show="tested && tested.empty" class="text-success">Connected to <span class="mono" x-text="tested && tested.target"></span>. It is empty and ready.</span>
+                  <span x-show="tested && !tested.empty" class="text-danger">Connected, but this database already has <span x-text="tested && tested.existingTables"></span> table(s). Use a new, empty one.</span>
+                </div>
+              </div>
+
+              <div class="panel p-3 mb-3" x-show="st.state && st.state !== 'idle'">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                  <strong x-text="headline"></strong>
+                  <div class="d-flex gap-2" x-show="st.state === 'failed' || st.state === 'ready'">
+                    <button type="button" class="btn btn-sm btn-primary" x-show="st.resumable" :disabled="busy || !url.trim()" @click="start(true)">Resume</button>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" :disabled="busy" @click="clear()">Start over</button>
+                  </div>
+                </div>
+                <div class="progress mb-2" role="progressbar" aria-label="Copy progress" x-show="running"><div class="progress-bar" :style="'width:' + percent + '%'"></div></div>
+                <div class="small muted" x-show="st.step" x-text="st.step + (running ? ' — ' + rowsDone.toLocaleString() + ' of ' + rowsTotal.toLocaleString() + ' rows' : '')"></div>
+                <div class="small muted" x-show="st.resumable && !url.trim()">Enter the connection string above to resume or to clear the new database.</div>
+                <div class="alert alert-danger mt-2 mb-0" role="alert" x-show="st.error" x-text="st.error"></div>
+                <div class="small mt-2" x-show="st.extraTables && st.extraTables.length">
+                  Tables made in the SQL console were recreated by shape (their columns and plain indexes):
+                  <span class="mono" x-text="(st.extraTables || []).join(', ')"></span>.
+                </div>
+                <div class="table-responsive mt-2" x-show="(st.tables || []).some(t => t.source > 0)">
+                  <table class="table table-sm mb-0"><thead><tr><th>Table</th><th class="text-end">Rows here</th><th class="text-end">Copied</th></tr></thead><tbody>
+                    <template x-for="t in (st.tables || []).filter(t => t.source > 0)" :key="t.name"><tr>
+                      <td class="mono" x-text="t.name"></td><td class="text-end" x-text="t.source"></td>
+                      <td class="text-end" x-text="t.done ? t.copied : (t.copied ? t.copied + '…' : '…')"></td>
+                    </tr></template>
+                  </tbody></table>
+                </div>
+                <div class="mt-3" x-show="(st.objects || []).some(o => o.status !== 'exists')">
+                  <div class="small"><strong>Views, triggers, functions and extra indexes</strong></div>
+                  <div class="small muted mb-1" x-show="skipped.length">Some could not be created on the new database engine. Their original SQL is shown so you can port them by hand.</div>
+                  <template x-for="o in (st.objects || []).filter(o => o.status !== 'exists')" :key="o.kind + o.name + (o.table || '')">
+                    <div class="small mb-1">
+                      <span class="badge" :class="o.status === 'created' ? 'text-bg-success' : 'text-bg-warning'" x-text="o.status === 'created' ? 'Copied' : 'Not copied'"></span>
+                      <span x-text="o.kind"></span> <span class="mono" x-text="o.name"></span><span class="muted" x-show="o.table" x-text="' on ' + o.table"></span>
+                      <div class="muted" x-show="o.reason" x-text="o.reason"></div>
+                      <pre class="mono small mb-0 p-2 border rounded" style="white-space:pre-wrap" x-show="o.sql" x-text="o.sql"></pre>
+                    </div>
+                  </template>
+                </div>
+                <div class="mt-2 small text-danger" x-show="st.mismatches && st.mismatches.length">
+                  Different row counts after the copy:
+                  <template x-for="m in st.mismatches" :key="m.name"><div class="mono" x-text="m.name + ': ' + m.source + ' here, ' + m.target + ' there'"></div></template>
+                </div>
+              </div>
+
+              <div class="panel p-3" x-show="st.state === 'ready'">
+                <h2 class="h5">Switch this server</h2>
+                <p class="small muted">
+                  The copy matches row for row. Switching rewrites <span class="mono">DB_URL</span> in this server's <span class="mono">.env</span>
+                  (a dated backup is kept) and takes effect when it restarts. The old database is left untouched, so you can switch back.
+                </p>
+                <div class="form-check mb-2">
+                  <input class="form-check-input" type="checkbox" id="mv-restart" x-model="restart">
+                  <label class="form-check-label" for="mv-restart">Restart this server now</label>
+                </div>
+                <button type="button" class="btn btn-danger" :disabled="busy || st.switched || !url.trim()" @click="switchNow()">Switch to the new database</button>
+                <div class="small muted mt-2" x-show="!url.trim()">Enter the connection string above again to confirm which database to switch to.</div>
+                <div class="alert alert-success mt-3 mb-0" x-show="switched">
+                  <div x-text="switched && switched.message"></div>
+                  <div class="small mt-2">On every other server, set this and restart it: <span class="mono" x-text="switched && switched.otherServers"></span> (with the real password).</div>
+                </div>
               </div>
             </div>
           </div>
