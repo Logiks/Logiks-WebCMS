@@ -13,8 +13,8 @@ A single-site CMS with an admin console and a public website, plus an online sto
 AWS ALB** with most configuration in the database. Third-party themes must be safe to install.
 
 **In scope:** content management, themes, media, SEO, public API, catalog, cart/checkout, orders, GST-aware tax, payments
-(Razorpay/Stripe/PayU), extensibility (modules), hardening, launch tooling.
-**Out of scope (for now):** multi-tenant hosting, marketplace/multi-vendor, mobile apps, a visual page builder beyond block editing,
+(pluggable: Stripe, Razorpay, PayU, COD), extensibility (modules), hardening, launch tooling.
+**Out of scope (for now):** multi-tenant hosting, vendor payouts/commission (data-ready multi-vendor is in, D-090), mobile apps, a visual page builder beyond block editing,
 e-invoicing/e-way-bill filing (hooks only), multi-currency accounting.
 
 ## 2. Locked decisions (details in `DECISIONS.md`)
@@ -34,7 +34,7 @@ e-invoicing/e-way-bill filing (hooks only), multi-currency accounting.
 | ----- | -------------------------------- | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 1     | Cluster foundation and settings  | 1–5           | **Complete** (§4); 1e awaits BKM                                                                                                                        |
 | 2     | CMS and public website           | 6–12          | M2.1–M2.5 built (code + tests exist, **not audited** against their exit criteria); **M2.6 the site: one system, plus the page/component builder, done** |
-| 3     | eCommerce                        | 13–20         | Not started                                                                                                                                             |
+| 3     | eCommerce                        | 13–20         | Planned (D-088..D-098), not started                                                                                                                                          |
 | 4     | Extensibility, hardening, launch | 21–25         | Not started                                                                                                                                             |
 
 Each phase ends with a deployable, demonstrable increment on a **3-node cluster**, and a short retrospective that updates this document.
@@ -95,19 +95,80 @@ Demo: marketing site on a 3-node cluster, theme switched live, a page edit visib
 
 Phase 2 dependencies already in place: settings registry, permissions, audit, queue, mailer, cache, cluster nodes view.
 
-## 6. Phase 3 — eCommerce (proposed, weeks 13–20)
+## 6. Phase 3 — eCommerce (planned, D-088..D-098)
 
-**Outcome:** a customer can browse, pay and receive an order; the merchant can fulfil, invoice and report — with correct Indian GST.
+**Outcome:** a business customer or consumer can browse a large catalog, download specifications, request a quote or buy and pay, and the merchant can fulfil, invoice and report — with correct Indian GST. Scale target: **100k SKUs, 100k+ orders/day**.
 
-| Milestone                             | Scope                                                                                                                                                                                                                                                                                  | Exit criteria                                                                                                                                                  |
-| ------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **M3.1 Catalog** (wk 13–14)           | Products, variants/options, collections, attributes, media, SEO fields, inventory (SKU, stock, low-stock threshold), price lists, CSV import/export, storefront Liquid drops and theme sections                                                                                        | 10k-product import completes on the queue; catalog pages cache and invalidate by tag                                                                           |
-| **M3.2 Pricing and tax** (wk 14–15)   | Money as **integer minor units** + currency (INR first), tax classes, **HSN codes**, GST rules: intra-state CGST+SGST vs inter-state IGST from seller/ship-to state, inclusive/exclusive prices, rounding rules, gapless per-financial-year invoice numbering                          | Table-driven tests for every GST scenario; invoice numbers never skip or repeat under concurrent checkouts on 3 nodes                                          |
-| **M3.3 Cart and checkout** (wk 15–17) | Cart (Redis + DB persistence), **customer accounts as a separate auth realm** from admin users, address book, shipping zones/methods, coupons/promotions, order state machine, **inventory reservation**, idempotent order creation, order emails via queue                            | Concurrent buyers can't oversell; double-submit creates one order; cart survives node loss                                                                     |
-| **M3.4 Payments** (wk 17–19)          | Gateway adapter interface; **Razorpay first**, then Stripe and PayU; hosted/tokenised flows only (no card data touches our servers); signature-verified webhooks processed idempotently on the queue; refunds; reconciliation job; credentials as encrypted settings with test buttons | A webhook that lands on a _different node_ than the checkout completes the order once; replayed webhooks are harmless; failed/abandoned payments release stock |
-| **M3.5 Back office** (wk 19–20)       | Admin order screens, fulfilment and tracking numbers, invoices and credit notes (PDF), sales and **GST reports/exports**, abandoned-cart emails, customer account pages in the theme                                                                                                   | Scripted purchase → pay → fulfil → invoice → refund on the 3-node cluster                                                                                      |
+Shape: an **independent Product Catalog** (not content types), **pluggable** payment gateways, file storage and search, a default "house" vendor so multi-vendor is data-ready but invisible, and **request-a-quote** for products without a public price. Everything sits behind `features.commerce` (off by default).
 
-Payment provider order and India-only vs multi-country launch are open (❓).
+### How it is packaged (D-095)
+
+Every commerce feature is an **optional built-in module** (D-070), not a plugin, because it needs core hooks plugins don't have yet (content-type, Liquid-tag and event extension points, D-060). They share one **category, "eCommerce"**, are **switched off by default**, and are turned on at **System → Modules**, which groups modules by category. Their admin screens live under **one menu group, "eCatalog"** (not under Applications). `requires` already stops a module being switched on before the ones it needs, and stops one being switched off while another on depends on it.
+
+| Module id | Category | Needs | Contains |
+| --- | --- | --- | --- |
+| `sms` | eCommerce | — | SMS provider interface: send, delivery status, test button, per-number rate limits |
+| `sms-twilio` | eCommerce | `sms` | Twilio adapter; more providers are added as their own modules |
+| `customers` | eCommerce | `sms` (mobile OTP only) | Sign-in/registration by email or mobile, password + OTP, fraud lock, Flagged accounts review, customer groups |
+| `customer-account` | eCommerce | `customers` | Profile, password/OTP re-verification, address book, GSTIN/company, order history, saved downloads, notification preferences, consent, export/delete my data |
+| `catalog` | eCommerce | — | Families, SKUs, categories, brands, attributes, relations, search + facets, import/export, product SEO (JSON-LD, sitemap, feeds) |
+| `catalog-assets` | eCommerce | `catalog` | Datasheets/manuals/software, access levels, Download Center |
+| `quotes` | eCommerce | `catalog` | Quote-only products, Quotes inbox |
+| `inventory` | eCommerce | `catalog` | Stock (one location per vendor), reservations, low-stock events |
+| `pricing` | eCommerce | `catalog`, `customers` | Money, tax classes, HSN, GST, B2B price lists by customer group |
+| `cart` | eCommerce | `catalog`, `pricing` | Server-side cart, guest-to-customer merge, totals preview, expiry, mini-cart |
+| `checkout` | eCommerce | `cart`, `customers`, `inventory` | Address → shipping → payment → confirmation, idempotent order creation, COD rules |
+| `orders` | eCommerce | `checkout` | Order state machine, sub-orders, admin order screens, fulfilment |
+| `invoicing` | eCommerce | `orders` | Gapless GST invoice numbers, PDF invoices and credit notes, GST reports/exports |
+| `payments` | eCommerce | `checkout` | Gateway interface + COD |
+| `payments-stripe / -razorpay / -payu` | eCommerce | `payments` | One module per gateway, each switchable |
+| `shipping` | eCommerce | `checkout` | Zones, methods, pincode serviceability, carrier adapters, tracking |
+| `returns` | eCommerce | `orders`, `payments` | Return requests (RMA), refunds, restocking, credit notes |
+| `vendors` | eCommerce | `catalog`, `orders` | Vendor offers, sub-orders, vendor permissions |
+| `commerce-notifications` | eCommerce | `orders`, uses `sms` | Editable email/SMS templates for order, shipped, refund, quote, abandoned-cart; wording goes through translations |
+| `commerce-analytics` | eCommerce | `orders`, extends Analytics | Sales, funnel, top products/categories/brands, abandoned carts, quote funnel, zero-result searches, download counts, ticket stats |
+| `support` | Support | — (uses `customers`, `sms` when on) | Contact Us + a simple grid-style tickets desk (below) |
+
+File storage (D-089) stays **core**, because media already uses it.
+
+### Customer sign-in and registration (D-096)
+
+Off until the `customers` module is on **and** registration is enabled in its settings (so a store can show the catalog only).
+- **Identifier:** email, mobile, or either — a setting. **Password** always; **OTP** for verifying a new email/mobile, for sign-in as a second step or passwordless fallback (setting), and for password reset.
+- **OTP rules:** stored hashed, short expiry, limited attempts, resend cooldown, per-identifier and per-IP rate limits. Email goes through the existing mailer; **mobile needs an SMS provider adapter** (pluggable, like gateways; India needs DLT-registered templates).
+- **Fraud lock:** deterministic, configurable rules score each account (many sign-ups from one IP or device, disposable email domains, OTP request bursts, repeated failed OTPs, repeated failed or declined payments, repeated COD refusals). Past the threshold the account becomes **locked until an admin acts** (unlike the timed lockout admin users get): sessions end, sign-in says to contact support, and the customer is never told which rule fired. The reason and signals are recorded.
+- **Admin:** a **Flagged accounts** screen lists locked accounts with the signals; an admin **activates** (with a note, audited) or keeps them locked. An activated account gets a grace period so the same signals don't re-lock it at once.
+- Customer sessions are a **separate auth realm** from admin users; account pages are never cached.
+
+### Contact Us and tickets (D-097)
+
+`support` (category **Support**, off by default; works without commerce): a public Contact Us form creates a **ticket** for staff. A ticket has a reference number, subject, message, attachments (through file storage), status (open → pending → resolved/closed), priority, assignee, internal notes and a threaded reply history emailed to the sender. Backend is a **simple grid** (sortable, filterable by status/priority/assignee, click a row for the thread and reply box), not a helpdesk suite. Signed-in customers see their own tickets; guests verify with an email or mobile OTP. Emits `ticket.created` / `ticket.replied`. It replaces the plain contact form when on; quote requests (`quotes`) remain a separate inbox.
+
+| Milestone                          | Scope                                                                                                                                                                                                                                                                                                                                                                                       | Exit criterion                                                                                                                                                      |
+| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **E0 Decisions and module groundwork** | D-088..D-098 written; **module manifests gain `category` and `defaultOff`, System → Modules groups by category, the admin menu can declare the eCatalog group**; Stripe INR eligibility confirmed (BKM); load-test targets agreed | This section and the decisions are accepted |
+| **E1.1 Customer accounts** | Separate auth realm from admin users; email/mobile + password + OTP; fraud lock and Flagged accounts review (D-096); address book, GSTIN, the public-site **cache-safety fix** (account/cart/checkout never cached or shared) | Two visitors never see each other's data through any cache layer; sessions survive node loss |
+| **E1.2 File storage** | Storage adapter shared by media and commerce: local drive first, **S3-compatible** pluggable; private files and signed expiring URLs | Same code path on both adapters; a private file is unreachable without a valid signature |
+| **E1.3 Catalog** | Product families + SKUs (types: physical, digital, service); multi-parent category tree; brands (many-to-many); typed attributes with units and per-category sets; relations (accessories, alternatives, spares); SEO + JSON-LD `Product`; storefront components and Liquid access via declared endpoints | A family page lists its model table; product in several categories and brands; pages cache and invalidate by tag |
+| **E1.4 Assets and Download Center** | Datasheets, manuals, CAD, certificates, firmware, software: versioned, per-language, access `public` / `login` / `purchase`; per-product and a site-wide Download Center | Access levels enforced server-side (tested); old versions kept and selectable |
+| **E1.5 Import/export** | Chunked, resumable, queue-run CSV/zip import with row-level error report and dry-run; export | **100k-SKU import completes** on the queue without request timeouts or memory growth; re-run is idempotent |
+| **E1.6 Search and facets** | Search interface with a **database engine as default**; faceted filtering on filterable attributes, category and brand; Meilisearch/OpenSearch adapter later (supersedes D-033 only when added) | Facet counts correct on SQLite, MySQL and PostgreSQL; 100k-SKU query latency measured and recorded |
+| **E1.7 Request a quote** | A product flagged `quote_only` shows a quote form instead of a price; **Quotes inbox** in the admin (new → responded → won/lost, assignee, internal notes, emailed reply, optional quoted price + validity); emits `quote.requested`/`quote.responded` | A lead submitted on one node appears for staff on every node; reply email delivered once; rate-limited public form |
+| **E2.1 Inventory** | Per-SKU stock (per vendor offer), atomic conditional decrement, **TTL reservations**, low-stock events, backorder rule | Concurrent buyers cannot oversell, tested across nodes with real processes |
+| **E2.2 Pricing, B2B price lists and GST** | Money as **integer minor units** + currency (INR first, schema multi-currency-ready); tax classes, **HSN**, CGST+SGST vs IGST by origin/destination state, inclusive/exclusive, rounding rules; **price lists** (customer-group / buyer-specific prices, tiered quantity breaks, MOQ — good-to-have, built after the base price); gapless per-financial-year invoice numbers | Table-driven tests for every GST scenario; invoice numbers never skip or repeat under concurrent checkouts on 3 nodes |
+| **E2.3 Cart, checkout, orders** | Cart (Redis + DB), shipping zones/methods, order state machine, idempotent order creation, **COD** as a payment method (with COD rules: limits, fee, serviceable pincodes, confirm-on-delivery), order emails through the queue | Double submit creates one order; cart survives node loss; COD order completes without a gateway |
+| **E2.4 Payments** | **Gateway interface** (create/confirm/refund/verify-webhook/capabilities) with adapters: **Stripe first, then Razorpay, PayU**, plus COD as a built-in offline method; hosted/tokenised flows only; signature-verified, **idempotent** webhooks on the queue; refunds; reconciliation job; credentials as encrypted settings with test buttons; gateways enabled per currency/country/amount | A webhook landing on a different node completes the order once; replays are harmless; abandoned payments release stock; adding a gateway touches no checkout code |
+| **E3.1 Vendors** | Default "house" vendor; vendor offers (price, stock, lead time) per SKU; **sub-orders per vendor**; vendor-scoped permissions; UI hides vendor features while there is one vendor | A two-vendor cart splits into two sub-orders, each fulfilled and refunded independently |
+| **E3.2 Back office** | Order management, fulfilment and tracking, shipping carrier adapters, returns/RMA and refunds, invoices and credit notes (PDF), sales and **GST reports/exports**, abandoned-cart emails, customer account pages | Scripted purchase → pay → fulfil → invoice → refund on the 3-node cluster, on all three databases |
+| **E1.8 Support tickets** | `support` module (D-097) | A ticket raised on one node is visible and repliable by staff on every node; reply email sent once |
+| **E3.3 Notifications and analytics** | `commerce-notifications` and `commerce-analytics` (D-099) | Every order/quote/ticket event produces its message once; analytics figures reconcile with the orders table on all three databases |
+| **E4 Growth** | **Promotions/coupons (D-099)**, **warehouses/multi-location stock (D-099)**, digital delivery + licences/download limits, product comparison, wishlist, reviews, extra carriers/gateways | — |
+| **Next phase (not in this plan)** | **Vendor payouts and commission tracking** | — |
+
+**Scale rules (apply to every E-milestone):** atomic SQL for stock (never read-then-write), keyset pagination, no `COUNT(*)` on large tables, server-side paging/sort/filter in every admin table, immutable order snapshots, payment/email/webhook work only through the queue, orders designed for partition/archive after 6–12 months, catalog reads through `ctx.cache` with tag invalidation, cart/checkout/account never cached.
+
+Earlier sketch kept for reference: `../../PLAN-eCommerce.md` (plugin-oriented split; gateways stay behind the core interface, individual gateways may ship as plugins once the Plugin Manager gains extension points).
+
 
 ## 7. Phase 4 — Extensibility, hardening, launch (proposed, weeks 21–25)
 
@@ -148,10 +209,10 @@ additive, admin copy reviewed, `CLAUDE.md` "Where we are" updated.
 ## Open decisions
 
 1. **Primary production database** — MySQL or PostgreSQL? (Drives CI order and load-test target.)
-2. **Media storage** — S3 (recommended for clusters) or shared filesystem (EFS)?
-3. **Search** — DB-native to start (simplest) or an external engine (Meilisearch/OpenSearch) from day one?
+2. ~~Media storage~~ — **decided (D-089):** pluggable adapter, local drive first, S3-compatible later.
+3. ~~Search~~ — **decided (D-091):** database engine first behind an interface; Meilisearch/OpenSearch later.
 4. **Multilingual** — needed for launch, or later behind the feature flag?
-5. **Payments** — Razorpay first as proposed? India-only at launch, or Stripe from the start?
+5. ~~Payments~~ — **decided (D-092):** pluggable gateways (Stripe first, then Razorpay, PayU) plus COD; India first, schema multi-currency-ready. Open: confirm Stripe INR eligibility.
 6. **Customer sign-in** — email + password, or OTP/passwordless (common in India)?
 7. **Third-party themes/modules** — will outsiders ever install them? (Sets how strict the sandbox and review process must be. Plugin Manager, D-060, is built for the owner's own/AI-generated plugins at single-operator trust — full, unsandboxed Node.js — so this decision is still open and gates whether a plugin-review process or sandbox is ever needed.)
 8. **Hosting** — ECS, EKS or EC2 for the web/worker roles? Managed Redis (ElastiCache) and RDS assumed.
@@ -159,6 +220,7 @@ additive, admin copy reviewed, `CLAUDE.md` "Where we are" updated.
 
 ## Change log
 
+- 2026-10-20 — Phase 3 eCommerce re-planned (D-088..D-098): independent catalog, 100k SKU / 100k orders-per-day target, request-a-quote, pluggable storage/search/gateways + COD, B2B price lists, data-ready multi-vendor. Payouts and commission are the next phase. Planning only; no code.
 - 2026-10-06 — Plugin Editor's Files panel is no longer read-only (D-066): a file can be viewed and edited by hand, through the same validation the AI's own write_file/delete_file tools use, in a Theme-editor-style file browser + code editor.
 - 2026-10-06 — Webmaster → AI Page Designer built (D-065): a chat session plans a complete new page, picks or proposes components (owner approves anything new), generates raster/SVG images straight into the media library, and lays the page out, reusing the Pages builder's save path, Media Generator's image pipeline and Services/Database's table creation. SVG upload support added to the media library as part of this (sanitized, allow-listed).
 - 2026-10-05 — Plugin Editor's nav moved to a button inside Plugin Manager; Media moved to its own "Media Manager" group, which gained Media Generator (AI images, OpenAI/Google/Stability) and Media Analytics ("Media Usage") (D-064).
