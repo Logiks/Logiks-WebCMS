@@ -10,6 +10,11 @@ import { siteLocales, makeTranslator } from './i18n.js';
 const VALUE = /^[a-z0-9][a-z0-9_-]{0,127}$/; // one part of an address that a [param] can take
 const HEAD = '<!--cms:head-->';
 const FOOT = '<!--cms:foot-->';
+/** A component preview shows the component alone: the theme's styles and scripts, but none of its header, footer or layout. */
+const BARE_LAYOUT =
+  '<!doctype html><html lang="{{ site.locale }}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">' +
+  "<style>:root { --accent: {{ settings.accent_color | default: '#2b59c3' }}; } body { margin: 0; }</style>{{ content_for_header }}</head>" +
+  '<body>{{ content_for_layout }}{{ content_for_footer }}</body></html>';
 const MAX_API_CALLS = 30;
 const SEO_KEYS = [
   'title',
@@ -236,10 +241,11 @@ export function createSitePages(ctx) {
 
     /**
      * @param {{file: string, params: Record<string,string>, themeId: string, status?: number, globals: any,
-     *          overlay?: Map<string,string>, customCss?: string,
+     *          overlay?: Map<string,string>, bare?: boolean, customCss?: string,
      *          request: {path: string, canonical: string, query: Record<string,string>, locale: string, ip?: string, previewId?: number}}} req
      *   `overlay`: draft file content to render WITHOUT saving (the page/component builder's live preview). Keyed by site-tree
      *   path (`pages/about.html`, `components/hero.html`); a path not in the tree yet is simply added for this render.
+     *   `bare`: render without the theme's layout (header, footer, page chrome) — a component's own preview.
      *   `customCss`: draft custom CSS in place of the theme's saved one (Appearance → Customize's live preview).
      * @returns {Promise<{status: number, html: string, tags: string[], entries: [number, number][], front: any, notFound: boolean, redirect?: {to: string, status: number}}>}
      */
@@ -253,8 +259,8 @@ export function createSitePages(ctx) {
         const layoutName = b.rt.text.has(`layouts/${page.front.layout}.html`)
           ? page.front.layout
           : 'default';
-        const layoutFile = `layouts/${layoutName}.html`;
-        if (!b.rt.text.has(layoutFile))
+        const layoutFile = req.bare ? '__bare__' : `layouts/${layoutName}.html`;
+        if (!req.bare && !b.rt.text.has(layoutFile))
           throw new HttpError(
             500,
             'theme_incomplete',
@@ -296,7 +302,7 @@ export function createSitePages(ctx) {
           if (state.notFound) return null;
           Object.assign(seoView, await finalSeo(page.front, state, req, status));
           const html = await b.engine.render(
-            parseOnce(b, layoutFile, b.rt.text.get(layoutFile)),
+            parseOnce(b, layoutFile, req.bare ? BARE_LAYOUT : b.rt.text.get(layoutFile)),
             {
               layout: layoutName,
               content_for_layout: new Safe(body),

@@ -1,12 +1,7 @@
 import { test, before, after, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { makeNode, signedIn } from './helpers.js';
-import {
-  compileTailwind,
-  convertSnippet,
-  snippetAddress,
-  v4ToV3,
-} from '../src/modules/site/snippet.js';
+import { compileTailwind, convertSnippet, snippetAddress } from '../src/modules/site/snippet.js';
 import {
   SiteFormatError,
   compileComponent,
@@ -74,13 +69,23 @@ describe('convertSnippet: a library snippet becomes a component file', () => {
 
   test('says what the site may be missing: Alpine, plugins, images', async () => {
     const out = await convertSnippet({
-      html: '<div x-data="{o:false}" class="form-input p-2"><img src="/img/a.png"></div>',
+      html: '<div x-data="{o:false}" class="p-2" data-hs-overlay="#m"><img src="/img/a.png"></div>',
       name: 'needs',
     });
     const all = out.notes.join('\n');
     assert.match(all, /Alpine/);
     assert.match(all, /plugin/i);
     assert.match(all, /images/);
+  });
+
+  test('the Tailwind forms and typography plugin classes work, without resetting every input', async () => {
+    const css = await compileTailwind(
+      '<input class="form-input rounded"><input type="checkbox" class="form-checkbox"><article class="prose">x</article>',
+    );
+    assert.match(css, /\.form-input\b/);
+    assert.match(css, /\.form-checkbox\b/);
+    assert.match(css, /\.prose\b/);
+    assert.doesNotMatch(css, /\[type='text'\]\s*[,{]|^input\s*[,{]/m, 'no element-wide form reset');
   });
 
   test('names are slugged; empty or oversized snippets are refused with a fix', async () => {
@@ -99,26 +104,28 @@ describe('convertSnippet: a library snippet becomes a component file', () => {
   });
 });
 
-describe('Tailwind 4 snippets are translated to the sizes Tailwind 3 means', () => {
-  test('renamed scale steps and the important marker', () => {
-    const { html, converted } = v4ToV3(
-      '<a class="rounded-sm shadow-xs hover:rounded-xs bg-linear-to-r focus:ring-3 outline-hidden flex! md:-ml-2">x</a>',
+describe('Tailwind 4 snippets compile as written', () => {
+  test('v4 class names, the important marker and gradients work, and the cascade layers are gone', async () => {
+    const css = await compileTailwind(
+      '<a class="rounded-xs shadow-xs bg-linear-to-r from-red-500 focus:ring-3 outline-hidden flex! md:-ml-2 group-hover:underline">x</a>',
     );
-    assert.equal(converted, true);
-    assert.equal(
-      html,
-      '<a class="rounded shadow-sm hover:rounded-sm bg-gradient-to-r focus:ring outline-none !flex md:-ml-2">x</a>',
-    );
+    assert.match(css, /\.rounded-xs\s*\{\s*border-radius: var\(--radius-xs\)/);
+    assert.match(css, /\.md\\:-ml-2/);
+    assert.match(css, /\.flex\\!/);
+    assert.match(css, /linear-gradient\(var\(--tw-gradient-stops\)\)/);
+    assert.doesNotMatch(css, /@layer/, "unlayered, so the rules beat Bootstrap's");
+    assert.doesNotMatch(css, /:root/, ':root does not exist inside a component');
+    assert.match(css, /:host\s*\{[^}]*--radius-xs/, 'theme values live on the component wrapper');
   });
 
-  test('a Tailwind 3 snippet is left exactly as written', () => {
-    const src = '<a class="rounded-sm shadow-sm ring blur">x</a>';
-    assert.deepEqual(v4ToV3(src), { html: src, converted: false });
-  });
-
-  test('the import tells the author it happened', async () => {
-    const out = await convertSnippet({ html: '<a class="rounded-xs p-2">x</a>', name: 'v4' });
-    assert.match(out.notes.join(' '), /Tailwind 4/);
+  test('the theme values reach the rendered component through the wrapper', async () => {
+    const out = await convertSnippet({
+      html: '<a class="rounded-xs bg-indigo-600 p-2">x</a>',
+      name: 'v4wrap',
+    });
+    const compiled = compileComponent('site:v4wrap', out.content);
+    assert.match(compiled.css, /^\[data-c="[a-f0-9]{8}"\]\{[^}]*--color-indigo-600/m);
+    assert.match(compiled.css, /--color-indigo-600\)/);
   });
 });
 
@@ -246,5 +253,137 @@ describe('POST /site/components/import-snippet', () => {
       .post('/api/admin/site/components/import-snippet')
       .send({ html: '<p>x</p>', name: 'nope' });
     assert.equal(r.status, 403);
+  });
+});
+
+describe('the library catalog (HyperUI, PrebuiltUI)', () => {
+  let node, admin;
+  const realFetch = globalThis.fetch;
+  /** @type {string[]} */
+  let asked = [];
+  const TREE = {
+    tree: [
+      { type: 'blob', path: 'public/examples/marketing/ctas/1.html' },
+      { type: 'blob', path: 'public/examples/marketing/ctas/1-dark.html' },
+      { type: 'blob', path: 'public/examples/marketing/ctas/2.html' },
+      { type: 'blob', path: 'public/examples/application/tabs/1.html' },
+      { type: 'blob', path: 'public/examples/application/tabs/notes.md' },
+      { type: 'tree', path: 'public/examples/application' },
+    ],
+  };
+  before(async () => {
+    node = await makeNode();
+    admin = await signedIn(node.app);
+    globalThis.fetch = async (u, init) => {
+      const url = String(u);
+      if (!/api\.github\.com|raw\.githubusercontent\.com/.test(url)) return realFetch(u, init);
+      asked.push(url);
+      if (url.includes('api.github.com')) return new globalThis.Response(JSON.stringify(TREE));
+      return new globalThis.Response(
+        `<a class="rounded-xs p-2" href="#">${url.split('/').pop()}</a>`,
+      );
+    };
+  });
+  after(async () => {
+    globalThis.fetch = realFetch;
+    await node.close();
+  });
+  const get = (q) => admin.get('/api/admin/site/components/catalog').query(q);
+
+  test('lists the libraries, then one library grouped by category — without dark twins or non-HTML', async () => {
+    const all = await get({});
+    assert.deepEqual(
+      all.body.sources.map((s) => s.id),
+      ['hyperui', 'prebuiltui'],
+    );
+    const r = await get({ source: 'hyperui' });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.equal(r.body.count, 3);
+    assert.deepEqual(
+      r.body.categories.map((c) => c.id),
+      ['application', 'marketing'],
+    );
+    const ctas = r.body.categories[1].groups[0];
+    assert.deepEqual(
+      ctas.items.map((i) => i.name),
+      ['hyperui_marketing_ctas_1', 'hyperui_marketing_ctas_2'],
+    );
+    assert.equal(ctas.items[0].title, 'Ctas 1');
+  });
+
+  test('the listing is fetched once and then served from the cache', async () => {
+    asked = [];
+    await get({ source: 'hyperui' });
+    await get({ source: 'hyperui' });
+    assert.equal(asked.filter((u) => u.includes('api.github.com')).length, 0);
+  });
+
+  test('convert shows the result without saving; import saves, skips repeats, and only fetches listed files', async () => {
+    const path = 'public/examples/marketing/ctas/1.html';
+    const conv = await admin
+      .post('/api/admin/site/components/catalog/convert')
+      .send({ source: 'hyperui', path });
+    assert.equal(conv.status, 200, JSON.stringify(conv.body));
+    assert.match(conv.body.content, /"license": "MIT"/);
+    assert.match(
+      conv.body.content,
+      /github\.com\/markmead\/hyperui\/blob\/main\/public\/examples\/marketing\/ctas\/1\.html/,
+    );
+    assert.ok(
+      !node.ctx.siteFiles.list('components/').some((f) => f.path.includes('hyperui_')),
+      'convert saves nothing',
+    );
+
+    const imp = (paths, extra = {}) =>
+      admin
+        .post('/api/admin/site/components/catalog/import')
+        .send({ source: 'hyperui', paths, ...extra });
+    const first = await imp([path, 'public/examples/application/tabs/1.html']);
+    assert.equal(first.status, 200, JSON.stringify(first.body));
+    assert.equal(first.body.saved.length, 2);
+    const again = await imp([path]);
+    assert.deepEqual(again.body.skipped, ['hyperui_marketing_ctas_1']);
+    const over = await imp([path], { overwrite: true });
+    assert.equal(over.body.saved.length, 1);
+
+    asked = [];
+    const evil = await imp(['../../etc/passwd', 'public/examples/marketing/ctas/9.html']);
+    assert.equal(evil.body.saved.length, 0);
+    assert.equal(evil.body.errors.length, 2);
+    assert.match(evil.body.errors[0].message, /not in the library/);
+    assert.deepEqual(asked, [], 'nothing outside the listing is ever requested');
+  });
+
+  test('an unknown library, a GitHub outage and a missing permission each say what to do', async () => {
+    assert.equal((await get({ source: 'nope' })).status, 422);
+    const saved = globalThis.fetch;
+    globalThis.fetch = async () => {
+      throw new Error('offline');
+    };
+    try {
+      const r = await get({ source: 'prebuiltui' });
+      assert.equal(r.status, 422);
+      assert.match(r.body.error.message, /Could not reach GitHub/);
+    } finally {
+      globalThis.fetch = saved;
+    }
+    const role = await node.ctx.users.createRole(
+      { name: 'reader2', description: '', permissions: ['admin.access', 'components.read'] },
+      null,
+    );
+    await node.ctx.users.createUser(
+      {
+        email: 'reader2@example.com',
+        name: 'r',
+        password: 'Some-long-pass-12',
+        roleId: Number(role.id),
+      },
+      null,
+    );
+    const reader = await signedIn(node.app, {
+      email: 'reader2@example.com',
+      password: 'Some-long-pass-12',
+    });
+    assert.equal((await reader.get('/api/admin/site/components/catalog')).status, 403);
   });
 });

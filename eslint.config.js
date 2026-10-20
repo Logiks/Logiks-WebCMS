@@ -1,7 +1,7 @@
 import js from '@eslint/js';
 
 export default [
-  { ignores: ['node_modules/', 'data/', 'admin/static/vendor/', 'ecosystem_copy.config.js'] },
+  { ignores: ['node_modules/', 'data/', 'admin/static/vendor/', 'ecosystem_copy.config.cjs'] },
   js.configs.recommended,
   {
     languageOptions: {

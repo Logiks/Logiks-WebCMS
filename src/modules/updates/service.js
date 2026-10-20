@@ -5,6 +5,8 @@ import path from 'node:path';
 import { HttpError, notFound } from '../../core/http/errors.js';
 
 const CHANNEL = 'updates:cmd';
+/** Updates always come from the configured source URL, through this git remote that the app keeps pointed at it. */
+export const SOURCE_REMOTE = 'cms-source';
 const MAX_INCOMING = 20;
 
 /** Credentials that git or npm may echo back (https://user:token@host, npm auth tokens) never leave this module. */
@@ -126,19 +128,16 @@ export function createUpdatesService({
               "This server isn't running from a git checkout, so it can't update itself. Deploy a new build instead (for Docker: rebuild the image and roll the containers).",
           };
 
-    const remote = settings.get('updates.remote');
+    const remote = SOURCE_REMOTE;
+    const sourceBranch = settings.get('updates.source_branch');
+    const sourceUrl = settings.get('updates.source_url');
     const head = (await git('rev-parse', 'HEAD')).out;
     const branchRes = await git('symbolic-ref', '--short', '-q', 'HEAD');
     const branch = branchRes.code === 0 ? branchRes.out : null;
     const [meta] = (await git('log', '-1', '--format=%h%x1f%s%x1f%an%x1f%at')).out.split('\n');
     const [short, subject, author, at] = (meta ?? '').split('\x1f');
     const dirty = (await git('status', '--porcelain', '--untracked-files=no')).out !== '';
-    const url = await git('remote', 'get-url', remote);
-    const remotes = [];
-    for (const name of (await git('remote')).out.split('\n').filter(Boolean)) {
-      const u = await git('remote', 'get-url', name);
-      remotes.push({ name, url: u.code === 0 ? u.out : null });
-    }
+    const url = { code: 0, out: redact(sourceUrl) };
 
     const info = {
       supported: true,
@@ -149,8 +148,9 @@ export function createUpdatesService({
       committedAt: Number(at) * 1000 || null,
       branch,
       remote,
-      remoteUrl: url.code === 0 ? url.out : null,
-      remotes,
+      sourceUrl: redact(sourceUrl),
+      sourceBranch,
+      remoteUrl: url.out,
       dirty,
       ahead: null,
       behind: null,
@@ -161,11 +161,10 @@ export function createUpdatesService({
       blocker: null,
     };
     if (!branch) info.blocker = 'detached';
-    else if (url.code !== 0) info.blocker = 'no_remote';
     else if (dirty) info.blocker = 'dirty';
 
-    if (branch && url.code === 0) {
-      const ref = `refs/remotes/${remote}/${branch}`;
+    if (branch) {
+      const ref = `refs/remotes/${remote}/${sourceBranch}`;
       if ((await git('rev-parse', '--verify', '-q', ref)).code === 0) {
         const [ahead, behind] = (
           await git('rev-list', '--left-right', '--count', `HEAD...${ref}`)
@@ -211,7 +210,6 @@ export function createUpdatesService({
     ({
       detached:
         'This server is on a detached commit, not a branch. Check out a branch (git checkout <branch>) and try again.',
-      no_remote: `The git remote "${g.remote}" doesn't exist in this checkout. Fix the name under Settings → Updates, or add it with "git remote add".`,
       dirty:
         'This checkout has uncommitted changes to tracked files, and updating would overwrite them. Commit or stash them (git stash), then try again.',
       diverged:
@@ -245,7 +243,7 @@ export function createUpdatesService({
       set({ op: 'check', status: 'running', step: 'Fetching from the remote', message: null });
       const g = await readGit();
       if (!g.supported) throw new StepError(g.message);
-      if (!g.branch || g.blocker === 'no_remote') throw new StepError(blockerMessage(g));
+      if (!g.branch) throw new StepError(blockerMessage(g));
       await fetchRemote(g);
       const after = await readGit();
       await audit.log({
@@ -271,16 +269,21 @@ export function createUpdatesService({
 
   async function fetchRemote(g) {
     alive();
+    // Keep the managed remote pointing at the configured source, so the URL is only ever set here.
+    const url = settings.get('updates.source_url');
+    const set = (await git('remote', 'get-url', SOURCE_REMOTE)).code === 0 ? 'set-url' : 'add';
+    const pointed = await git('remote', set, SOURCE_REMOTE, url);
+    if (pointed.code !== 0)
+      throw new StepError(`Couldn't use the update source: ${lastLine(pointed.out)}.`);
+    const b = g.sourceBranch;
     const r = await run(
       'git',
-      ['fetch', g.remote, `+refs/heads/${g.branch}:refs/remotes/${g.remote}/${g.branch}`],
-      {
-        timeoutMs: 120_000,
-      },
+      ['fetch', SOURCE_REMOTE, `+refs/heads/${b}:refs/remotes/${SOURCE_REMOTE}/${b}`],
+      { timeoutMs: 120_000 },
     );
     if (r.code !== 0)
       throw new StepError(
-        `Couldn't fetch from "${g.remote}": ${r.timedOut ? 'it took too long' : lastLine(r.out) || 'unknown error'}. Check that this server can reach the remote and has read access to it.`,
+        `Couldn't fetch branch "${b}" from ${g.sourceUrl}: ${r.timedOut ? 'it took too long' : lastLine(r.out) || 'unknown error'}. Check the source URL and branch, and that this server can reach it and has read access.`,
       );
   }
 
@@ -293,8 +296,7 @@ export function createUpdatesService({
       let g = await readGit();
       if (!g.supported) throw new StepError(g.message);
       from = g.headFull;
-      if (['detached', 'no_remote', 'dirty'].includes(g.blocker))
-        throw new StepError(blockerMessage(g));
+      if (['detached', 'dirty'].includes(g.blocker)) throw new StepError(blockerMessage(g));
 
       set({ step: 'Fetching from the remote' });
       await fetchRemote(g);
@@ -306,7 +308,7 @@ export function createUpdatesService({
       if (g.behind > 0) {
         alive();
         set({ step: `Applying ${g.behind} update${g.behind === 1 ? '' : 's'}` });
-        const m = await git('merge', '--ff-only', `refs/remotes/${g.remote}/${g.branch}`);
+        const m = await git('merge', '--ff-only', `refs/remotes/${g.remote}/${g.sourceBranch}`);
         if (m.code !== 0)
           throw new StepError(
             `Git couldn't apply the update: ${lastLine(m.out)}. Nothing was changed.`,
@@ -417,37 +419,33 @@ export function createUpdatesService({
   }
 
   /**
-   * Switches which git remote updates come from. It is the cluster-wide `updates.remote` setting, so every server follows;
-   * a server that has no remote of that name says so on its next check. The name must exist in THIS checkout.
+   * Changes where updates come from: a git URL and a branch, cluster-wide settings, so every server follows.
+   * Each server needs read access to the URL; a bad one shows up as a failed fetch on the next check.
    */
-  async function setRemote(name, actor) {
+  async function setSource({ url, branch }, actor) {
     if (st.status === 'running')
       throw new HttpError(
         409,
         'busy',
         'An update is already running on this server. Wait for it to finish.',
       );
-    const g = await readGit();
-    if (!g.supported) throw new HttpError(409, 'unsupported', g.message);
-    if (!g.remotes.some((r) => r.name === name))
-      throw new HttpError(
-        400,
-        'unknown_remote',
-        `This checkout has no git remote named "${name}". Add it with "git remote add ${name} <url>" first.`,
-      );
-    const from = settings.get('updates.remote');
-    if (from === name) return;
-    await settings.update('updates', { values: { remote: name } }, actor);
+    const from = {
+      url: redact(settings.get('updates.source_url')),
+      branch: settings.get('updates.source_branch'),
+    };
+    if (from.url === redact(url) && from.branch === branch) return;
+    await settings.update('updates', { values: { source_url: url, source_branch: branch } }, actor);
     await audit.log({
       actor: actorInfo(actor),
-      action: 'updates.remote',
+      action: 'updates.source',
       entity: 'server',
       entityId: env.nodeId,
-      meta: { host: hostName(), from, to: name },
+      // redact(): a URL may carry a token; it must not reach the audit log.
+      meta: { host: hostName(), from, to: { url: redact(url), branch } },
     });
     set({
       git: await readGit(),
-      message: `Updates now come from "${name}". Check for updates to refresh.`,
+      message: `Updates now come from ${redact(url)} (${branch}). Check for updates to refresh.`,
     });
   }
 
@@ -491,7 +489,7 @@ export function createUpdatesService({
       stopped = true;
     },
     snapshot: () => st,
-    setRemote,
+    setSource,
     bootCommit: () => bootCommit,
     restartMode: () => resolveRestartMode(settings.get('updates.restart_mode'), env.supervised),
 

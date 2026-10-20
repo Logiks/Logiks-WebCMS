@@ -8,6 +8,7 @@ import { SiteFormatError, parseComponent, parsePage } from './component.js';
 import { siteGlobals } from './public.js';
 import { inferUses, usesIssues, usesOf } from './uses.js';
 import { convertSnippet, fetchSnippet, slugName } from './snippet.js';
+import { createCatalog } from './catalog.js';
 
 /**
  * What the page manager and component builder need beyond plain file CRUD (files-routes.js):
@@ -146,6 +147,7 @@ export default function siteBuilderRoutes(ctx) {
       params: plan.params,
       themeId,
       overlay: plan.overlay,
+      bare: !!plan.previewProps,
       globals,
       request: {
         path: plan.url,
@@ -263,6 +265,89 @@ export default function siteBuilderRoutes(ctx) {
         if (e instanceof SiteFormatError) throw new HttpError(422, 'invalid_input', e.message);
         throw e;
       }
+    },
+  );
+
+  // Browse HyperUI / PrebuiltUI and add components from their open-source repositories (D-106).
+  const catalog = createCatalog({ cache: ctx.cache });
+  const asInvalid = (e) => {
+    if (e instanceof SiteFormatError) throw new HttpError(422, 'invalid_input', e.message);
+    throw e;
+  };
+  const catalogPick = z.object({
+    source: z.string().min(1).max(40),
+    path: z.string().min(1).max(300),
+  });
+
+  r.get('/site/components/catalog', requirePermission('components.write'), async (req, res) => {
+    const id = typeof req.query.source === 'string' ? req.query.source : '';
+    if (!id) return res.json({ sources: catalog.sources() });
+    try {
+      res.json(await catalog.list(id));
+    } catch (e) {
+      asInvalid(e);
+    }
+  });
+
+  // Convert one catalog component without saving it — the Library tab renders this through /site/preview.
+  r.post(
+    '/site/components/catalog/convert',
+    requirePermission('components.write'),
+    docs({ body: catalogPick }),
+    async (req, res) => {
+      const b = parse(catalogPick, req.body);
+      try {
+        const out = await catalog.convert(b.source, b.path);
+        res.json({ name: out.name, content: out.content, notes: out.notes });
+      } catch (e) {
+        asInvalid(e);
+      }
+    },
+  );
+
+  const catalogImport = z.object({
+    source: z.string().min(1).max(40),
+    paths: z.array(z.string().min(1).max(300)).min(1).max(30),
+    overwrite: z.boolean().default(false),
+  });
+
+  r.post(
+    '/site/components/catalog/import',
+    requirePermission('components.write'),
+    docs({ body: catalogImport }),
+    async (req, res) => {
+      const b = parse(catalogImport, req.body);
+      /** @type {{name: string, path: string}[]} */
+      const saved = [];
+      const skipped = [];
+      const errors = [];
+      const have = new Set(siteFiles.list('components/').map((f) => f.path));
+      try {
+        await catalog.list(b.source); // fails the whole call with one clear message if GitHub is unreachable
+      } catch (e) {
+        asInvalid(e);
+      }
+      for (const path of b.paths) {
+        try {
+          const out = await catalog.convert(b.source, path);
+          if (have.has(out.path) && !b.overwrite) {
+            skipped.push(out.name);
+            continue;
+          }
+          await siteFiles.put(out.path, out.content, actorOf(req), undefined);
+          have.add(out.path);
+          saved.push({ name: out.name, path: out.path });
+        } catch (e) {
+          errors.push({
+            path,
+            message:
+              e instanceof SiteFormatError || e instanceof HttpError
+                ? e.message
+                : 'Could not import this one.',
+          });
+        }
+      }
+      res.json({ saved, skipped, errors });
     },
   );
 

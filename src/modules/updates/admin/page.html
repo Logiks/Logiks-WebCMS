@@ -5,15 +5,14 @@
           <span x-show="data?.restartMode === 'self'">Restart starts a new copy of the process by itself. Under a supervisor, set the restart method in <a href="#/settings/updates">Settings</a>.</span>
         </div>
 
-        <div class="panel mb-3" x-show="remotes().length > 1">
+        <div class="panel mb-3" x-show="data">
           <div class="panel-h">Update source</div>
-          <div class="p-3 d-flex flex-wrap align-items-center gap-2">
-            <label class="small mb-0" for="upd-remote">Pull updates from</label>
-            <select class="form-select form-select-sm w-auto" id="upd-remote" :value="data?.remote" @change="setRemote($event.target.value)" :disabled="!actionable(self())">
-              <template x-for="r in remotes()" :key="r.name"><option :value="r.name" :selected="r.name === data?.remote" x-text="r.name + (r.url ? ' — ' + r.url : '')"></option></template>
-            </select>
-            <span class="small muted">Applies to every server. Each server needs access to the remote.</span>
-          </div>
+          <form class="p-3 row g-2 align-items-end" @submit.prevent="saveSource()">
+            <div class="col-12 col-md-7"><label class="form-label small mb-1" for="upd-url">Git repository URL</label><input class="form-control form-control-sm mono" id="upd-url" x-model="srcUrl" required placeholder="https://github.com/Logiks/Logiks-WebCMS.git" autocomplete="off"></div>
+            <div class="col-8 col-md-3"><label class="form-label small mb-1" for="upd-branch">Branch</label><input class="form-control form-control-sm mono" id="upd-branch" x-model="srcBranch" required placeholder="master" autocomplete="off"></div>
+            <div class="col-4 col-md-2"><button class="btn btn-sm btn-primary w-100" :disabled="!sourceDirty() || !srcUrl.trim() || !srcBranch.trim()">Save source</button></div>
+            <div class="col-12 small muted">Every update is pulled from here. Applies to every server, and each server needs read access to the repository. Defaults to the official Logiks-WebCMS repository.</div>
+          </form>
         </div>
 
         <div class="panel mb-3">

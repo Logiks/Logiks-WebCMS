@@ -515,16 +515,25 @@ export function defineCoreSettings(registry) {
       'How Operations → Updates pulls new code from git on each server. Only applies to servers running from a git checkout.',
     order: 55,
     fields: {
-      remote: {
+      source_url: {
         type: 'string',
-        label: 'Git remote',
-        default: 'origin',
-        max: 64,
+        label: 'Update source (git URL)',
+        default: 'https://github.com/Logiks/Logiks-WebCMS.git',
+        max: 300,
         validate: (v) =>
-          /^[A-Za-z0-9_][A-Za-z0-9._-]*$/.test(v)
+          /^[^\s-]\S*$/.test(v) ? null : 'Enter a git URL, like https://github.com/owner/repo.git.',
+        help: 'Servers pull new code from this repository. Git needs read access already (an SSH key or stored credential); do not put passwords in the URL.',
+      },
+      source_branch: {
+        type: 'string',
+        label: 'Update source (branch)',
+        default: 'master',
+        max: 100,
+        validate: (v) =>
+          /^[A-Za-z0-9_][A-Za-z0-9._/-]*$/.test(v) && !v.includes('..')
             ? null
-            : 'Use the name of a git remote, like origin (letters, numbers, dots, dashes).',
-        help: 'Servers pull the branch they have checked out from this remote. Git needs read access already (an SSH key or stored credential); no passwords are kept here.',
+            : 'Use a branch name, like master (letters, numbers, dots, dashes, slashes).',
+        help: 'The branch to pull. Each server must be on a local branch that can fast-forward to it.',
       },
       install_dependencies: {
         type: 'boolean',

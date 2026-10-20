@@ -83,6 +83,10 @@ function makeRepos({ servers = ['server'] } = {}) {
 /** A node whose updates module manages `appRoot`; resolves once it has read the checkout. */
 async function nodeFor(appRoot, opts = {}) {
   const node = await startNode({ seed: true, appRoot, ...opts });
+  // The source is a setting (default: the GitHub repo); the fixture's "origin" stands in for it.
+  await node.ctx.settings.update('updates', {
+    values: { source_url: git(appRoot, 'remote', 'get-url', 'origin'), source_branch: 'main' },
+  });
   await until(() => node.ctx.updates.snapshot().git);
   return node;
 }
@@ -330,23 +334,20 @@ test('a server that is not a git checkout says so and cannot update', async () =
 
 test('a failed fetch changes nothing, says how to fix it, and never shows credentials in the remote URL', async () => {
   const repos = makeRepos();
-  git(
-    repos.server,
-    'remote',
-    'set-url',
-    'origin',
-    'https://deploy:hunter2secret@127.0.0.1:1/repo.git',
-  );
   const node = await nodeFor(repos.server);
   try {
+    await node.ctx.settings.update('updates', {
+      values: { source_url: 'https://deploy:hunter2secret@127.0.0.1:1/repo.git' },
+    });
     const before = repos.head(repos.server);
-    assert.match(node.ctx.updates.snapshot().git.remoteUrl, /^https:\/\/\*\*\*@127\.0\.0\.1/);
+    await until(() => /\*\*\*@/.test(node.ctx.updates.snapshot().git?.sourceUrl ?? ''));
+    assert.match(node.ctx.updates.snapshot().git.sourceUrl, /^https:\/\/\*\*\*@127\.0\.0\.1/);
 
     await node.ctx.updates.dispatch(self(node), 'apply', {}, null);
     await finished(node);
     const snap = node.ctx.updates.snapshot();
     assert.equal(snap.status, 'failed');
-    assert.match(snap.message, /Couldn't fetch from "origin".*read access/);
+    assert.match(snap.message, /Couldn't fetch branch "main" from https:\/\/\*\*\*@.*read access/);
     assert.equal(repos.head(repos.server), before);
 
     await node.ctx.nodes.start();
@@ -382,18 +383,30 @@ test('one action at a time per server', async () => {
   }
 });
 
-test('the git remote setting only accepts a remote name, never a git option', async () => {
+test('the update source defaults to the official repository, and only accepts a URL and a branch, never a git option', async () => {
   const node = await startNode({ seed: true });
   try {
-    for (const bad of ['--upload-pack=touch /tmp/pwned', '-x', 'a b', 'origin;ls', '']) {
+    assert.equal(
+      node.ctx.settings.get('updates.source_url'),
+      'https://github.com/Logiks/Logiks-WebCMS.git',
+    );
+    assert.equal(node.ctx.settings.get('updates.source_branch'), 'master');
+    for (const bad of ['--upload-pack=touch /tmp/pwned', '-x', 'a b', '']) {
       await assert.rejects(
-        node.ctx.settings.update('updates', { values: { remote: bad } }),
+        node.ctx.settings.update('updates', { values: { source_url: bad } }),
         undefined,
-        `should refuse ${JSON.stringify(bad)}`,
+        `should refuse URL ${JSON.stringify(bad)}`,
       );
     }
-    await node.ctx.settings.update('updates', { values: { remote: 'upstream-2.x' } });
-    assert.equal(node.ctx.settings.get('updates.remote'), 'upstream-2.x');
+    for (const bad of ['--x', 'a b', 'a..b', 'x;ls', '']) {
+      await assert.rejects(
+        node.ctx.settings.update('updates', { values: { source_branch: bad } }),
+        undefined,
+        `should refuse branch ${JSON.stringify(bad)}`,
+      );
+    }
+    await node.ctx.settings.update('updates', { values: { source_branch: 'release/2.x' } });
+    assert.equal(node.ctx.settings.get('updates.source_branch'), 'release/2.x');
   } finally {
     await node.close();
   }
@@ -565,9 +578,9 @@ test('helpers: credentials are redacted, changed files are classified, the resta
   assert.ok(!JSON.stringify(env).includes('APP_MASTER_KEY=') && typeof env.childEnv === 'function');
 });
 
-test('the update source can be switched to another remote of the checkout, and updates then come from it', async () => {
+test('the update source can be changed to another repository and branch, and updates then come from it', async () => {
   const repos = makeRepos();
-  // A second remote that is a clone of origin with one extra commit only it has.
+  // A second repository: a clone of origin with one extra commit only it has.
   const mirror = path.join(path.dirname(repos.origin), 'mirror.git');
   git(path.dirname(repos.origin), 'clone', '--bare', repos.origin, mirror);
   const extra = path.join(path.dirname(repos.origin), 'extra');
@@ -576,25 +589,27 @@ test('the update source can be switched to another remote of the checkout, and u
   git(extra, 'add', '.');
   git(extra, 'commit', '-m', 'mirror only');
   git(extra, 'push', 'origin', 'HEAD:main');
-  git(repos.server, 'remote', 'add', 'mirror', mirror);
   const node = await nodeFor(repos.server);
   try {
-    await until(() => node.ctx.updates.snapshot().git?.remotes);
-    assert.deepEqual(
-      node.ctx.updates
-        .snapshot()
-        .git.remotes.map((r) => r.name)
-        .sort(),
-      ['mirror', 'origin'],
-    );
-    await assert.rejects(node.ctx.updates.setRemote('nope', null), { code: 'unknown_remote' });
-    await node.ctx.updates.setRemote('mirror', null);
-    assert.equal(node.ctx.settings.get('updates.remote'), 'mirror');
-    assert.equal(node.ctx.updates.snapshot().git.remote, 'mirror');
+    await node.ctx.updates.dispatch(self(node), 'check', {}, null);
+    await finished(node);
+    assert.equal(node.ctx.updates.snapshot().git.behind, 0);
+
+    await node.ctx.updates.setSource({ url: mirror, branch: 'main' }, null);
+    assert.equal(node.ctx.settings.get('updates.source_url'), mirror);
+    assert.equal(node.ctx.updates.snapshot().git.sourceUrl, mirror);
+    assert.ok((await auditActions(node)).includes('updates.source'));
 
     await node.ctx.updates.dispatch(self(node), 'check', {}, null);
     await finished(node);
     assert.equal(node.ctx.updates.snapshot().git.behind, 1);
+
+    // A branch that doesn't exist at the source is a clear failure, not a silent "up to date".
+    await node.ctx.updates.setSource({ url: mirror, branch: 'nope' }, null);
+    await node.ctx.updates.dispatch(self(node), 'check', {}, null);
+    await finished(node);
+    assert.equal(node.ctx.updates.snapshot().status, 'failed');
+    assert.match(node.ctx.updates.snapshot().message, /branch "nope"/);
   } finally {
     await node.close();
     repos.cleanup();

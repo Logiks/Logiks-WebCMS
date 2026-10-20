@@ -1567,6 +1567,7 @@ document.addEventListener('alpine:init', () => {
     async refresh(withHistory = false) {
       try {
         this.data = await api('GET', '/admin/updates');
+        this.loadSource();
         this.trackRestarts();
         // History changes rarely; read it on load, after an action, and every few ticks.
         if (withHistory || ++this.tick % 5 === 0)
@@ -1605,18 +1606,31 @@ document.addEventListener('alpine:init', () => {
     self() {
       return this.data?.nodes.find((n) => n.self) || {};
     },
-    /** Remotes of the server answering this page (the one the switch is validated against). */
-    remotes() {
-      return this.git(this.self())?.remotes || [];
+    srcUrl: '',
+    srcBranch: '',
+    srcLoaded: false,
+    /** Fill the source form once from the server's settings; later refreshes must not overwrite what is being typed. */
+    loadSource() {
+      if (this.srcLoaded || !this.data?.source) return;
+      this.srcUrl = this.data.source.url;
+      this.srcBranch = this.data.source.branch;
+      this.srcLoaded = true;
     },
-    async setRemote(remote) {
+    sourceDirty() {
+      return (
+        !!this.data?.source &&
+        (this.srcUrl.trim() !== this.data.source.url ||
+          this.srcBranch.trim() !== this.data.source.branch)
+      );
+    },
+    async saveSource() {
       try {
-        await api('PUT', '/admin/updates/remote', { remote });
-        toast(`Updates now come from "${remote}".`);
+        const body = { url: this.srcUrl.trim(), branch: this.srcBranch.trim() };
+        await api('PUT', '/admin/updates/source', body);
+        toast(`Updates now come from ${body.url} (${body.branch}).`);
         await this.refresh(true);
       } catch (e) {
         toast(e.message, 'error');
-        await this.refresh();
       }
     },
     working(n) {
@@ -1722,8 +1736,8 @@ document.addEventListener('alpine:init', () => {
           return m.from === m.to
             ? `${host} was already at ${m.to}${m.restart ? ' and was restarted' : ''}`
             : `${host} updated ${m.from} → ${m.to}${m.restart ? ' and restarted' : ''}`;
-        case 'updates.remote':
-          return `Switched the update source from ${m.from} to ${m.to}`;
+        case 'updates.source':
+          return `Switched the update source from ${m.from?.url} (${m.from?.branch}) to ${m.to?.url} (${m.to?.branch})`;
         case 'updates.check':
           return `Checked ${host} for updates` + (m.behind ? ` (${m.behind} available)` : '');
         case 'updates.restart':
@@ -3685,9 +3699,104 @@ document.addEventListener('alpine:init', () => {
     snipBusy: false,
     snipError: '',
     snipNotes: [],
+    // "Library": browse HyperUI / PrebuiltUI from their open-source repositories, preview, and add several at once.
+    lib: {
+      open: false,
+      sources: [],
+      source: '',
+      data: null,
+      category: '',
+      picked: [],
+      busy: false,
+      error: '',
+      overwrite: false,
+      preview: { title: '', html: '', notes: [], busy: false, error: '' },
+    },
     async init() {
       if (!(await this.mountFragment('site', 'components-list'))) return;
       await this.load();
+    },
+    async openLibrary() {
+      const l = this.lib;
+      l.open = !l.open;
+      if (!l.open || l.sources.length) return;
+      try {
+        l.sources = (await api('GET', '/admin/site/components/catalog')).sources;
+        if (l.sources.length) await this.pickSource(l.sources[0].id);
+      } catch (e) {
+        l.error = e.message;
+      }
+    },
+    async pickSource(id) {
+      const l = this.lib;
+      l.source = id;
+      l.data = null;
+      l.picked = [];
+      l.error = '';
+      l.preview.html = '';
+      l.busy = true;
+      try {
+        l.data = await api(
+          'GET',
+          `/admin/site/components/catalog?source=${encodeURIComponent(id)}`,
+        );
+        l.category = l.data.categories[0]?.id || '';
+      } catch (e) {
+        l.error = e.message;
+      } finally {
+        l.busy = false;
+      }
+    },
+    libGroups() {
+      return this.lib.data?.categories.find((c) => c.id === this.lib.category)?.groups || [];
+    },
+    libToggle(path) {
+      const p = this.lib.picked;
+      this.lib.picked = p.includes(path) ? p.filter((x) => x !== path) : [...p, path];
+    },
+    async libPreview(item) {
+      const pv = this.lib.preview;
+      Object.assign(pv, { title: item.title, html: '', notes: [], busy: true, error: '' });
+      try {
+        const c = await api('POST', '/admin/site/components/catalog/convert', {
+          source: this.lib.source,
+          path: item.path,
+        });
+        pv.notes = c.notes;
+        pv.html = (
+          await api('POST', '/admin/site/preview', {
+            mode: 'component',
+            name: c.name,
+            content: c.content,
+          })
+        ).html;
+      } catch (e) {
+        pv.error = e.message;
+      } finally {
+        pv.busy = false;
+      }
+    },
+    async libAdd() {
+      const l = this.lib;
+      l.busy = true;
+      l.error = '';
+      try {
+        const r = await api('POST', '/admin/site/components/catalog/import', {
+          source: l.source,
+          paths: l.picked.slice(0, 30),
+          overwrite: l.overwrite,
+        });
+        toast(
+          `${r.saved.length} added${r.skipped.length ? `, ${r.skipped.length} already there` : ''}${r.errors.length ? `, ${r.errors.length} failed` : ''}.`,
+        );
+        if (r.errors.length) l.error = r.errors.map((e) => e.message).join('\n');
+        l.picked = l.picked.filter((p) => r.errors.some((e) => e.path === p));
+        await this.load();
+      } catch (e) {
+        l.error = e.message;
+      } finally {
+        l.busy = false;
+      }
     },
     async importSnippet() {
       const s = this.snip;
@@ -3746,6 +3855,17 @@ document.addEventListener('alpine:init', () => {
     css: '',
     template: '',
     preview: { html: '', busy: false, error: '' },
+    tab: 'general',
+    tabs: [
+      { id: 'general', label: 'General', icon: 'card-text' },
+      { id: 'data', label: 'Properties & data', icon: 'sliders' },
+      { id: 'template', label: 'Template', icon: 'code-slash' },
+      { id: 'style', label: 'Style', icon: 'palette' },
+      { id: 'preview', label: 'Preview', icon: 'eye' },
+    ],
+    openTab(id) {
+      this.tab = id;
+    },
 
     async init() {
       if (!(await this.mountFragment('site', 'components-edit'))) return;

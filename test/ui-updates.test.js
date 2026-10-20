@@ -41,6 +41,9 @@ test('Updates screen: check, see what is coming, update without restarting, then
   git(root, 'clone', origin, server);
 
   const node = await startNode({ seed: true, appRoot: server });
+  await node.ctx.settings.update('updates', {
+    values: { source_url: origin, source_branch: 'main' },
+  });
   let restarts = 0;
   node.ctx.state.requestRestart = () => restarts++;
   const b = await openAdmin(node.url);
@@ -64,6 +67,17 @@ test('Updates screen: check, see what is coming, update without restarting, then
     git(work, 'add', '-A');
     git(work, 'commit', '-m', 'Add the reports page');
     git(work, 'push', 'origin', 'HEAD:main');
+
+    // The source is always set: the form starts from the stored settings and saving changes them for every server.
+    const section = 'section[x-data="updatesPage"]';
+    await wait(() => b.$(`${section} #upd-url`)?.value === origin);
+    assert.equal(b.$(`${section} #upd-branch`).value, 'main');
+    b.type(b.$(`${section} #upd-branch`), 'release');
+    b.click(b.button('Save source'));
+    await until(() => node.ctx.settings.get('updates.source_branch') === 'release');
+    b.type(b.$(`${section} #upd-branch`), 'main');
+    b.click(b.button('Save source'));
+    await until(() => node.ctx.settings.get('updates.source_branch') === 'main');
 
     b.click(b.button('Check for updates'));
     await wait(() => /1 update available/.test(rowText()));

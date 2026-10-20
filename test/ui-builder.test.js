@@ -120,6 +120,20 @@ test('Components: the list shows the starter components, and a new one can be bu
   setValue(ed().querySelector('#c-name'), 'ui-test-widget');
   setValue(ed().querySelector('#c-title'), 'UI test widget');
 
+  // The editor is grouped into tabs, like the page editor: only the open tab's fields are visible.
+  const panes = () => [...ed().querySelectorAll('.pe-pane')].filter((p) => b.visible(p));
+  assert.deepEqual(
+    [...ed().querySelectorAll('.pe-tabs .nav-link')].map((x) => x.textContent.trim()),
+    ['General', 'Properties & data', 'Template', 'Style', 'Preview'],
+  );
+  assert.equal(panes().length, 1);
+  assert.ok(panes()[0].querySelector('#c-name'));
+  b.click(ed().querySelector('[data-tab="data"]'));
+  await wait(
+    () => panes()[0]?.querySelector('input, button') && !panes()[0].querySelector('#c-name'),
+  );
+  assert.equal(panes().length, 1);
+
   const addProp = [...ed().querySelectorAll('button')].find(
     (x) => x.textContent === 'Add property',
   );
@@ -169,6 +183,63 @@ test('Components: a pasted library snippet is imported, with notes about what it
   assert.match(node.ctx.siteFiles.get('components/ui_snippet.html').content, /\.p-4\b/);
 
   await node.ctx.siteFiles.remove('components/ui_snippet.html', null);
+});
+
+test('Components: the Library lists a repository, previews one component and adds the ticked ones', async () => {
+  const realFetch = b.win.fetch;
+  const hostFetch = globalThis.fetch;
+  globalThis.fetch = async (u, init) => {
+    const url = String(u);
+    if (url.includes('api.github.com'))
+      return new globalThis.Response(
+        JSON.stringify({
+          tree: [
+            { type: 'blob', path: 'public/examples/marketing/ctas/1.html' },
+            { type: 'blob', path: 'public/examples/marketing/ctas/2.html' },
+          ],
+        }),
+      );
+    if (url.includes('raw.githubusercontent.com'))
+      return new globalThis.Response('<p class="p-4 text-lg">lib item</p>');
+    return hostFetch(u, init);
+  };
+  try {
+    b.go('#/components');
+    const list = () => b.$('section[x-data="componentsList"]');
+    await wait(() => list() && /hero/.test(list().textContent));
+    b.click([...list().querySelectorAll('button')].find((x) => x.textContent === 'Library'));
+    await wait(() => list().querySelectorAll('input[aria-label^="Add "]').length === 2);
+    const previewBtn = list().querySelector('.col-lg-5 button');
+    b.click(previewBtn);
+    await wait(() =>
+      /lib item/.test(
+        list().querySelector('iframe[title="Library component preview"]')?.getAttribute('srcdoc') ||
+          '',
+      ),
+    );
+    const boxes = list().querySelectorAll('input[aria-label^="Add "]');
+    boxes[0].click();
+    boxes[1].click();
+    const add = () =>
+      [...list().querySelectorAll('button')].find((x) =>
+        /^Add 2 to my components/.test(x.textContent),
+      );
+    await wait(() => add() && !add().disabled);
+    b.click(add());
+    await wait(
+      () =>
+        node.ctx.siteFiles
+          .list('components/')
+          .filter((f) => f.path.includes('hyperui_marketing_ctas')).length === 2,
+    );
+    for (const f of node.ctx.siteFiles
+      .list('components/')
+      .filter((f) => f.path.includes('hyperui_')))
+      await node.ctx.siteFiles.remove(f.path, null);
+  } finally {
+    globalThis.fetch = hostFetch;
+    void realFetch;
+  }
 });
 
 test('Pages: the list offers export and a .zip import', async () => {

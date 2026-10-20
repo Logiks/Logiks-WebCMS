@@ -1,13 +1,27 @@
               <div class="page-head d-flex justify-content-between align-items-end flex-wrap gap-2">
                 <div><h1 x-text="isNew ? 'New component' : (metaTitle || name)"></h1><p x-show="!isNew" class="mono" x-text="name"></p></div>
-                <div class="d-flex gap-2 flex-wrap">
-                  <button type="button" class="btn btn-outline-secondary" x-show="!isNew && assistantAvailable()" @click="askAssistant('components/' + name + '.html')" title="Open the assistant, focused on this component"><i class="bi bi-stars"></i> Ask the assistant</button>
-                  <a href="#/components" class="btn btn-outline-secondary">Back to components</a>
-                </div>
               </div>
               <div class="alert alert-danger" role="alert" x-show="error" x-text="error"></div>
-              <div class="row g-3" x-show="loaded">
-                <div class="col-lg-7">
+
+              <div class="pe-bar">
+                <ul class="nav nav-tabs pe-tabs" role="tablist">
+                  <template x-for="t in tabs" :key="t.id">
+                    <li class="nav-item" role="presentation">
+                      <button type="button" class="nav-link" :class="{active: tab === t.id}" role="tab" :aria-selected="tab === t.id" :data-tab="t.id" @click="openTab(t.id)"><i class="bi" :class="'bi-' + t.icon" aria-hidden="true"></i> <span x-text="t.label"></span></button>
+                    </li>
+                  </template>
+                </ul>
+                <div class="pe-actions">
+                  <span class="muted small" x-show="dirty && !isNew">Unsaved changes</span>
+                  <button type="button" class="btn btn-outline-secondary btn-sm" x-show="!isNew && assistantAvailable()" @click="askAssistant('components/' + name + '.html')" title="Open the assistant, focused on this component"><i class="bi bi-stars"></i> Ask the assistant</button>
+                  <button type="button" class="btn btn-outline-secondary btn-sm" x-show="!isNew && dirty" @click="discard()">Discard</button>
+                  <a href="#/components" class="btn btn-outline-secondary btn-sm">Back to components</a>
+                  <button class="btn btn-primary btn-sm" type="button" :disabled="busy" @click="save()" x-text="isNew ? 'Create component' : 'Save component'"></button>
+                </div>
+              </div>
+
+              <div x-show="loaded">
+                <div class="pe-pane" x-show="tab === 'general'" role="tabpanel">
                   <div class="panel p-3 mb-3">
                     <label class="form-label" for="c-name">Name</label>
                     <div class="input-group">
@@ -20,7 +34,8 @@
                       <div class="col-md-6"><label class="form-label" for="c-desc">Description</label><input id="c-desc" class="form-control" maxlength="300" x-model="metaDescription"></div>
                     </div>
                   </div>
-
+                </div>
+                <div class="pe-pane" x-show="tab === 'data'" role="tabpanel">
                   <div class="panel p-3 mb-3">
                     <div class="d-flex justify-content-between align-items-center mb-2"><label class="form-label mb-0">Properties</label><button type="button" class="btn btn-sm btn-outline-secondary" @click="addProp()">Add property</button></div>
                     <div class="empty small" x-show="!props.length">No properties: this component always shows the same thing.</div>
@@ -34,7 +49,6 @@
                       </div>
                     </template>
                   </div>
-
                   <div class="panel p-3 mb-3">
                     <div class="d-flex justify-content-between align-items-center mb-2"><label class="form-label mb-0">Data this component reads</label><button type="button" class="btn btn-sm btn-outline-secondary" @click="addApi()">Add endpoint</button></div>
                     <div class="empty small" x-show="!apis.length">No data: this component only uses its properties.</div>
@@ -47,34 +61,29 @@
                       </div>
                     </template>
                   </div>
-
+                </div>
+                <div class="pe-pane" x-show="tab === 'template'" role="tabpanel">
                   <div class="panel p-3 mb-3">
                     <label class="form-label" for="c-template">Template (HTML + Liquid)</label>
                     <textarea id="c-template" class="form-control mono" rows="14" spellcheck="false" x-codejar="{ mode: 'htmlmixed', get: template, set: (v) => (template = v) }"></textarea>
                     <div class="help small muted mt-1">A <span class="mono">&lt;script&gt;</span> tag is allowed here and runs on the live page (it is not sandboxed — the same trust level as a script Service); the live preview does not run it, since the preview frame never runs scripts.</div>
                   </div>
+                </div>
+                <div class="pe-pane" x-show="tab === 'style'" role="tabpanel">
                   <div class="panel p-3 mb-3">
                     <label class="form-label" for="c-css">Scoped CSS</label>
                     <textarea id="c-css" class="form-control mono" rows="8" spellcheck="false" x-codejar="{ mode: 'css', get: css, set: (v) => (css = v) }"></textarea>
                   </div>
                 </div>
-
-                <div class="col-lg-5">
-                  <div class="panel mb-3" style="position:sticky;top:1rem">
+                <div class="pe-pane" x-show="tab === 'preview'" role="tabpanel">
+                  <div class="panel mb-3">
                     <div class="panel-h d-flex justify-content-between align-items-center">
                       <span>Preview</span>
                       <span class="muted small" x-show="preview.busy">Rendering…</span>
                     </div>
                     <div class="help small muted p-2" x-show="props.length">Shown with each property at its default value above.</div>
                     <div class="alert alert-danger m-2" role="alert" x-show="preview.error" x-text="preview.error"></div>
-                    <iframe title="Component preview" style="width:100%;height:60vh;border:0;border-top:1px solid var(--line)" sandbox="allow-same-origin" :srcdoc="preview.html"></iframe>
+                    <iframe title="Component preview" style="width:100%;height:70vh;border:0;border-top:1px solid var(--line)" sandbox="allow-same-origin" :srcdoc="preview.html"></iframe>
                   </div>
                 </div>
-              </div>
-
-              <div class="savebar" x-show="loaded && (isNew || dirty)">
-                <span x-show="dirty && !isNew">Unsaved changes</span>
-                <span class="ms-auto"></span>
-                <button class="btn btn-outline-secondary" type="button" x-show="!isNew" @click="discard()">Discard</button>
-                <button class="btn btn-primary" type="button" :disabled="busy" @click="save()" x-text="isNew ? 'Create component' : 'Save component'"></button>
               </div>

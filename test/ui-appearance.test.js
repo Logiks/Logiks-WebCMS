@@ -178,6 +178,7 @@ test('preview frames keep the site origin (so theme files load) and nothing more
   // Order is just an artifact of which module's directory sorts where — not a meaningful invariant.
   assert.deepEqual(frames.map((m) => m[1]).sort(), [
     'Component preview',
+    'Library component preview', // Components → Library
     'Page preview', // the page editor
     'Page preview', // the AI Page Designer chat
     'Theme preview',

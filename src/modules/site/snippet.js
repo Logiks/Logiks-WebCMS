@@ -1,6 +1,8 @@
 import * as cheerio from 'cheerio';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import postcss from 'postcss';
-import tailwindcss from 'tailwindcss';
+import { compile, optimize } from '@tailwindcss/node';
 import { SiteFormatError, parseComponent } from './component.js';
 
 /**
@@ -51,130 +53,57 @@ function extractMarkup(raw) {
 /** `{{` and `{%` in a pasted snippet (Vue/Angular style bindings, code samples) must reach the page as text, not run as Liquid. */
 const escapeLiquid = (html) => html.replace(/\{\{/g, "{{ '{{' }}").replace(/\{%/g, "{{ '{%' }}");
 
-// ───────── Tailwind v4 → v3 class names ─────────
-// The compiler here is Tailwind 3 (its output is plain CSS rules that component.js can scope; v4 emits @layer/@property
-// and CSS-variable theming). Newer snippets (HyperUI, PrebuiltUI) are written for v4, which RENAMED a handful of scale
-// steps — so the same word means a different size. They are only translated when the snippet carries a marker that
-// exists in v4 alone; a v3 snippet using `shadow-sm` is left exactly as written.
+// ───────── Tailwind 4 ─────────
+// `@tailwindcss/node` is Tailwind's own programmatic compiler. We feed it the theme + utilities (no preflight: its global
+// reset would restyle the whole Bootstrap site) and the class names found in the snippet, and get back only the rules
+// those classes need. The output is then reshaped so component.js can scope it like any hand-written component CSS.
 
-const V4_ONLY =
-  /(?:^|\s)(?:[a-z0-9-]+:)*(?:rounded-xs|shadow-(?:xs|2xs)|blur-xs|outline-hidden|bg-linear-[a-z]|ring-3|inset-shadow|drop-shadow-xs|backdrop-blur-xs)(?:\s|$)|(?:^|\s)[a-z0-9:-]+!(?:\s|$)/;
-// Each class is looked up once, against its ORIGINAL name, so `shadow-sm` → `shadow` never chains into a second rename.
-const V4_RENAMES = {
-  'shadow-2xs': 'shadow-sm',
-  'shadow-xs': 'shadow-sm',
-  'shadow-sm': 'shadow',
-  shadow: 'shadow-sm',
-  'rounded-xs': 'rounded-sm',
-  'rounded-sm': 'rounded',
-  rounded: 'rounded-sm',
-  'blur-xs': 'blur-sm',
-  'blur-sm': 'blur',
-  blur: 'blur-sm',
-  'backdrop-blur-xs': 'backdrop-blur-sm',
-  'backdrop-blur-sm': 'backdrop-blur',
-  'drop-shadow-xs': 'drop-shadow-sm',
-  'drop-shadow-sm': 'drop-shadow',
-  'outline-hidden': 'outline-none',
-  ring: 'ring-1',
-  'ring-3': 'ring',
-};
+// Plugins and the theme are resolved from the app's own node_modules, whatever the process's working directory is.
+const APP_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
+const TAILWIND_INPUT = `@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" layer(utilities);
+@plugin "@tailwindcss/forms" { strategy: class; }
+@plugin "@tailwindcss/typography";`;
 
-/** `hover:rounded-sm` keeps its variants; only the utility after the last `:` is renamed. */
-function renameClass(tok) {
-  const important = tok.endsWith('!');
-  const body = important ? tok.slice(0, -1) : tok;
-  const variants = body.slice(0, body.lastIndexOf(':') + 1);
-  let util = body.slice(variants.length);
-  const neg = util.startsWith('-');
-  if (neg) util = util.slice(1);
-  if (Object.hasOwn(V4_RENAMES, util)) util = V4_RENAMES[util];
-  else if (util.startsWith('bg-linear-')) util = `bg-gradient-${util.slice('bg-linear-'.length)}`;
-  // v4 writes the important marker last (`flex!`), v3 right before the utility (`hover:!flex`).
-  return `${variants}${important ? '!' : ''}${neg ? '-' : ''}${util}`;
-}
+/** @param {string} html */
+const candidates = (html) => [...new Set(html.match(/[^\s"'`<>=]+/g) ?? [])];
 
 /**
- * @param {string} html
- * @returns {{html: string, converted: boolean}}
- */
-export function v4ToV3(html) {
-  const attr = /\bclass=(["'])([^"']*)\1/g;
-  const all = [...html.matchAll(attr)].map((m) => ` ${m[2]} `).join(' ');
-  if (!V4_ONLY.test(all)) return { html, converted: false };
-  return {
-    html: html.replace(
-      attr,
-      (_m, q, value) =>
-        `class=${q}${value
-          .split(/(\s+)/)
-          .map((t) => (t.trim() ? renameClass(t) : t))
-          .join('')}${q}`,
-    ),
-    converted: true,
-  };
-}
-
-/**
- * Compile Tailwind (v3 engine) for one snippet. Resolves to CSS with only the utilities the markup uses.
- * @param {string} html
- */
-export async function compileTailwind(html) {
-  // Tailwind warns on every snippet without a class; plain markup simply has nothing to compile.
-  if (!/\bclass=/.test(html)) return '';
-  const result = await postcss([
-    tailwindcss({
-      content: [{ raw: html, extension: 'html' }],
-      corePlugins: { preflight: false },
-    }),
-    pruneVariables,
-  ]).process('@tailwind base;\n@tailwind components;\n@tailwind utilities;', { from: undefined });
-  return result.css;
-}
-
-/**
- * Tailwind's base layer defines ~60 `--tw-*` starting values (twice: for elements and for ::backdrop) whether or not a
- * rule uses them. The CSS ends up in every page that shows the component, so keep only the ones something reads.
+ * Tailwind 4 wraps its output in cascade layers and themes on `:root`. Both are wrong for a component: unlayered rules
+ * are what beat Bootstrap's (layered rules lose to any unlayered stylesheet), and `:root` does not exist inside the
+ * component wrapper, where `:host` is the wrapper itself. The `@layer properties` block only supports browsers that
+ * lack `@property`, which the same output declares for everyone else.
  * @type {import('postcss').Plugin}
  */
-const pruneVariables = {
-  postcssPlugin: 'prune-tw-variables',
+const flattenForComponent = {
+  postcssPlugin: 'flatten-for-component',
   OnceExit(root) {
-    const used = new Set();
-    root.walkDecls((d) => {
-      if (
-        d.prop.startsWith('--tw-') &&
-        /** @type {any} */ (d.parent)?.selector?.includes('::backdrop')
-      )
-        return;
-      for (const m of d.value.matchAll(/var\(\s*(--tw-[a-z0-9-]+)/g)) used.add(m[1]);
+    root.walkAtRules('layer', (rule) => {
+      if (!rule.nodes)
+        rule.remove(); // `@layer a, b;`
+      else if (rule.params === 'properties') rule.remove();
+      else rule.replaceWith(rule.nodes);
     });
-    // A variable can be read only by another variable's starting value (the ring/shadow chains): keep what they pull in too.
-    let grew = true;
-    while (grew) {
-      grew = false;
-      root.walkDecls(/^--tw-/, (d) => {
-        if (!used.has(d.prop)) return;
-        for (const m of d.value.matchAll(/var\(\s*(--tw-[a-z0-9-]+)/g))
-          if (!used.has(m[1])) {
-            used.add(m[1]);
-            grew = true;
-          }
-      });
-    }
     root.walkRules((rule) => {
-      if (rule.selector.includes('::backdrop')) {
-        rule.remove();
-        return;
-      }
-      if (!/^\*,/.test(rule.selector)) return;
-      rule.walkDecls(/^--tw-/, (d) => {
-        if (!used.has(d.prop)) d.remove();
-      });
-      if (!rule.nodes?.length) rule.remove();
+      if (rule.selector === ':root, :host') rule.selector = ':host';
+    });
+    root.walkComments((c) => {
+      c.remove();
     });
   },
 };
+
+/**
+ * Compile Tailwind 4 for one snippet. Resolves to CSS with only the utilities the markup uses.
+ * @param {string} html
+ */
+export async function compileTailwind(html) {
+  // Plain markup has nothing to compile.
+  if (!/\bclass=/.test(html)) return '';
+  const compiler = await compile(TAILWIND_INPUT, { base: APP_ROOT, onDependency() {} });
+  const { code } = optimize(compiler.build(candidates(html)), { minify: false });
+  return (await postcss([flattenForComponent]).process(code, { from: undefined })).css;
+}
 
 /** What in the snippet needs something the site may not load, so the importer can say so instead of leaving a silent gap. */
 function compatibilityNotes(html) {
@@ -190,10 +119,6 @@ function compatibilityNotes(html) {
   if (/\bdata-(?:hs|te|flowbite|drawer|dropdown|modal)-?[a-z-]*\s*=/i.test(html))
     notes.push(
       'It relies on a JavaScript plugin (Flowbite, Preline, …). Add that script to the theme for it to react.',
-    );
-  if (/(?:^|[\s"'])(?:form-(?:input|select|checkbox|textarea)|prose)(?:[\s"']|$)/.test(html))
-    notes.push(
-      'It uses classes from a Tailwind plugin (forms or typography), which are not included here, so those parts may look plain.',
     );
   if (/<img\b[^>]*\bsrc=["']\//i.test(html))
     notes.push(
@@ -225,8 +150,7 @@ export async function convertSnippet(input) {
       'Give the component a name made of letters, numbers and underscores.',
     );
 
-  const extracted = extractMarkup(raw);
-  const { html: markup, converted } = v4ToV3(extracted);
+  const markup = extractMarkup(raw);
   if (!markup)
     throw new SiteFormatError('Nothing was left of the snippet after removing page wrappers.');
   const css = (await compileTailwind(markup)).trim();
@@ -255,14 +179,7 @@ export async function convertSnippet(input) {
     name,
     path: `components/${name}.html`,
     content,
-    notes: [
-      ...(converted
-        ? [
-            'It was written for Tailwind 4; class names that changed meaning (shadow, rounded, ring, blur…) were translated to Tailwind 3 sizes. Check the preview.',
-          ]
-        : []),
-      ...compatibilityNotes(markup),
-    ],
+    notes: [...compatibilityNotes(markup)],
     utilities: css.length > 0,
   };
 }

@@ -155,6 +155,8 @@ describe('POST /site/preview: draft content rendered without saving', () => {
     assert.match(r.body.html, /href="\/somewhere"/);
     // the theme's CSS variables are in scope: the preview is a full page, not a bare fragment
     assert.match(r.body.html, /<style data-cms="components">/);
+    // ...but only the component: none of the theme's header, footer or skip link around it
+    assert.doesNotMatch(r.body.html, /<header|<footer|class="skip"|<main/);
   });
 
   test('a prop value can hold quotes, braces and Liquid-looking text without breaking the preview or running as code', async () => {
