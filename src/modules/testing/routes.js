@@ -166,6 +166,10 @@ export default function testingRoutes(ctx) {
     res.json({ baselines: await testing.baselines() });
   });
   r.get('/testing/baselines/shot', requirePermission('testing.read'), async (req, res) => {
+    const path = String(req.query.path ?? '');
+    const viewport = String(req.query.viewport ?? '');
+    if (!path || !viewport)
+      throw new HttpError(422, 'invalid_input', 'Give the page and the screen size.');
     res
       .set({
         'content-type': 'image/jpeg',
