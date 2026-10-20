@@ -439,7 +439,7 @@
           </template>
 
           <template x-if="v.kind === 'edit'">
-            <section x-data="pagesEditor(v.name)"></section>
+            <section x-data="pagesEditor(v.name)" @keydown.window.ctrl.s.prevent="tab && !busy && save()" @keydown.window.meta.s.prevent="tab && !busy && save()"></section>
           </template>
 
         </div></template>

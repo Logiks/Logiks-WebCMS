@@ -3,7 +3,25 @@
                 <div class="d-flex gap-2 flex-wrap">
                   <a class="btn btn-outline-secondary" href="/api/admin/site/components/export">Export .zip</a>
                   <label class="btn btn-outline-secondary mb-0" x-show="can('components.write')" :class="{disabled: importBusy}">Import .zip<input type="file" hidden accept=".zip,application/zip" @change="importZip($event.target.files[0]); $event.target.value = ''"></label>
+                  <button class="btn btn-outline-secondary" type="button" x-show="can('components.write')" @click="snip.open = !snip.open" :aria-expanded="snip.open">Import snippet</button>
                   <a class="btn btn-primary" x-show="can('components.write')" href="#/components/new">New component</a>
+                </div>
+              </div>
+              <div class="panel mb-3" x-show="snip.open && can('components.write')">
+                <h2 class="h6">Import a snippet from a component library</h2>
+                <p class="muted small mb-3">Paste the HTML of a component from HyperUI, PrebuiltUI or similar, or give a GitHub file link. Tailwind classes are compiled into this component&rsquo;s own CSS, so nothing extra loads on your pages. Check the library&rsquo;s licence allows reuse.</p>
+                <div class="alert alert-danger" role="alert" style="white-space:pre-wrap" x-show="snipError" x-text="snipError"></div>
+                <div class="alert alert-info" role="status" x-show="snipNotes.length"><strong>Imported. Worth knowing:</strong><ul class="mb-0"><template x-for="n in snipNotes" :key="n"><li x-text="n"></li></template></ul></div>
+                <div class="row g-3">
+                  <div class="col-12"><label class="form-label" for="sn-html">HTML</label><textarea id="sn-html" class="form-control mono" rows="8" x-model="snip.html" placeholder="<section class=&quot;bg-white&quot;>…</section>"></textarea></div>
+                  <div class="col-12"><label class="form-label" for="sn-url">Or a GitHub file link</label><input id="sn-url" class="form-control" type="url" x-model="snip.url" :disabled="snip.html.trim() !== ''" placeholder="https://github.com/markmead/hyperui/blob/main/…/1.html"></div>
+                  <div class="col-md-4"><label class="form-label" for="sn-name">Name</label><input id="sn-name" class="form-control mono" x-model="snip.name" placeholder="hero_one"></div>
+                  <div class="col-md-4"><label class="form-label" for="sn-title">Title</label><input id="sn-title" class="form-control" x-model="snip.title" placeholder="Hero with image"></div>
+                  <div class="col-md-4"><label class="form-label" for="sn-license">Licence</label><input id="sn-license" class="form-control" x-model="snip.license" placeholder="MIT"></div>
+                  <div class="col-12 d-flex align-items-center gap-3 flex-wrap">
+                    <button class="btn btn-primary" type="button" @click="importSnippet()" :disabled="snipBusy || (!snip.html.trim() && !snip.url.trim())">Import as component</button>
+                    <div class="form-check mb-0"><input id="sn-over" class="form-check-input" type="checkbox" x-model="snip.overwrite"><label class="form-check-label small" for="sn-over">Replace it if a component with this name exists</label></div>
+                  </div>
                 </div>
               </div>
               <div class="form-check mb-2" x-show="can('components.write')"><input id="c-prune" class="form-check-input" type="checkbox" x-model="prune"><label class="form-check-label small" for="c-prune">Importing replaces the whole library (deletes components the zip doesn't have) instead of adding to it</label></div>

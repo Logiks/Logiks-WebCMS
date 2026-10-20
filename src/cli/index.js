@@ -28,6 +28,9 @@ CMS command line
   site:pull [dir]                            write the site tree to a folder (default ./public)
   site:push [dir] [--prune]                  read pages/ and components/ from a folder into the site (default ./public);
                                              --prune also deletes site files that are not in the folder
+  site:import-snippets <dir> [--prefix hyperui_] [--license MIT] [--replace]
+                                             turn every .html snippet in a folder (a clone of HyperUI, PrebuiltUI…) into a
+                                             component: Tailwind compiled to scoped CSS, name = prefix + file path
 
   user:create --email a@b.com --name "A B" --role Administrator [--password ...]
   user:reset-password <email> [--password ...]
@@ -187,6 +190,52 @@ async function main() {
         );
         for (const e of r.errors) console.log(`  ✖ ${e.message}`);
         if (r.errors.length) process.exitCode = 1;
+        break;
+      }
+      case 'site:import-snippets': {
+        if (!pos[0]) throw new Error('Give the folder to read: site:import-snippets <dir>');
+        const { convertSnippet, slugName } = await import('../modules/site/snippet.js');
+        const root = path.resolve(pos[0]);
+        const files = [];
+        const walk = (d) => {
+          for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+            if (e.name.startsWith('.') || e.isSymbolicLink()) continue;
+            const full = path.join(d, e.name);
+            if (e.isDirectory()) walk(full);
+            else if (e.name.endsWith('.html')) files.push(full);
+          }
+        };
+        walk(root);
+        const have = new Set(ctx.siteFiles.list('components/').map((f) => f.path));
+        let saved = 0;
+        let skipped = 0;
+        let failed = 0;
+        for (const f of files.sort()) {
+          const rel = path.relative(root, f).replace(/\.html$/, '');
+          const name = slugName(`${flags.prefix ?? ''}${rel}`);
+          try {
+            const out = await convertSnippet({
+              html: fs.readFileSync(f, 'utf8'),
+              name,
+              title: rel.replace(/[\\/]+/g, ' / '),
+              license: typeof flags.license === 'string' ? flags.license : undefined,
+            });
+            if (have.has(out.path) && !flags.replace) {
+              skipped++;
+              continue;
+            }
+            await ctx.siteFiles.put(out.path, out.content, null, undefined);
+            have.add(out.path);
+            saved++;
+          } catch (e) {
+            failed++;
+            console.log(`  ✖ ${rel}: ${e.message}`);
+          }
+        }
+        console.log(
+          `Imported ${saved} component(s), ${skipped} already existed (use --replace to overwrite)${failed ? `, ${failed} failed` : ''}.`,
+        );
+        if (failed) process.exitCode = 1;
         break;
       }
       case 'search:reindex': {

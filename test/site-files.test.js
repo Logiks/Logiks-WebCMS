@@ -114,7 +114,6 @@ describe('saving files', () => {
   test('what is wrong is explained at save time, and nothing is stored', async () => {
     const put = (p, c) => node.ctx.siteFiles.put(p, c, null);
     const before = node.ctx.siteFiles.version;
-    await rejects(put('pages/x.html', '<p>x</p><script>alert(1)</script>'), /<script>/);
     await rejects(put('pages/x.html', '{% if never_closed %}'), /Template/);
     await rejects(put('pages/x.html', '{% include "../../etc/passwd" %}'), /include/); // not an allowed tag
     await rejects(put('pages/x.html', '---\nlayout: ../../x\n---\nhi'), /layout/);

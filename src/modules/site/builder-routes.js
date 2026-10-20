@@ -4,9 +4,10 @@ import { forbidden, parse, HttpError } from '../../core/http/errors.js';
 import { docs } from '../../core/http/docs.js';
 import { actorOf, requirePermission } from '../../core/http/middleware.js';
 import { classify } from './files.js';
-import { parseComponent, parsePage } from './component.js';
+import { SiteFormatError, parseComponent, parsePage } from './component.js';
 import { siteGlobals } from './public.js';
 import { inferUses, usesIssues, usesOf } from './uses.js';
+import { convertSnippet, fetchSnippet, slugName } from './snippet.js';
 
 /**
  * What the page manager and component builder need beyond plain file CRUD (files-routes.js):
@@ -200,6 +201,70 @@ export default function siteBuilderRoutes(ctx) {
       next();
     };
   }
+
+  // Import a copy-paste snippet from a component library (HyperUI, PrebuiltUI…) as a component (D-106).
+  const snippetBody = z
+    .object({
+      html: z.string().max(200_000).optional(),
+      url: z.string().max(400).optional(),
+      name: z.string().max(80).optional(),
+      title: z.string().max(80).optional(),
+      description: z.string().max(300).optional(),
+      license: z.string().max(80).optional(),
+      source: z.string().max(400).optional(),
+      overwrite: z.boolean().default(false),
+    })
+    .refine((b) => Boolean(b.html?.trim()) || Boolean(b.url?.trim()), {
+      message: 'Paste the snippet’s HTML or give a GitHub file link.',
+    });
+
+  r.post(
+    '/site/components/import-snippet',
+    requirePermission('components.write'),
+    docs({ body: snippetBody }),
+    async (req, res) => {
+      const body = parse(snippetBody, req.body);
+      try {
+        let html = body.html?.trim() ? body.html : '';
+        let sourceUrl = body.source || undefined;
+        if (!html) {
+          const got = await fetchSnippet(body.url.trim());
+          html = got.html;
+          sourceUrl ??= got.url;
+        }
+        const fromFile = body.url
+          ? decodeURIComponent(body.url.split('/').pop() ?? '').replace(/\.[a-z]+$/i, '')
+          : '';
+        const out = await convertSnippet({
+          html,
+          name: body.name || slugName(body.title || fromFile),
+          title: body.title,
+          description: body.description,
+          sourceUrl,
+          license: body.license,
+        });
+        const exists = siteFiles.list('components/').some((f) => f.path === out.path);
+        if (exists && !body.overwrite)
+          throw new HttpError(
+            409,
+            'conflict',
+            `A component named "${out.name}" already exists. Pick another name, or tick "Replace it" to overwrite it.`,
+            { field: 'name' },
+          );
+        await siteFiles.put(out.path, out.content, actorOf(req));
+        res.status(exists ? 200 : 201).json({
+          path: out.path,
+          name: out.name,
+          created: !exists,
+          notes: out.notes,
+        });
+      } catch (e) {
+        // A snippet the importer can't accept is the author's to fix: say what, as a 422, not a server error.
+        if (e instanceof SiteFormatError) throw new HttpError(422, 'invalid_input', e.message);
+        throw e;
+      }
+    },
+  );
 
   // ───────── import / export (pages and components as a .zip) ─────────
 

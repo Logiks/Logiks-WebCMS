@@ -1,13 +1,31 @@
               <div class="page-head d-flex justify-content-between align-items-end flex-wrap gap-2">
                 <div><h1 x-text="isNew ? 'New page' : (front.title || pageName)"></h1><p x-show="!isNew" class="mono" x-text="'/' + pageName"></p></div>
-                <div class="d-flex gap-2 flex-wrap">
-                  <button type="button" class="btn btn-outline-secondary" x-show="!isNew && assistantAvailable()" @click="askAssistant(path)" title="Open the assistant, focused on this page"><i class="bi bi-stars"></i> Ask the assistant</button>
-                  <a href="#/pages" class="btn btn-outline-secondary">Back to pages</a>
-                </div>
               </div>
               <div class="alert alert-danger" role="alert" x-show="error" x-text="error"></div>
-              <div class="row g-3" x-show="loaded">
-                <div class="col-lg-7">
+
+              <div class="pe-bar">
+                <ul class="nav nav-tabs pe-tabs" role="tablist">
+                  <template x-for="t in tabs" :key="t.id">
+                    <li class="nav-item" role="presentation">
+                      <button type="button" class="nav-link" :class="{active: tab === t.id}" role="tab" :aria-selected="tab === t.id" :data-tab="t.id" @click="openTab(t.id)"><i class="bi" :class="'bi-' + t.icon" aria-hidden="true"></i> <span x-text="t.label"></span></button>
+                    </li>
+                  </template>
+                </ul>
+                <div class="pe-actions">
+                  <span class="muted small" x-show="dirty && !isNew">Unsaved changes</span>
+                  <a class="btn btn-outline-secondary btn-sm" x-show="liveUrl" :href="liveUrl" target="_blank" rel="noopener" title="Open the live page (the last saved version)"><i class="bi bi-box-arrow-up-right"></i> Open page</a>
+                  <button type="button" class="btn btn-outline-secondary btn-sm" x-show="!isNew && assistantAvailable()" @click="askAssistant(path)" title="Open the assistant, focused on this page"><i class="bi bi-stars"></i> Ask the assistant</button>
+                  <button type="button" class="btn btn-outline-secondary btn-sm" x-show="!isNew && dirty" @click="discard()">Discard</button>
+                  <a href="#/pages" class="btn btn-outline-secondary btn-sm">Back to pages</a>
+                  <button class="btn btn-primary btn-sm" type="button" :disabled="busy || (!isNew && !dirty)" @click="save()" x-text="isNew ? 'Create page' : 'Save page'" title="Ctrl/Cmd + S"></button>
+                </div>
+              </div>
+
+              <div x-show="loaded">
+                <!-- 1 · General -->
+                <div class="pe-pane" x-show="tab === 'general'" role="tabpanel">
+                  <div class="row g-3">
+                    <div class="col-xl-7">
                   <div class="panel p-3 mb-3">
                     <label class="form-label" for="p-name">Address</label>
                     <div class="input-group">
@@ -17,23 +35,39 @@
                     <div class="help small muted mt-1">Use <code>[name]</code> for a part of the address that varies, or <code>[...name]</code> for the rest of it. End with <code>index</code> to answer the folder itself (so <code>blog/index</code> is just <code>/blog</code>).</div>
                   </div>
 
-                  <div class="panel p-3 mb-3">
-                    <div class="row g-2">
-                      <div class="col-md-6"><label class="form-label" for="p-title">Title</label><input id="p-title" class="form-control" maxlength="200" x-model="front.title"></div>
-                      <div class="col-md-6"><label class="form-label" for="p-layout">Layout</label>
-                        <select id="p-layout" class="form-select" x-model="front.layout"><option value="">Theme default</option><template x-for="l in layouts" :key="l"><option :value="l" x-text="l"></option></template></select>
+                      <div class="panel p-3 mb-3">
+                        <div class="row g-2">
+                          <div class="col-md-6"><label class="form-label" for="p-title">Title</label><input id="p-title" class="form-control" maxlength="200" x-model="front.title"></div>
+                          <div class="col-md-6"><label class="form-label" for="p-layout">Layout</label>
+                            <select id="p-layout" class="form-select" x-model="front.layout"><option value="">Theme default</option><template x-for="l in layouts" :key="l"><option :value="l" x-text="l"></option></template></select>
+                          </div>
+                        </div>
+                        <div class="row g-2 mt-1 align-items-center">
+                          <div class="col-6 col-md-4"><div class="form-check"><input id="p-cache" class="form-check-input" type="checkbox" x-model="front.cache"><label class="form-check-label small" for="p-cache">Cacheable</label></div></div>
+                          <div class="col-6 col-md-8"><select class="form-select form-select-sm" aria-label="Rate limit" x-model="front.limit"><option value="">No extra limit</option><option value="search">Search limit</option></select></div>
+                        </div>
                       </div>
-                    </div>
-                    <label class="form-label mt-2" for="p-desc">Description</label>
-                    <textarea id="p-desc" class="form-control" rows="2" maxlength="400" x-model="front.description"></textarea>
-                    <div class="row g-2 mt-1 align-items-center">
-                      <div class="col-6 col-md-3"><div class="form-check"><input id="p-noindex" class="form-check-input" type="checkbox" x-model="front.noindex"><label class="form-check-label small" for="p-noindex">Noindex</label></div></div>
-                      <div class="col-6 col-md-3"><div class="form-check"><input id="p-sitemap" class="form-check-input" type="checkbox" x-model="front.sitemap"><label class="form-check-label small" for="p-sitemap">In sitemap</label></div></div>
-                      <div class="col-6 col-md-3"><div class="form-check"><input id="p-cache" class="form-check-input" type="checkbox" x-model="front.cache"><label class="form-check-label small" for="p-cache">Cacheable</label></div></div>
-                      <div class="col-6 col-md-3"><select class="form-select form-select-sm" aria-label="Rate limit" x-model="front.limit"><option value="">No extra limit</option><option value="search">Search limit</option></select></div>
-                    </div>
+                  <div class="panel p-3 mb-3">
+                    <label class="form-label" for="p-shows">Shows</label>
+                    <select id="p-shows" class="form-select mb-2" x-model="shows">
+                      <option value="none">Nothing special — a custom page</option>
+                      <option value="type">Every entry of a content type</option>
+                      <option value="own">Any type with its own address</option>
+                      <option value="fixed">One specific entry</option>
+                      <option value="terms">Every entry with one taxonomy term</option>
+                    </select>
+                    <template x-if="shows === 'type' || shows === 'fixed'">
+                      <select class="form-select mb-2" aria-label="Content type" x-model="showsType"><option value="">Choose a type…</option><template x-for="t in entryTypes" :key="t.id"><option :value="t.id" x-text="t.label"></option></template></select>
+                    </template>
+                    <template x-if="shows === 'fixed'"><input class="form-control mono" aria-label="Entry path" placeholder="about/team" x-model="showsPath"></template>
+                    <template x-if="shows === 'terms'">
+                      <select class="form-select" aria-label="Taxonomy" x-model="showsTaxonomy"><option value="">Choose a taxonomy…</option><template x-for="t in taxonomies" :key="t.id"><option :value="t.id" x-text="t.label"></option></template></select>
+                    </template>
+                    <div class="help small muted mt-2" x-show="dynamicParams.length" x-text="'Address parts this file name gives: ' + dynamicParams.join(', ')"></div>
                   </div>
 
+                    </div>
+                    <div class="col-xl-5">
                   <div class="panel p-3 mb-3">
                     <div class="panel-h">Data this page may read</div>
                     <div class="help small muted mb-2">A page can list the modules its components read from. When it does, a component can’t pull data from any other module. Leave it open and nothing is held back.</div>
@@ -62,6 +96,24 @@
                     </template>
                   </div>
 
+                    </div>
+                  </div>
+                </div>
+
+                <!-- 2 · SEO -->
+                <div class="pe-pane" x-show="tab === 'seo'" role="tabpanel">
+                  <div class="row g-3">
+                    <div class="col-xl-7">
+                      <div class="panel p-3 mb-3">
+                        <div class="panel-h">Search listing</div>
+                        <label class="form-label" for="p-desc">Description</label>
+                        <textarea id="p-desc" class="form-control" rows="3" maxlength="400" x-model="front.description"></textarea>
+                        <div class="help small muted mt-1"><span x-text="front.description.length"></span>/400 — search engines show about the first 155 characters.</div>
+                        <div class="row g-2 mt-2">
+                          <div class="col-6"><div class="form-check"><input id="p-noindex" class="form-check-input" type="checkbox" x-model="front.noindex"><label class="form-check-label small" for="p-noindex">Noindex (keep out of search results)</label></div></div>
+                          <div class="col-6"><div class="form-check"><input id="p-sitemap" class="form-check-input" type="checkbox" x-model="front.sitemap"><label class="form-check-label small" for="p-sitemap">Include in the sitemap</label></div></div>
+                        </div>
+                      </div>
                   <div class="panel p-3 mb-3">
                     <div class="panel-h">SEO defaults for this page</div>
                     <div class="help small muted mb-2">Applies to every address this page produces. A <a href="#/seo">SEO Manager</a> rule for one specific address overrides all of this.</div>
@@ -83,34 +135,36 @@
                     <div class="help small muted mt-1">Used when an entry has no featured image and no site-wide default social image is set.</div>
                   </div>
 
-                  <div class="panel p-3 mb-3">
-                    <label class="form-label" for="p-shows">Shows</label>
-                    <select id="p-shows" class="form-select mb-2" x-model="shows">
-                      <option value="none">Nothing special — a custom page</option>
-                      <option value="type">Every entry of a content type</option>
-                      <option value="own">Any type with its own address</option>
-                      <option value="fixed">One specific entry</option>
-                      <option value="terms">Every entry with one taxonomy term</option>
-                    </select>
-                    <template x-if="shows === 'type' || shows === 'fixed'">
-                      <select class="form-select mb-2" aria-label="Content type" x-model="showsType"><option value="">Choose a type…</option><template x-for="t in entryTypes" :key="t.id"><option :value="t.id" x-text="t.label"></option></template></select>
-                    </template>
-                    <template x-if="shows === 'fixed'"><input class="form-control mono" aria-label="Entry path" placeholder="about/team" x-model="showsPath"></template>
-                    <template x-if="shows === 'terms'">
-                      <select class="form-select" aria-label="Taxonomy" x-model="showsTaxonomy"><option value="">Choose a taxonomy…</option><template x-for="t in taxonomies" :key="t.id"><option :value="t.id" x-text="t.label"></option></template></select>
-                    </template>
-                    <div class="help small muted mt-2" x-show="dynamicParams.length" x-text="'Address parts this file name gives: ' + dynamicParams.join(', ')"></div>
-                  </div>
-
-                  <div class="panel p-3 mb-3">
-                    <div class="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
-                      <label class="form-label mb-0">Content</label>
-                      <div class="d-flex gap-2 align-items-center">
-                        <label class="btn btn-sm btn-outline-secondary mb-0">Import HTML<input type="file" accept=".html,.htm" hidden @change="importFile($event.target.files[0]); $event.target.value = ''"></label>
-                        <button type="button" class="btn btn-sm btn-outline-secondary" @click="toggleCode()" x-text="mode === 'compose' ? 'Edit as code' : 'Edit as components'"></button>
+                    </div>
+                    <div class="col-xl-5">
+                      <div class="panel p-3 mb-3">
+                        <div class="panel-h">How it may look in search</div>
+                        <div class="serp">
+                          <div class="serp-url mono" x-text="'/' + cleanName"></div>
+                          <div class="serp-title" x-text="front.title || cleanName || 'Untitled page'"></div>
+                          <div class="serp-desc" x-text="front.description || 'No description yet. Search engines will pick text from the page.'"></div>
+                        </div>
+                        <div class="help small muted mt-2">Rules for one exact address, extra meta tags and structured data live in <a href="#/seo">SEO Manager</a>.</div>
                       </div>
                     </div>
+                  </div>
+                </div>
 
+                <!-- 3 · Code -->
+                <div class="pe-pane" x-show="tab === 'code'" role="tabpanel">
+                  <div class="pe-tools">
+                    <div class="btn-group btn-group-sm" role="group" aria-label="How to edit the content">
+                      <button type="button" class="btn btn-outline-secondary" :class="{active: mode === 'compose'}" @click="mode === 'code' && toggleCode()">Components</button>
+                      <button type="button" class="btn btn-outline-secondary" :class="{active: mode === 'code'}" @click="mode === 'compose' && toggleCode()" x-text="mode === 'compose' ? 'Edit as code' : 'Code'"></button>
+                    </div>
+                    <template x-if="mode === 'code'">
+                      <select class="form-select form-select-sm pe-insert" aria-label="Insert a component" x-model="newBlockName" @change="insertComponent(newBlockName)"><option value="">Insert a component…</option><template x-for="c in components" :key="c.name"><option :value="c.name" x-text="c.meta?.title || c.name"></option></template></select>
+                    </template>
+                    <button type="button" class="btn btn-outline-secondary btn-sm" x-show="mode === 'code'" @click="formatCode('codeEd')"><i class="bi bi-text-indent-left"></i> Format</button>
+                    <label class="btn btn-sm btn-outline-secondary mb-0 ms-auto">Import HTML<input type="file" accept=".html,.htm" hidden @change="importFile($event.target.files[0]); $event.target.value = ''"></label>
+                  </div>
+                  <div x-show="mode === 'compose'">
+                    <div class="panel p-3">
                     <template x-if="mode === 'compose'">
                       <div>
                         <div class="empty" x-show="!blocks.length">No components on this page yet. Add one below.</div>
@@ -142,32 +196,50 @@
                         </div>
                       </div>
                     </template>
-                    <template x-if="mode === 'code'">
-                      <textarea class="form-control mono" rows="16" spellcheck="false" x-codejar="{ mode: 'htmlmixed', get: code, set: (v) => (code = v) }"></textarea>
+                    </div>
+                  </div>
+                  <div x-show="mode === 'code'">
+                    <div class="pe-editor"><textarea x-ref="codeEd" class="form-control mono" spellcheck="false" aria-label="Page markup" x-monaco="{ language: 'html', liquid: true, name: 'page.html', label: 'Page markup (HTML and Liquid)', get: code, set: (v) => (code = v), markers: codeErrors }"></textarea></div>
+                    <div class="pe-problems" role="alert" x-show="preview.error"><i class="bi bi-exclamation-octagon"></i> <span x-text="preview.error"></span></div>
+                    <div class="help small muted mt-1">HTML plus Liquid. Type <code>{%</code> for tags, <code>|</code> for filters, <code>{% render "</code> for components. A script or style you write on the Scripts / Style tabs is saved with the page.</div>
+                  </div>
+                </div>
+
+                <!-- 4 · Scripts -->
+                <div class="pe-pane" x-show="tab === 'scripts'" role="tabpanel">
+                  <div class="pe-tools">
+                    <span class="small muted">JavaScript that runs on this page only. Saved as a <code>&lt;script&gt;</code> at the end of the page.</span>
+                    <button type="button" class="btn btn-outline-secondary btn-sm ms-auto" @click="formatCode('jsEd')"><i class="bi bi-text-indent-left"></i> Format</button>
+                  </div>
+                  <div class="pe-editor"><textarea x-ref="jsEd" class="form-control mono" spellcheck="false" aria-label="Page script" x-monaco="{ language: 'javascript', name: 'page.js', label: 'Page script (JavaScript)', get: js, set: (v) => (js = v) }"></textarea></div>
+                  <div class="help small muted mt-1">It runs in every visitor’s browser, so it needs the same care as any code on the site. It is not run in the Preview tab; open the saved page to try it.</div>
+                </div>
+
+                <!-- 5 · Style -->
+                <div class="pe-pane" x-show="tab === 'style'" role="tabpanel">
+                  <div class="pe-tools">
+                    <span class="small muted">CSS for this page only. Saved as a <code>&lt;style&gt;</code> at the end of the page.</span>
+                    <button type="button" class="btn btn-outline-secondary btn-sm ms-auto" @click="formatCode('cssEd')"><i class="bi bi-text-indent-left"></i> Format</button>
+                  </div>
+                  <div class="pe-editor"><textarea x-ref="cssEd" class="form-control mono" spellcheck="false" aria-label="Page style" x-monaco="{ language: 'css', name: 'page.css', label: 'Page style (CSS)', get: css, set: (v) => (css = v) }"></textarea></div>
+                </div>
+
+                <!-- 6 · Preview -->
+                <div class="pe-pane" x-show="tab === 'preview'" role="tabpanel">
+                  <div class="pe-tools">
+                    <div class="btn-group btn-group-sm" role="group" aria-label="Preview width">
+                      <button type="button" class="btn btn-outline-secondary" :class="{active: device === 'desktop'}" @click="device = 'desktop'"><i class="bi bi-display"></i> Desktop</button>
+                      <button type="button" class="btn btn-outline-secondary" :class="{active: device === 'tablet'}" @click="device = 'tablet'"><i class="bi bi-tablet"></i> Tablet</button>
+                      <button type="button" class="btn btn-outline-secondary" :class="{active: device === 'mobile'}" @click="device = 'mobile'"><i class="bi bi-phone"></i> Mobile</button>
+                    </div>
+                    <template x-for="p in dynamicParams" :key="p">
+                      <input class="form-control form-control-sm pe-param" :aria-label="'Sample value for ' + p" :placeholder="p + ' (sample value)'" x-model="previewParams[p]">
                     </template>
+                    <span class="muted small ms-auto" x-show="preview.busy">Rendering…</span>
+                    <button type="button" class="btn btn-outline-secondary btn-sm" @click="runPreview()"><i class="bi bi-arrow-clockwise"></i> Refresh</button>
                   </div>
+                  <div class="alert alert-danger" role="alert" x-show="preview.error" x-text="preview.error"></div>
+                  <div class="pe-frame"><iframe title="Page preview" :style="'width:' + previewWidth" sandbox="allow-same-origin" :srcdoc="preview.html"></iframe></div>
+                  <div class="help small muted mt-1">Shows your unsaved changes. Scripts don’t run here.</div>
                 </div>
-
-                <div class="col-lg-5">
-                  <div class="panel mb-3" style="position:sticky;top:1rem">
-                    <div class="panel-h d-flex justify-content-between align-items-center">
-                      <span>Preview</span>
-                      <span class="muted small" x-show="preview.busy">Rendering…</span>
-                    </div>
-                    <div class="p-2" x-show="dynamicParams.length">
-                      <template x-for="p in dynamicParams" :key="p">
-                        <input class="form-control form-control-sm mb-1" :aria-label="'Sample value for ' + p" :placeholder="p + ' (sample value)'" x-model="previewParams[p]">
-                      </template>
-                    </div>
-                    <div class="alert alert-danger m-2" role="alert" x-show="preview.error" x-text="preview.error"></div>
-                    <iframe title="Page preview" style="width:100%;height:70vh;border:0;border-top:1px solid var(--line)" sandbox="allow-same-origin" :srcdoc="preview.html"></iframe>
-                  </div>
-                </div>
-              </div>
-
-              <div class="savebar" x-show="loaded && (isNew || dirty)">
-                <span x-show="dirty && !isNew">Unsaved changes</span>
-                <span class="ms-auto"></span>
-                <button class="btn btn-outline-secondary" type="button" x-show="!isNew" @click="discard()">Discard</button>
-                <button class="btn btn-primary" type="button" :disabled="busy" @click="save()" x-text="isNew ? 'Create page' : 'Save page'"></button>
               </div>

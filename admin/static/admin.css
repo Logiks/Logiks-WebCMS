@@ -1266,3 +1266,126 @@ body {
   margin-top: 0.3rem;
   font-size: 0.74rem;
 }
+
+/* ───────── page editor (tabs + Monaco, D-105) ───────── */
+.pe-bar {
+  position: sticky;
+  top: 0;
+  z-index: 15;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
+  background: var(--paper);
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 1rem;
+  padding-top: 0.25rem;
+}
+.pe-tabs {
+  border-bottom: 0;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+}
+.pe-tabs .nav-link {
+  color: var(--muted);
+  white-space: nowrap;
+  border-width: 0 0 2px;
+  border-radius: 0;
+  margin-bottom: -1px;
+}
+.pe-tabs .nav-link.active {
+  color: var(--text);
+  font-weight: 600;
+  background: transparent;
+  border-color: var(--cobalt);
+}
+.pe-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  padding-bottom: 0.4rem;
+}
+.pe-tools {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+.pe-insert {
+  width: auto;
+  max-width: 16rem;
+}
+.pe-param {
+  width: 11rem;
+}
+/* The code fields fill the rest of the screen: it is the main thing on these tabs. */
+.pe-editor {
+  height: calc(100vh - 17rem);
+  min-height: 22rem;
+  display: flex;
+  flex-direction: column;
+}
+.pe-editor > textarea,
+.pe-editor > .monaco-host {
+  flex: 1;
+  min-height: 0;
+  height: 100%;
+}
+.monaco-host {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.liquid-token {
+  color: #a1470a;
+  font-weight: 500;
+}
+.pe-problems {
+  margin-top: 0.4rem;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid #e4b4ae;
+  background: #fbeeec;
+  color: #8a2a1f;
+  border-radius: 6px;
+  font-size: 0.85rem;
+}
+.pe-frame {
+  display: flex;
+  justify-content: center;
+  background: #f1f2f4;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  height: calc(100vh - 16rem);
+  min-height: 24rem;
+  overflow: auto;
+}
+.pe-frame iframe {
+  max-width: 100%;
+  height: 100%;
+  border: 0;
+  background: #fff;
+}
+.serp {
+  max-width: 36rem;
+}
+.serp-url {
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+.serp-title {
+  font-size: 1.1rem;
+  color: #1a0dab;
+  line-height: 1.3;
+}
+.serp-desc {
+  font-size: 0.85rem;
+  color: #4d5156;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}

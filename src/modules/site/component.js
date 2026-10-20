@@ -100,20 +100,6 @@ const frontSchema = z
 
 // ───────── shared checks ─────────
 
-const SCRIPT = /<script\b/i;
-
-/**
- * A page's own body still can't hold a `<script>` (use a theme script or a library, D-037); a component's can
- * (docs/DECISIONS.md D-055) — its author already has the same trust tier as `services.script`/`dbms.query`, and
- * `compileComponent` gives every `<script>` a CSP nonce so it actually runs on the rendered page.
- */
-function checkMarkup(html, what) {
-  if (SCRIPT.test(html))
-    fail(
-      `${what} contains a <script> tag. Scripts aren't supported in pages; use a theme script or a library.`,
-    );
-}
-
 /** Parse a Liquid template with the sandbox engine so syntax errors are reported at save time, not on a visitor's request. */
 export function checkTemplate(engine, source, what) {
   try {
@@ -134,8 +120,8 @@ export function parsePage(src) {
     fail(
       `Front matter: ${r.error.issues[0].path.join('.') || 'file'}: ${r.error.issues[0].message}`,
     );
-  checkMarkup(body, 'This page');
-  return { front: r.data, body };
+  // D-105 (amends D-055): a page may carry its own <script>, same nonce treatment as a component's.
+  return { front: r.data, body: addScriptNonce(body) };
 }
 
 // ───────── components ─────────
@@ -145,6 +131,9 @@ const metaSchema = z
   .object({
     title: z.string().max(80).optional(),
     description: z.string().max(300).optional(),
+    // Where an imported snippet came from (D-106): kept for attribution, never read at render time.
+    source: z.string().max(400).optional(),
+    license: z.string().max(80).optional(),
     // What the builder shows as a form. Runtime defaults are written in the template: {{ heading | default: "Hello" }}.
     props: z
       .record(
@@ -315,7 +304,7 @@ const SCRIPT_TAG_OPEN = /<script\b([^>]*)>/gi;
  * expression, substituted per render by `sitepages.js`; a tag that already declares its own `nonce` is left alone.
  * @param {string} html
  */
-function addScriptNonce(html) {
+export function addScriptNonce(html) {
   return html.replace(SCRIPT_TAG_OPEN, (m, attrs) =>
     /\bnonce\s*=/i.test(attrs) ? m : `<script${attrs} nonce="{{ csp_nonce }}">`,
   );

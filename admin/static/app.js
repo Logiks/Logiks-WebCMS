@@ -392,6 +392,33 @@ function parseCompose(body) {
   return blocks;
 }
 
+/** A page body → its markup, its stylesheet and its script. Only attribute-less `<style>`/`<script>` blocks move to their own
+ *  tabs (several are joined in order); `<script src>`, `<style media>` and the rest stay in the markup untouched. */
+function splitPageBody(body) {
+  const take = (re) => {
+    const parts = [];
+    const rest = body.replace(re, (_m, inner) => {
+      parts.push(inner.trim());
+      return '';
+    });
+    body = rest;
+    return parts.filter(Boolean).join('\n\n');
+  };
+  const css = take(/<style>([\s\S]*?)<\/style>/gi);
+  const js = take(/<script>([\s\S]*?)<\/script>/gi);
+  return { markup: body.trim(), css, js };
+}
+/** The reverse: the one body the server stores. Style then script, at the end, as plain tags. */
+function joinPageBody({ markup, css, js }) {
+  return [
+    markup.trim(),
+    css.trim() ? `<style>\n${css.trim()}\n</style>` : '',
+    js.trim() ? `<script>\n${js.trim()}\n</script>` : '',
+  ]
+    .filter(Boolean)
+    .join('\n\n');
+}
+
 // ───────── page fragments (each module owns its own admin-screen markup) ─────────
 // A page's `<section x-data="...">` ships empty in index.html; its actual markup is fetched once
 // (memoized per URL, same idiom as `loadEditor` below) from the owning module's own admin/ folder
@@ -456,6 +483,208 @@ function loadEditor() {
       await loadScript('/admin/vendor/codejar/dist/codejar.js');
     })();
   return editorLoading;
+}
+
+// ───────── Monaco (the page editor's code editor, D-105) ─────────
+// The VS Code editor: line numbers, completion, error squiggles, folding, find/replace, format. Self-hosted (AMD build, no
+// bundler) and loaded only when a screen that wants it is opened — it is a few MB. A plain textarea stays on the page until
+// it is ready (and for good if it can't load), so editing never depends on it.
+const MONACO_BASE = '/admin/vendor/monaco/vs';
+let monacoLoading;
+function loadMonaco() {
+  if (!monacoLoading)
+    monacoLoading = (async () => {
+      // jsdom (the UI tests) and very old browsers lack what Monaco needs: keep the textarea rather than half-load it.
+      if (!window.matchMedia || !window.Worker) throw new Error('Monaco needs a full browser');
+      const css = document.createElement('link');
+      css.rel = 'stylesheet';
+      css.href = `${MONACO_BASE}/editor/editor.main.css`;
+      document.head.appendChild(css);
+      await loadScript(`${MONACO_BASE}/loader.js`);
+      window.MonacoEnvironment = {
+        // Same-origin module workers; the server redirects to the hashed file.
+        getWorker: (_id, label) =>
+          new window.Worker(`/admin/vendor/monaco-worker/${label}`, {
+            type: 'module',
+            name: label,
+          }),
+      };
+      window.require.config({ paths: { vs: MONACO_BASE } });
+      await new Promise((resolve, reject) =>
+        window.require(['vs/editor/editor.main'], resolve, reject),
+      );
+      const ts = window.monaco.languages.typescript ?? window.monaco.typescript;
+      // A script on a page is browser code: know the DOM, report syntax errors, but don't flag every global a theme defines.
+      ts?.javascriptDefaults.setCompilerOptions({
+        allowNonTsExtensions: true,
+        target: ts.ScriptTarget?.ES2020 ?? 7,
+        checkJs: false,
+      });
+      ts?.javascriptDefaults.setDiagnosticsOptions({
+        noSemanticValidation: true,
+        noSyntaxValidation: false,
+      });
+      registerLiquid(window.monaco);
+      return window.monaco;
+    })();
+  return monacoLoading;
+}
+
+const LIQUID_TAGS = [
+  [
+    'if',
+    '{% if ${1:condition} %}\n\t$0\n{% endif %}',
+    'Show something only when a condition holds',
+  ],
+  ['unless', '{% unless ${1:condition} %}\n\t$0\n{% endunless %}', 'The opposite of if'],
+  [
+    'for',
+    '{% for ${1:item} in ${2:list} %}\n\t$0\n{% endfor %}',
+    'Repeat for every item of a list',
+  ],
+  [
+    'case',
+    '{% case ${1:value} %}\n{% when ${2:x} %}\n\t$0\n{% endcase %}',
+    'Pick one branch by value',
+  ],
+  ['assign', '{% assign ${1:name} = ${2:value} %}', 'Set a variable'],
+  ['capture', '{% capture ${1:name} %}\n\t$0\n{% endcapture %}', 'Capture output into a variable'],
+  ['comment', '{% comment %}\n\t$0\n{% endcomment %}', 'A note that is not rendered'],
+  [
+    'render',
+    '{% render "${1:component}" %}',
+    'Place a component (or "theme/name" for a theme one)',
+  ],
+  [
+    'seo',
+    '{% seo title: ${1:title}, description: ${2:description} %}',
+    'Say what this page is, for search and sharing',
+  ],
+  [
+    'redirect',
+    '{% redirect to: "${1:/}", status: ${2:301} %}',
+    'Send the visitor to another address',
+  ],
+  ['not_found', '{% not_found %}', 'Make this whole page a 404'],
+  ['raw', '{% raw %}\n\t$0\n{% endraw %}', 'Output Liquid-looking text as it is'],
+];
+const LIQUID_FILTERS = [
+  'append',
+  'prepend',
+  'capitalize',
+  'downcase',
+  'upcase',
+  'strip',
+  'truncate',
+  'truncatewords',
+  'replace',
+  'remove',
+  'split',
+  'join',
+  'first',
+  'last',
+  'size',
+  'sort',
+  'reverse',
+  'map',
+  'where',
+  'uniq',
+  'default',
+  'date',
+  'escape',
+  'strip_html',
+  'newline_to_br',
+  'url_encode',
+  'plus',
+  'minus',
+  'times',
+  'divided_by',
+  'round',
+  'json',
+  't',
+  'asset_url',
+  'library_url',
+  'absolute_url',
+  'handle',
+];
+const LIQUID_GLOBALS = [
+  ['page.title', 'This page’s title'],
+  ['page.description', 'This page’s description'],
+  ['page.url', 'This page’s address'],
+  ['params', 'The varying parts of the address ([slug] → params.slug)'],
+  ['query', 'The ?query string'],
+  ['site.name', 'The site’s name'],
+  ['site.locale', 'The visitor’s language'],
+  ['csp_nonce', 'The script nonce for this render'],
+];
+/** What the open page editor can offer beyond the fixed lists (component names, api names): set by the screen. */
+const liquidHints = { components: [], apis: [] };
+let liquidRegistered = false;
+function registerLiquid(monaco) {
+  if (liquidRegistered) return;
+  liquidRegistered = true;
+  const K = monaco.languages.CompletionItemKind;
+  const Snip = monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet;
+  monaco.languages.registerCompletionItemProvider('html', {
+    triggerCharacters: ['%', '{', '|', '"', ' ', '.'],
+    provideCompletionItems(model, pos) {
+      if (!String(model.uri).startsWith('cms://page/')) return { suggestions: [] };
+      const line = model.getLineContent(pos.lineNumber).slice(0, pos.column - 1);
+      const word = model.getWordUntilPosition(pos);
+      const range = new monaco.Range(
+        pos.lineNumber,
+        word.startColumn,
+        pos.lineNumber,
+        word.endColumn,
+      );
+      const open =
+        line.lastIndexOf('{%') > line.lastIndexOf('%}')
+          ? '{%'
+          : line.lastIndexOf('{{') > line.lastIndexOf('}}')
+            ? '{{'
+            : null;
+      if (!open) return { suggestions: [] };
+      const tail = line.slice(line.lastIndexOf(open) + 2);
+      const sug = [];
+      if (/render\s+["'][\w/]*$/.test(tail)) {
+        for (const c of liquidHints.components)
+          sug.push({ label: c.name, kind: K.Module, detail: c.title, insertText: c.name, range });
+        return { suggestions: sug };
+      }
+      if (/\|\s*\w*$/.test(tail)) {
+        for (const f of LIQUID_FILTERS)
+          sug.push({ label: f, kind: K.Function, insertText: f, range });
+        return { suggestions: sug };
+      }
+      if (open === '{%' && /^\s*\w*$/.test(tail)) {
+        // The tag-name position. The snippet already contains the `{%`, so replace from it.
+        const start = line.lastIndexOf('{%') + 1;
+        const full = new monaco.Range(pos.lineNumber, start, pos.lineNumber, pos.column);
+        for (const [name, snippet, doc] of LIQUID_TAGS)
+          sug.push({
+            label: name,
+            kind: K.Keyword,
+            detail: doc,
+            insertText: snippet,
+            insertTextRules: Snip,
+            range: full,
+            filterText: `{% ${name}`,
+          });
+        return { suggestions: sug };
+      }
+      for (const [name, doc] of LIQUID_GLOBALS)
+        sug.push({ label: name, kind: K.Variable, detail: doc, insertText: name, range });
+      for (const a of liquidHints.apis)
+        sug.push({
+          label: `api.${a}`,
+          kind: K.Variable,
+          detail: 'Data a component on this page loads',
+          insertText: `api.${a}`,
+          range,
+        });
+      return { suggestions: sug };
+    },
+  });
 }
 
 document.addEventListener('alpine:init', () => {
@@ -539,6 +768,145 @@ document.addEventListener('alpine:init', () => {
       destroyed = true;
       jar?.destroy();
       editorEl?.remove();
+      el.style.display = '';
+    });
+  });
+
+  // x-monaco="{ language: 'html', get: code, set: (v) => (code = v), liquid: true, markers: errs, name: 'code.html' }" on a <textarea>.
+  // Same contract as x-codejar (get/set through Alpine's scope, the textarea stays the fallback), plus: `liquid` colours
+  // {{ }} / {% %} and enables Liquid completion, `markers` ([{ line, col, message }]) draws error squiggles, and the
+  // instance is kept on `el._monaco` ({ editor, monaco }) so the screen can format, insert at the cursor, or focus.
+  Alpine.directive('monaco', (el, { expression }, { effect, evaluateLater, cleanup }) => {
+    if (!(el instanceof HTMLTextAreaElement)) return;
+    const evalCfg = evaluateLater(expression);
+    let cfg = null;
+    let host = null;
+    let editor = null;
+    let model = null;
+    let decos = null;
+    let destroyed = false;
+    let starting = false;
+    let applying = false;
+
+    const paintLiquid = () => {
+      if (!cfg.liquid) return;
+      const out = [];
+      for (const m of model.findMatches(
+        '\\{\\{[\\s\\S]*?\\}\\}|\\{%[\\s\\S]*?%\\}',
+        true,
+        true,
+        false,
+        null,
+        false,
+      ))
+        out.push({ range: m.range, options: { inlineClassName: 'liquid-token' } });
+      decos.set(out);
+    };
+    const apply = () => {
+      const val = cfg.get ?? '';
+      if (val !== model.getValue()) {
+        applying = true;
+        model.setValue(val);
+        applying = false;
+        el.value = val;
+      }
+      editor.updateOptions({ readOnly: !!cfg.readOnly });
+      const monaco = window.monaco;
+      monaco.editor.setModelMarkers(
+        model,
+        'cms',
+        (cfg.markers ?? []).map((m) => {
+          const line = Math.min(Math.max(1, m.line || 1), model.getLineCount());
+          const col = Math.max(1, m.col || 1);
+          const w = model.getWordAtPosition({ lineNumber: line, column: col });
+          return {
+            severity: monaco.MarkerSeverity.Error,
+            message: m.message,
+            startLineNumber: line,
+            startColumn: w ? w.startColumn : col,
+            endLineNumber: line,
+            endColumn: w ? w.endColumn : model.getLineMaxColumn(line),
+          };
+        }),
+      );
+      paintLiquid();
+    };
+    const start = () => {
+      if (starting) return;
+      starting = true;
+      el.dataset.editorState = 'loading';
+      loadMonaco().then(
+        (monaco) => {
+          if (destroyed) return;
+          host = document.createElement('div');
+          host.className = 'monaco-host';
+          el.insertAdjacentElement('afterend', host);
+          model = monaco.editor.createModel(
+            cfg.get ?? '',
+            cfg.language,
+            monaco.Uri.parse(
+              `cms://page/${cfg.name || 'file'}-${Math.random().toString(36).slice(2, 8)}`,
+            ),
+          );
+          editor = monaco.editor.create(host, {
+            model,
+            automaticLayout: true,
+            minimap: { enabled: false },
+            fontFamily: "'IBM Plex Mono', ui-monospace, Menlo, monospace",
+            fontSize: 13,
+            lineNumbers: 'on',
+            glyphMargin: true,
+            folding: true,
+            wordWrap: 'on',
+            scrollBeyondLastLine: false,
+            tabSize: 2,
+            bracketPairColorization: { enabled: true },
+            quickSuggestions: { other: true, comments: false, strings: true },
+            suggest: { showWords: false },
+            renderWhitespace: 'selection',
+            padding: { top: 8, bottom: 8 },
+            fixedOverflowWidgets: true,
+            ariaLabel: cfg.label || 'Code editor',
+          });
+          decos = editor.createDecorationsCollection();
+          model.onDidChangeContent(() => {
+            if (applying) return;
+            const v = model.getValue();
+            el.value = v;
+            cfg.set(v);
+            paintLiquid();
+          });
+          el._monaco = { editor, monaco };
+          el.style.display = 'none';
+          el.dataset.editorState = 'ready';
+          apply();
+        },
+        () => {
+          // Monaco could not load: the textarea keeps working, and says nothing more — the screen is fully usable.
+          el.dataset.editorState = 'failed';
+        },
+      );
+    };
+    effect(() => {
+      evalCfg((next) => {
+        cfg = next;
+        if (editor) apply();
+        else {
+          if (el.value !== (cfg.get ?? '')) el.value = cfg.get ?? ''; // the fallback textarea shows it meanwhile
+          start();
+        }
+      });
+    });
+    // The textarea still forwards input (a test's setValue, a form reset) while it is the visible editor.
+    el.addEventListener('input', () => {
+      if (!editor) cfg?.set(el.value);
+    });
+    cleanup(() => {
+      destroyed = true;
+      editor?.dispose();
+      model?.dispose();
+      host?.remove();
+      delete el._monaco;
       el.style.display = '';
     });
   });
@@ -2929,8 +3297,22 @@ document.addEventListener('alpine:init', () => {
     blocks: [],
     newBlockName: '',
     code: '',
+    css: '',
+    js: '',
+    tab: 'general',
+    tabs: [
+      { id: 'general', label: 'General', icon: 'sliders' },
+      { id: 'seo', label: 'SEO', icon: 'search' },
+      { id: 'code', label: 'Code', icon: 'code-slash' },
+      { id: 'scripts', label: 'Scripts', icon: 'filetype-js' },
+      { id: 'style', label: 'Style', icon: 'filetype-css' },
+      { id: 'preview', label: 'Preview', icon: 'eye' },
+    ],
+    device: 'desktop',
     previewParams: {},
     preview: { html: '', busy: false, error: '' },
+    /** Liquid errors the last preview found, as editor squiggles: [{ line, col, message }]. */
+    codeErrors: [],
 
     async init() {
       if (!(await this.mountFragment('site', 'pages-edit'))) return;
@@ -2939,6 +3321,13 @@ document.addEventListener('alpine:init', () => {
       this.entryTypes = meta.entryTypes;
       this.taxonomies = meta.taxonomies;
       this.components = (await api('GET', '/admin/site/components')).components;
+      liquidHints.components = this.components.map((c) => ({
+        name: c.name,
+        title: c.meta?.title || '',
+      }));
+      liquidHints.apis = [
+        ...new Set(this.components.flatMap((c) => (c.meta?.api ?? []).map((a) => a.name))),
+      ];
       if (this.isNew) this.originalContent = this.content();
       else await this.load();
       this.loaded = true;
@@ -2954,6 +3343,8 @@ document.addEventListener('alpine:init', () => {
             this.mode,
             this.blocks,
             this.code,
+            this.css,
+            this.js,
             this.previewParams,
           ]),
         () => this.schedulePreview(),
@@ -3006,11 +3397,16 @@ document.addEventListener('alpine:init', () => {
         this.shows = 'type';
         this.showsType = front.entry;
       }
-      const parsed = parseCompose(body.trim());
-      this.code = body.trim();
+      const parts = splitPageBody(body);
+      const parsed = parseCompose(parts.markup);
+      this.code = parts.markup;
+      this.css = parts.css;
+      this.js = parts.js;
       this.blocks = parsed || [];
       this.mode = parsed ? 'compose' : 'code';
-      this.originalContent = r.content;
+      // What Save would write for an untouched form — so "Unsaved changes" means the author changed something, not that
+      // the file was formatted differently by hand.
+      this.originalContent = this.content();
       this.error = '';
     },
 
@@ -3111,7 +3507,14 @@ document.addEventListener('alpine:init', () => {
     content() {
       const lines = Object.entries(this.buildFront()).map(([k, v]) => frontLine(k, v));
       const fm = lines.length ? `---\n${lines.join('\n')}\n---\n` : '';
-      return fm + (this.mode === 'compose' ? this.composeBody() : this.code);
+      return (
+        fm +
+        joinPageBody({
+          markup: this.mode === 'compose' ? this.composeBody() : this.code,
+          css: this.css,
+          js: this.js,
+        })
+      );
     },
     get dirty() {
       return !this.isNew && this.content() !== this.originalContent;
@@ -3155,11 +3558,58 @@ document.addEventListener('alpine:init', () => {
         this.preview.html = r.redirect
           ? `<p style="font:14px system-ui;padding:1rem">Redirects to ${r.redirect.to}</p>`
           : r.html;
+        this.codeErrors = [];
       } catch (e) {
         this.preview.error = e.message;
+        // Liquid reports "…, line:3, col:5": show it where it is. Only the markup is numbered the same as the stored
+        // body (it comes first), so a position past its last line is left to the message alone.
+        const at = /line:(\d+),?\s*col:(\d+)/.exec(e.message);
+        const lines = this.mode === 'code' ? this.code.split('\n').length : 0;
+        this.codeErrors =
+          at && Number(at[1]) <= lines
+            ? [{ line: Number(at[1]), col: Number(at[2]), message: e.message }]
+            : [];
       } finally {
         this.preview.busy = false;
       }
+    },
+
+    /** The address this page answers at, when it has no varying part. */
+    get liveUrl() {
+      if (this.isNew || this.dynamicParams.length) return '';
+      const n = this.cleanName.replace(/(^|\/)index$/, '');
+      return `/${n}`;
+    },
+    get previewWidth() {
+      return { desktop: '100%', tablet: '768px', mobile: '375px' }[this.device];
+    },
+    /** The Monaco instance behind a code field ($refs name), when it has loaded. */
+    monacoOf(ref) {
+      return this.$refs[ref]?._monaco ?? null;
+    },
+    formatCode(ref) {
+      this.monacoOf(ref)?.editor.getAction('editor.action.formatDocument')?.run();
+    },
+    /** Put a `{% render %}` for a component at the cursor (or the end, before the editor has loaded). */
+    insertComponent(name) {
+      if (!name) return;
+      const text = renderTag({ name, args: {} });
+      const m = this.monacoOf('codeEd');
+      if (m) {
+        const sel = m.editor.getSelection();
+        m.editor.executeEdits('insert-component', [{ range: sel, text, forceMoveMarkers: true }]);
+        m.editor.focus();
+      } else this.code = `${this.code.trimEnd()}\n${text}\n`;
+      this.newBlockName = '';
+    },
+    openTab(id) {
+      this.tab = id;
+      // A hidden Monaco measures 0×0; automaticLayout fixes it on the next frame, but focus needs it to exist.
+      if (['code', 'scripts', 'style'].includes(id))
+        this.$nextTick(() =>
+          this.monacoOf({ code: 'codeEd', scripts: 'jsEd', style: 'cssEd' }[id])?.editor.focus(),
+        );
+      if (id === 'preview') this.runPreview();
     },
 
     importFile(file) {
@@ -3172,8 +3622,12 @@ document.addEventListener('alpine:init', () => {
           text,
         )?.[1];
         const bodyMatch = /<body[^>]*>([\s\S]*)<\/body>/i.exec(text);
-        this.code = (bodyMatch ? bodyMatch[1] : text).trim();
+        const parts = splitPageBody((bodyMatch ? bodyMatch[1] : text).trim());
+        this.code = parts.markup;
+        if (parts.css) this.css = parts.css;
+        if (parts.js) this.js = parts.js;
         this.mode = 'code';
+        this.tab = 'code';
         if (title && !this.front.title) this.front.title = title;
         if (desc && !this.front.description) this.front.description = desc;
       };
@@ -3226,9 +3680,37 @@ document.addEventListener('alpine:init', () => {
     ...fileImportExport('components'),
     components: [],
     loaded: false,
+    // "Import snippet": paste HTML (or a GitHub file link) from HyperUI, PrebuiltUI… and save it as a component (D-106).
+    snip: { open: false, html: '', url: '', name: '', title: '', license: '', overwrite: false },
+    snipBusy: false,
+    snipError: '',
+    snipNotes: [],
     async init() {
       if (!(await this.mountFragment('site', 'components-list'))) return;
       await this.load();
+    },
+    async importSnippet() {
+      const s = this.snip;
+      this.snipBusy = true;
+      this.snipError = '';
+      this.snipNotes = [];
+      try {
+        const r = await api('POST', '/admin/site/components/import-snippet', {
+          ...(s.html.trim() ? { html: s.html } : { url: s.url.trim() }),
+          name: s.name.trim() || undefined,
+          title: s.title.trim() || undefined,
+          license: s.license.trim() || undefined,
+          overwrite: s.overwrite,
+        });
+        toast(r.created ? `Component "${r.name}" added.` : `Component "${r.name}" replaced.`);
+        this.snipNotes = r.notes;
+        Object.assign(s, { html: '', url: '', name: '', title: '', overwrite: false });
+        await this.load();
+      } catch (e) {
+        this.snipError = e.message;
+      } finally {
+        this.snipBusy = false;
+      }
     },
     async load() {
       this.components = (await api('GET', '/admin/site/components')).components;

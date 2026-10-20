@@ -147,6 +147,30 @@ test('Components: the list shows the starter components, and a new one can be bu
   await node.ctx.siteFiles.remove('components/ui-test-widget.html', null);
 });
 
+test('Components: a pasted library snippet is imported, with notes about what it needs', async () => {
+  b.go('#/components');
+  const list = () => b.$('section[x-data="componentsList"]');
+  await wait(() => list() && /hero/.test(list().textContent));
+  const open = [...list().querySelectorAll('button')].find(
+    (x) => x.textContent === 'Import snippet',
+  );
+  b.click(open);
+  await wait(() => b.visible(list().querySelector('#sn-html')));
+
+  setValue(list().querySelector('#sn-html'), '<div x-data class="p-4 text-lg">Hi</div>');
+  setValue(list().querySelector('#sn-name'), 'ui_snippet');
+  const go = () =>
+    [...list().querySelectorAll('button')].find((x) => x.textContent === 'Import as component');
+  await wait(() => !go().disabled);
+  b.click(go());
+  await wait(() => node.ctx.siteFiles.list().some((f) => f.path === 'components/ui_snippet.html'));
+  await wait(() => /ui_snippet/.test(list().querySelector('tbody')?.textContent || ''));
+  await wait(() => /Alpine/.test(list().querySelector('.alert-info')?.textContent || ''));
+  assert.match(node.ctx.siteFiles.get('components/ui_snippet.html').content, /\.p-4\b/);
+
+  await node.ctx.siteFiles.remove('components/ui_snippet.html', null);
+});
+
 test('Pages: the list offers export and a .zip import', async () => {
   b.go('#/pages');
   const list = () => b.$('section[x-data="pagesList"]');
@@ -164,4 +188,41 @@ test('Pages: the list offers export and a .zip import', async () => {
   });
   input.dispatchEvent(new b.win.Event('change', { bubbles: true }));
   await wait(() => /Import finished/.test(b.text()));
+});
+
+test('Page editor: six tabs, and Style / Scripts are saved with the page and read back (D-105)', async () => {
+  b.go('#/pages/new');
+  const ed = () => b.$('section[x-data^="pagesEditor"]');
+  await wait(() => ed() && ed().querySelector('#p-name'));
+  assert.deepEqual(
+    [...ed().querySelectorAll('.pe-tabs button')].map((x) => x.textContent.trim()),
+    ['General', 'SEO', 'Code', 'Scripts', 'Style', 'Preview'],
+  );
+  setValue(ed().querySelector('#p-name'), 'ui-tabs');
+  const alpine = () => b.win.Alpine.$data(ed());
+  alpine().mode = 'code';
+  alpine().code = '<h1>Tabs</h1>';
+  alpine().css = 'h1 { color: red; }';
+  alpine().js = 'window.__tabs = 1;';
+  const saveBtn = () =>
+    [...ed().querySelectorAll('button')].find((x) => x.textContent === 'Create page');
+  await wait(() => saveBtn() && !saveBtn().disabled);
+  b.click(saveBtn());
+  await wait(() => node.ctx.siteFiles.list().some((f) => f.path === 'pages/ui-tabs.html'));
+  const saved = node.ctx.siteFiles.get('pages/ui-tabs.html').content;
+  assert.match(
+    saved,
+    /<h1>Tabs<\/h1>\n\n<style>\nh1 \{ color: red; \}\n<\/style>\n\n<script>\nwindow\.__tabs = 1;\n<\/script>/,
+  );
+
+  b.go('#/pages');
+  b.go('#/pages/ui-tabs');
+  await wait(() => ed() && alpine().loaded && alpine().css);
+  assert.equal(alpine().css, 'h1 { color: red; }');
+  assert.equal(alpine().js, 'window.__tabs = 1;');
+  assert.equal(alpine().code, '<h1>Tabs</h1>'); // the blocks are lifted out of the markup tab
+  assert.equal(alpine().dirty, false);
+  b.go('#/pages'); // leave the editor before its file goes
+  await wait(() => !ed());
+  await node.ctx.siteFiles.remove('pages/ui-tabs.html', null);
 });

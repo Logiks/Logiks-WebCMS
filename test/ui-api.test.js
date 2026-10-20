@@ -106,7 +106,7 @@ test('the page editor lists the modules a page may use, writes "uses" to the fil
   setValue(ed().querySelector('#p-name'), 'ui-uses');
   // Switch to code mode and put a component that reads content on the page.
   const codeBtn = () =>
-    [...ed().querySelectorAll('button')].find((x) => /code/i.test(x.textContent));
+    [...ed().querySelectorAll('button')].find((x) => /edit as code/i.test(x.textContent));
   await wait(() => codeBtn());
   b.click(codeBtn());
   const alpine = () => b.win.Alpine.$data(ed());

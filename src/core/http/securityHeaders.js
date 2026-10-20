@@ -8,6 +8,7 @@ const KEBAB = {
   fontSrc: 'font-src',
   connectSrc: 'connect-src',
   objectSrc: 'object-src',
+  workerSrc: 'worker-src',
   baseUri: 'base-uri',
   formAction: 'form-action',
   frameAncestors: 'frame-ancestors',
@@ -42,6 +43,8 @@ function directives(v, { https, nonce }) {
     objectSrc: x(v.csp_object_sources).length ? x(v.csp_object_sources) : ["'none'"],
     baseUri: ["'self'", ...x(v.csp_base_uri)],
     formAction: ["'self'", ...x(v.csp_form_actions)],
+    // Monaco (the page editor, D-105) starts its language workers from blob: URLs that wrap our own same-origin files.
+    workerSrc: ["'self'", 'blob:'],
     frameAncestors: ["'none'"],
     ...(https ? { upgradeInsecureRequests: [] } : {}),
   };

@@ -53,9 +53,12 @@ describe('page front matter', () => {
     fails(() => parsePage('---\nnoindex: maybe\n---\nx'), /noindex/);
   });
 
-  test('scripts are refused for now', () => {
-    fails(() => parsePage('<p>x</p><script>alert(1)</script>'), /<script>/);
-    fails(() => parsePage('<SCRIPT src=x></SCRIPT>'), /<script>/);
+  test('a page may carry a <script>; it gets the render nonce (D-105)', () => {
+    assert.match(
+      parsePage('<p>x</p><script>alert(1)</script>').body,
+      /<script nonce="\{\{ csp_nonce \}\}">alert\(1\)<\/script>/,
+    );
+    assert.match(parsePage('<script src="/a.js"></script>').body, /nonce="\{\{ csp_nonce \}\}"/);
   });
 });
 

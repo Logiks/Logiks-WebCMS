@@ -104,6 +104,27 @@ export function createApp(ctx) {
       .send(codejarSrc);
   });
   app.use('/admin/vendor/codejar', express.static(pkgDir('codejar'), cache));
+  // Monaco (the page editor's code editor, D-105): the prebuilt AMD build, served as-is. Its language workers have
+  // content-hashed file names, so a small redirect turns "the html worker" into whatever this install's file is called
+  // (same origin, so the CSP needs no `blob:`).
+  const monacoDir = path.join(pkgDir('monaco-editor'), 'min/vs');
+  app.use('/admin/vendor/monaco/vs', express.static(monacoDir, cache));
+  app.get('/admin/vendor/monaco-worker/:label', (req, res) => {
+    const label =
+      {
+        typescript: 'ts',
+        javascript: 'ts',
+        handlebars: 'html',
+        razor: 'html',
+        less: 'css',
+        scss: 'css',
+      }[req.params.label] ?? req.params.label;
+    const file = fs.existsSync(path.join(monacoDir, 'assets'))
+      ? fs.readdirSync(path.join(monacoDir, 'assets')).find((f) => f.startsWith(`${label}.worker-`))
+      : null;
+    if (!file) return res.status(404).end();
+    res.redirect(302, `/admin/vendor/monaco/vs/assets/${file}`);
+  });
   app.use('/admin/vendor/prismjs', express.static(pkgDir('prismjs'), cache));
   app.use('/admin/vendor/plex-sans', express.static(pkgDir('@fontsource/ibm-plex-sans'), cache));
   app.use('/admin/vendor/plex-mono', express.static(pkgDir('@fontsource/ibm-plex-mono'), cache));
