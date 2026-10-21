@@ -73,7 +73,7 @@ Choose one:
 - One address or a pattern: Webmaster → SEO Manager → a rule with **noindex** on.
 - One content entry: tick **Hide from search engines** in its editor.
 
-A noindex page is also left out of the sitemap, **except** when the noindex comes from an SEO Manager rule: that rule changes the page's tags but does not edit the sitemap. For those, add a sitemap rule too (below).
+A noindex page is also left out of the sitemap, whichever of these set it. An SEO Manager rule with noindex on removes its address from the sitemap, and turning the rule off or deleting it puts the address back.
 
 ## sitemap.xml
 

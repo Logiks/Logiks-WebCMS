@@ -66,10 +66,11 @@ const xml = (s) =>
 const iso = (ms) => new Date(ms).toISOString();
 
 /**
- * @param {{settings: any, content: any, cache: any, db: any, audit: any, site: any, pages: () => any}} deps
+ * @param {{settings: any, content: any, cache: any, db: any, audit: any, site: any, pages: () => any, seo?: () => any}} deps
  *   `pages`: the site tree's router (ctx.sitePages), passed lazily because it is created after this service.
+ *   `seo`: the SEO Manager service or null (module off), lazy for the same reason.
  */
-export function createSitemap({ settings, content, cache, db, audit, site, pages }) {
+export function createSitemap({ settings, content, cache, db, audit, site, pages, seo }) {
   const cfg = () => settings.ns('sitemap');
   const enabled = () => settings.get('site.sitemap_enabled') && !settings.get('site.noindex');
 
@@ -81,6 +82,8 @@ export function createSitemap({ settings, content, cache, db, audit, site, pages
       re: patternRegex(r.pattern),
     }));
     const excludedTypes = new Set(c.exclude_types);
+    // An address a Webmaster → SEO Manager rule marks noindex is not offered to search engines (the rule edits the page's tags, so the sitemap must follow it).
+    const seoRule = (await seo?.()?.matcher?.()) ?? (() => null);
     /** @type {Map<string, any>} path → url */
     const urls = new Map();
     let skipped = 0;
@@ -88,7 +91,7 @@ export function createSitemap({ settings, content, cache, db, audit, site, pages
       if (urls.has(path)) return;
       if (urls.size >= MAX_URLS) return void skipped++;
       const rule = rules.find((r) => r.re.test(path));
-      if (rule?.exclude) return void skipped++;
+      if (rule?.exclude || seoRule(path)?.noindex === true) return void skipped++;
       urls.set(path, {
         path,
         loc: site.urls.absolute(path),
@@ -145,7 +148,10 @@ export function createSitemap({ settings, content, cache, db, audit, site, pages
   }
 
   const data = () =>
-    cache.wrap('sitemap:data', build, { tags: ['sitemap', 'site', 'sitefiles'], ttl: 3600 });
+    cache.wrap('sitemap:data', build, {
+      tags: ['sitemap', 'site', 'sitefiles', 'seo_rules'],
+      ttl: 3600,
+    });
 
   const perFile = () => Math.min(PROTOCOL_MAX, cfg().per_file);
 

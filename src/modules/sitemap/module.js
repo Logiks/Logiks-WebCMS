@@ -21,6 +21,7 @@ export default {
       audit: ctx.audit,
       site: ctx.site,
       pages: () => ctx.sitePages,
+      seo: () => (ctx.modules.isOn('seo', ctx) ? ctx.seo : null),
     });
   },
   routes: { admin: [sitemapRoutes] },

@@ -104,6 +104,36 @@ export function createSeo(ctx) {
     await cache.invalidate(['seo_rules']);
   }
 
+  async function enabledRules() {
+    return cache.wrap(
+      'seo:rules',
+      async () => (await db('seo_rules').where({ enabled: true }).orderBy('id')).map(row),
+      { tags: ['seo_rules'], ttl: 3600 },
+    );
+  }
+
+  /** @param {any[]} rules @param {string} path */
+  function pick(rules, path) {
+    const exact = rules.find((r) => !isWildcard(r.pattern) && r.pattern === path);
+    if (exact) return exact;
+    let best = null;
+    let bestPrefix = -1;
+    for (const r of rules) {
+      if (!isWildcard(r.pattern)) continue;
+      if (!toRegex(r.pattern).test(path)) continue;
+      const prefix = r.pattern.indexOf('*');
+      const better =
+        !best ||
+        r.priority > best.priority ||
+        (r.priority === best.priority && prefix > bestPrefix);
+      if (better) {
+        best = r;
+        bestPrefix = prefix;
+      }
+    }
+    return best;
+  }
+
   const svc = {
     async list() {
       return (await db('seo_rules').orderBy('pattern')).map(row);
@@ -208,29 +238,16 @@ export function createSeo(ctx) {
      * @param {string} path
      */
     async resolve(path) {
-      const rules = await cache.wrap(
-        'seo:rules',
-        async () => (await db('seo_rules').where({ enabled: true }).orderBy('id')).map(row),
-        { tags: ['seo_rules'], ttl: 3600 },
-      );
-      const exact = rules.find((r) => !isWildcard(r.pattern) && r.pattern === path);
-      if (exact) return exact;
-      let best = null;
-      let bestPrefix = -1;
-      for (const r of rules) {
-        if (!isWildcard(r.pattern)) continue;
-        if (!toRegex(r.pattern).test(path)) continue;
-        const prefix = r.pattern.indexOf('*');
-        const better =
-          !best ||
-          r.priority > best.priority ||
-          (r.priority === best.priority && prefix > bestPrefix);
-        if (better) {
-          best = r;
-          bestPrefix = prefix;
-        }
-      }
-      return best;
+      return pick(await enabledRules(), path);
+    },
+
+    /**
+     * The same lookup as resolve() for many addresses: loads the rules once and returns a plain function. The sitemap
+     * uses it to leave out addresses a rule marks noindex, without one cache read per address.
+     */
+    async matcher() {
+      const rules = await enabledRules();
+      return (/** @type {string} */ path) => pick(rules, path);
     },
   };
   return Object.assign(svc, { schemas: { rule: ruleSchema } });

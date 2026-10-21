@@ -41,6 +41,21 @@ describe('the generated sitemap', () => {
     assert.ok(locs(xml).every((u) => u.startsWith('https://acme.example/')));
   });
 
+  test('an address an SEO Manager rule marks noindex is left out, and comes back when the rule goes', async () => {
+    await setSitemap({ rules: [], default_changefreq: '', default_priority: '' });
+    assert.ok(paths((await get('/sitemap.xml')).text).includes('/about-us'));
+    const rule = await admin
+      .post('/api/admin/seo/rules')
+      .send({ pattern: '/about-us', noindex: true });
+    assert.equal(rule.status, 201, JSON.stringify(rule.body));
+    // Creating the rule refreshes the cached sitemap by itself (the seo_rules tag).
+    assert.ok(!paths((await get('/sitemap.xml')).text).includes('/about-us'));
+    // A rule that does not say noindex, or says it is not, keeps the page listed.
+    const id = rule.body.rule?.id ?? rule.body.id;
+    await admin.put(`/api/admin/seo/rules/${id}`).send({ pattern: '/about-us', noindex: false });
+    assert.ok(paths((await get('/sitemap.xml')).text).includes('/about-us'));
+  });
+
   test('rules leave addresses out or set hints; the first match wins', async () => {
     await setSitemap({
       rules: [
