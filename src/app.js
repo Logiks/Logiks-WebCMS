@@ -128,17 +128,21 @@ export function createApp(ctx) {
   app.use('/admin/vendor/prismjs', express.static(pkgDir('prismjs'), cache));
   app.use('/admin/vendor/plex-sans', express.static(pkgDir('@fontsource/ibm-plex-sans'), cache));
   app.use('/admin/vendor/plex-mono', express.static(pkgDir('@fontsource/ibm-plex-mono'), cache));
-  app.use(
-    '/admin/static',
-    express.static(path.join(ROOT, 'admin/static'), { maxAge: env.isProd ? '5m' : 0 }),
-  );
+  // The admin's own screens (app.js, CSS, each module's HTML fragments) change with every update, unlike the vendor files
+  // above, which are versioned by package. They must be revalidated on every load (ETag, so an unchanged file costs a 304):
+  // a browser that kept an old fragment for days simply never showed buttons added since (Templates, Library).
+  const revalidate = {
+    etag: true,
+    setHeaders: (/** @type {any} */ res) => res.setHeader('Cache-Control', 'no-cache'),
+  };
+  app.use('/admin/static', express.static(path.join(ROOT, 'admin/static'), revalidate));
   // Each module's own admin-screen HTML fragments (fetched lazily by the SPA, `H.mountFragment` in
   // app.js) — a module owns its admin markup under its own directory rather than one central file,
   // so it stays self-contained if it's ever copied/removed between installations. Auto-discovered:
   // adding or removing a module's admin/ folder needs no change here.
   for (const name of fs.readdirSync(path.join(ROOT, 'src/modules'))) {
     const dir = path.join(ROOT, 'src/modules', name, 'admin');
-    if (fs.existsSync(dir)) app.use(`/admin/modules/${name}`, express.static(dir, cache));
+    if (fs.existsSync(dir)) app.use(`/admin/modules/${name}`, express.static(dir, revalidate));
   }
   // A plugin's own admin/*.html, unlike the fixed loop above, can appear or disappear after boot (install/enable),
   // so it's served by a small dynamic middleware (src/modules/plugins/routes.js) instead of a fixed static mount.

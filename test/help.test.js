@@ -220,3 +220,25 @@ describe('how a doc becomes a page of Help', () => {
     assert.throws(() => help.get('ai', 'a'), /not found/i);
   });
 });
+
+describe('admin screens are never served from a stale browser cache', () => {
+  test('the SPA files and every module fragment must be revalidated, and answer 304 when unchanged', async () => {
+    for (const p of [
+      '/admin/static/app.js',
+      '/admin/static/admin-ui.css',
+      '/admin/modules/site/components-list.html',
+      '/admin/modules/site/template-picker.html',
+      '/admin/modules/help/page.html',
+    ]) {
+      const r = await fetch(`${node.url}${p}`);
+      assert.equal(r.status, 200, p);
+      assert.match(r.headers.get('cache-control') ?? '', /no-cache/, p);
+      assert.doesNotMatch(r.headers.get('cache-control') ?? '', /immutable|max-age=[1-9]/, p);
+      const again = await fetch(`${node.url}${p}`, {
+        // A browser revalidating sends max-age=0 (Node's fetch would send no-cache here, which forces a full 200).
+        headers: { 'if-none-match': r.headers.get('etag') ?? '', 'cache-control': 'max-age=0' },
+      });
+      assert.equal(again.status, 304, p);
+    }
+  });
+});
