@@ -144,6 +144,10 @@ export function defineCorePermissions(permissions) {
   permissions.define('Analytics', {
     'analytics.read': 'View site and admin activity: page views, sessions and user activity',
   });
+  permissions.define('Log Manager', {
+    // Pruning deletes history for good, so this is held back for administrators; no built-in role other than Admin gets it.
+    'logs.manage': 'See every log, set how long each is kept, and prune them (administrators only)',
+  });
   permissions.define('AI Usage', {
     'aiusage.read': 'View the log of AI calls: providers, models, tokens and who made them',
   });

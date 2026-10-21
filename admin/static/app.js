@@ -8,9 +8,18 @@ async function refreshCsrf() {
   auth.csrf = (await res.json()).csrfToken;
 }
 
+// When the person last did something. Sent with every request so the server can tell their clicks from a screen
+// refreshing itself (Settings → Security: sign out after inactivity).
+let lastInput = Date.now();
+for (const ev of ['pointerdown', 'keydown', 'wheel', 'touchstart', 'hashchange'])
+  window.addEventListener(ev, () => (lastInput = Date.now()), { passive: true, capture: true });
+
 async function api(method, path, body) {
   const send = async () => {
-    const headers = { accept: 'application/json' };
+    const headers = {
+      accept: 'application/json',
+      'x-user-idle': String(Math.round((Date.now() - lastInput) / 1000)),
+    };
     const opts = { method, headers, credentials: 'same-origin' };
     if (body !== undefined) {
       if (typeof window.Blob !== 'undefined' && body instanceof window.Blob) {
@@ -1216,6 +1225,7 @@ document.addEventListener('alpine:init', () => {
             { id: 'cluster', label: 'Cluster', perm: 'cluster.read' },
             { id: 'system', label: 'System', perm: 'cluster.read' },
             { id: 'updates', label: 'Updates', perm: 'system.update' },
+            { id: 'log-manager', label: 'Log Manager', module: 'logs', perm: 'logs.manage' },
           ],
         },
         {
@@ -2202,6 +2212,7 @@ document.addEventListener('alpine:init', () => {
     q: '',
     kind: '',
     folder: '', // the folder being browsed ('' = top level)
+    viewer: false, // the large document popup
     picked: [], // ids ticked for a move, copy or delete
     bulkFolder: '', // where Move / Copy put them
     folders: [], // every folder: [{ path, files }]
@@ -2290,6 +2301,12 @@ document.addEventListener('alpine:init', () => {
       return !this.folders
         .filter((f) => f.path === this.folder || f.path.startsWith(this.folder + '/'))
         .some((f) => f.files > 0);
+    },
+    canFullscreen(m) {
+      return m.kind === 'image' || m.kind === 'video' || this.isPdf(m);
+    },
+    isPdf(m) {
+      return m.mime === 'application/pdf';
     },
     isPicked(id) {
       return this.picked.includes(id);
@@ -2390,11 +2407,20 @@ document.addEventListener('alpine:init', () => {
           failed.length === 1
             ? failed[0].message
             : `${failed.length} files could not be uploaded. The reasons are listed below.`;
+      // A clean finish clears the bar after a moment; if something failed it stays, with a Dismiss button, to be read.
+      if (!failed.length) {
+        const mine = this.progress;
+        setTimeout(() => {
+          if (this.progress === mine)
+            this.progress = { total: 0, done: 0, failed: [], running: false };
+        }, 1500);
+      }
       if (this.progress.done)
         toast(`Uploaded ${this.progress.done} file${this.progress.done === 1 ? '' : 's'}.`);
       await Promise.all([this.load(), this.loadFolders()]);
     },
     async open(item) {
+      this.viewer = false;
       this.current = { ...item };
       this.usage = (await api('GET', `/admin/media/${item.id}`)).usage;
     },
@@ -2618,6 +2644,88 @@ document.addEventListener('alpine:init', () => {
         if (r.failed?.length)
           this.error = r.failed.map((f) => `${f.path}: ${f.reason}`).join(' · ');
       });
+    },
+  }));
+
+  // ───────── Automation → Log Manager ─────────
+  Alpine.data('logManagerPage', () => ({
+    ...H,
+    logs: [],
+    edit: {}, // id → days to keep, as typed
+    age: {}, // id → "older than N days" for a manual prune
+    open: '',
+    rows: [],
+    more: false,
+    error: '',
+    get current() {
+      return this.logs.find((l) => l.id === this.open);
+    },
+    async init() {
+      if (!(await this.mountFragment('logs', 'page'))) return;
+      await this.load();
+    },
+    n(v) {
+      return Number(v || 0).toLocaleString();
+    },
+    async load() {
+      try {
+        this.apply((await api('GET', '/admin/logs')).logs);
+      } catch (e) {
+        this.error = e.message;
+      }
+    },
+    apply(logs) {
+      this.logs = logs;
+      for (const l of logs) {
+        this.edit[l.id] = l.retentionDays;
+        this.age[l.id] ??= l.retentionDays || 30;
+      }
+    },
+    async view(id) {
+      this.open = id;
+      this.rows = [];
+      const r = await api('GET', `/admin/logs/${id}?limit=50`);
+      this.rows = r.rows;
+      this.more = r.rows.length === 50;
+    },
+    async loadMore() {
+      const r = await api(
+        'GET',
+        `/admin/logs/${this.open}?limit=50&before=${this.rows[this.rows.length - 1].id}`,
+      );
+      this.rows = [...this.rows, ...r.rows];
+      this.more = r.rows.length === 50;
+    },
+    async save(l) {
+      this.error = '';
+      try {
+        this.apply(
+          (await api('PUT', `/admin/logs/${l.id}/retention`, { days: Number(this.edit[l.id]) }))
+            .logs,
+        );
+        toast(
+          `${l.label} will be kept for ${this.edit[l.id] || 'ever'}${this.edit[l.id] ? ' days' : ''}.`,
+        );
+      } catch (e) {
+        this.error = e.message;
+      }
+    },
+    async prune(l) {
+      const d = Number(this.age[l.id]);
+      const what =
+        d === 0
+          ? `Delete every entry in the ${l.label}?`
+          : `Delete ${l.label} entries older than ${d} days?`;
+      if (!confirm(`${what} This can't be undone.`)) return;
+      this.error = '';
+      try {
+        const r = await api('POST', `/admin/logs/${l.id}/prune`, { days: d });
+        toast(`Removed ${this.n(r.deleted)} ${r.deleted === 1 ? 'entry' : 'entries'}.`);
+        await this.load();
+        if (this.open === l.id) await this.view(l.id);
+      } catch (e) {
+        this.error = e.message;
+      }
     },
   }));
 
@@ -8392,6 +8500,7 @@ document.addEventListener('alpine:init', () => {
     media: 'images files upload library pictures photos',
     'media-generator': 'ai image generate picture dall-e imagen stability',
     'media-analytics': 'media usage unused files',
+    'log-manager': 'logs prune retention delete old audit events keep days',
     'ai-usage-text': 'ai cost tokens anthropic models calls log',
     'ai-usage-media': 'ai images generated openai google stability log',
     _x: 'ai cost tokens anthropic openai google stability models calls log',
@@ -9035,6 +9144,30 @@ document.addEventListener('alpine:init', () => {
       return this.namespaces.find((n) => n.namespace === this.ns) || null;
     },
 
+    /** The sections in the left menu: grouped by what they are for, sorted by name inside each group. */
+    get groups() {
+      const GROUPS = [
+        ['Site', ['general', 'site', 'seo', 'sitemap', 'content', 'themes', 'login', 'libraries']],
+        ['Media', ['media', 'media_generator']],
+        ['AI', ['ai', 'assistant', 'prompts', 'research', 'visual', 'testing']],
+        ['Security', ['security']],
+        ['Messaging and automation', ['mail', 'automation', 'analytics', 'publish']],
+        ['System', ['system', 'updates', 'cache', 'modules', 'featureset', 'features']],
+      ];
+      const placed = new Set(GROUPS.flatMap(([, ids]) => ids));
+      const byName = (a, b) => a.title.localeCompare(b.title);
+      const out = GROUPS.map(([label, ids]) => ({
+        label,
+        items: this.namespaces.filter((n) => ids.includes(n.namespace)).sort(byName),
+      }));
+      // Anything a plugin or a later module adds still shows up, rather than vanishing from the menu.
+      out.push({
+        label: 'Other',
+        items: this.namespaces.filter((n) => !placed.has(n.namespace)).sort(byName),
+      });
+      return out.filter((g) => g.items.length);
+    },
+
     async init() {
       if (!(await this.mountFragment('settings', 'page'))) return;
       await this.reload();
@@ -9099,11 +9232,19 @@ document.addEventListener('alpine:init', () => {
       this.errors = {};
       this.testResult = null;
       history.replaceState(null, '', `#/settings/${ns}`);
+      this.toTop();
+    },
+
+    /** A new section starts at its top: the settings scroll in their own area now, which keeps its position between sections. */
+    toTop() {
+      const el = this.$root.querySelector('.settings-main');
+      if (el) el.scrollTop = 0;
     },
 
     async showHistory() {
       this.ns = '__history';
       history.replaceState(null, '', '#/settings/history');
+      this.toTop();
       this.history = (await api('GET', '/admin/settings/history?limit=100')).revisions;
     },
 

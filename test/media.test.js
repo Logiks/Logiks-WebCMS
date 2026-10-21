@@ -603,3 +603,19 @@ test('bulk: move, copy and delete several files; one bad id does not stop the re
 
   assert.equal((await post('copy', { ids: [a.id] })).status, 422, 'a destination is required');
 });
+
+test('a PDF can be framed by our own pages (no sandbox), while other files stay sandboxed', async () => {
+  const pdf = Buffer.from(
+    '%PDF-1.4\n1 0 obj<</Type/Catalog>>endobj\ntrailer<</Root 1 0 R>>\n%%EOF\n',
+  );
+  const item = (await upload(admin, pdf, 'doc.pdf')).body.item;
+  assert.equal(item.kind, 'file');
+  const res = await request(node.url).get(item.url);
+  assert.equal(res.status, 200);
+  assert.match(res.headers['content-security-policy'], /frame-ancestors 'self'/);
+  assert.doesNotMatch(res.headers['content-security-policy'], /sandbox/);
+  assert.match(res.headers['content-disposition'], /^inline/);
+  const img = (await upload(admin, await photo(), 'p.jpg')).body.item;
+  const r2 = await request(node.url).get(img.url);
+  assert.match(r2.headers['content-security-policy'], /sandbox/);
+});

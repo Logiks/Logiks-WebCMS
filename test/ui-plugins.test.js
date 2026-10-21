@@ -209,4 +209,16 @@ test('a plugin with a config block gets a "Configure" button that edits its plug
   await wait(() =>
     /Plugin: Config Plugin/.test(b.$('section[x-data^="settingsPage"]')?.textContent ?? ''),
   );
+  // the menu is grouped, each group sorted by name, and a plugin's section lands under "Other"
+  const sect = b.$('section[x-data^="settingsPage"]');
+  const labels = [...sect.querySelectorAll('.subnav-label')].map((x) => x.textContent.trim());
+  assert.deepEqual(labels.slice(0, 2), ['Site', 'Media']);
+  assert.equal(labels.at(-1), 'Other');
+  for (const g of sect.querySelectorAll('.subnav-group')) {
+    const names = [...g.querySelectorAll('a > span:first-child')].map((x) => x.textContent);
+    assert.deepEqual(
+      names,
+      [...names].sort((a, c) => a.localeCompare(c)),
+    );
+  }
 });

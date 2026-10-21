@@ -166,7 +166,13 @@ export function mediaPublicRoute(ctx) {
         'Content-Type': f.mime,
         'X-Content-Type-Options': 'nosniff',
         // Whatever a browser does with the file, it may not run anything from it.
-        'Content-Security-Policy': "default-src 'none'; sandbox",
+        // A PDF is the exception: the browser's PDF viewer does not start inside a sandboxed document, so the admin's
+        // preview would stay blank. The viewer runs the file's own scripts in its own sandbox, and the page still gets
+        // no sources to load anything from. Only our own pages may frame it.
+        'Content-Security-Policy':
+          f.mime === 'application/pdf'
+            ? "default-src 'none'; frame-ancestors 'self'"
+            : "default-src 'none'; sandbox",
         // Documents a browser can show (PDF, text) open in the tab; Word, zip and the rest are downloads.
         ...(f.kind === 'file'
           ? {

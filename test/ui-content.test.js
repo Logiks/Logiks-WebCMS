@@ -591,9 +591,17 @@ test('media: a file opens in a side panel, and "Delete folder" only shows for an
   b.click(sec('mediaPage').querySelector('.media-tile'));
   await wait(() => sec('mediaPage').querySelector('.media-side'));
   assert.ok(
-    !sec('mediaPage').querySelector('.modal-x'),
+    ![...sec('mediaPage').querySelectorAll('.modal-x')].some((m) => b.visible(m)),
     'the preview is part of the page, not a popup',
   );
+  assert.ok(
+    b.visible(sec('mediaPage').querySelector('[data-fullscreen]')),
+    'a full screen button is offered',
+  );
+  b.click(sec('mediaPage').querySelector('[data-fullscreen]'));
+  await wait(() => b.visible(sec('mediaPage').querySelector('.doc-viewer').closest('.modal-x')));
+  b.click(sec('mediaPage').querySelector('.doc-viewer .btn-close'));
+  await wait(() => !b.visible(sec('mediaPage').querySelector('.doc-viewer').closest('.modal-x')));
   b.click(sec('mediaPage').querySelector('.media-side .btn-close'));
   await wait(() => !sec('mediaPage').querySelector('.media-side'));
 
@@ -620,9 +628,19 @@ test('media: tick several files, then move them to a folder in one go', async ()
   await wait(() => sec('mediaAnalyticsPage'));
   b.go('#/media');
   await wait(() => sec('mediaPage'));
-  await wait(() => sec('mediaPage').querySelector('.media-tile'));
-  b.click(sec('mediaPage').querySelector('.media-pick'));
+  chooseFiles(sec('mediaPage').querySelector('input[data-upload-files]'), [
+    file(await png(120, 90), 'extra.png', 'image/png'),
+  ]);
+  await wait(() => sec('mediaPage').querySelectorAll('.media-tile').length >= 2);
+  await wait(() => !b.visible(sec('mediaPage').querySelector('[role="status"]')));
+  const picks = () => sec('mediaPage').querySelectorAll('.media-pick');
+  assert.ok(
+    !b.visible(sec('mediaPage').querySelector('.bulk-bar')),
+    'hidden until a file is ticked',
+  );
+  b.click(picks()[0]);
   await wait(() => b.visible(sec('mediaPage').querySelector('.bulk-bar')));
+  b.click(picks()[1]);
   const moveTo = sec('mediaPage').querySelector('.bulk-bar select');
   await wait(() => [...moveTo.options].some((o) => o.value === 'empty-one'));
   setValue(moveTo, 'empty-one');
@@ -635,6 +653,6 @@ test('media: tick several files, then move them to a folder in one go', async ()
       Number(
         (await node.ctx.db('media').where({ folder: 'empty-one' }).count({ n: '*' }).first()).n,
       ) ===
-      Number(before) + 1,
+      Number(before) + 2,
   );
 });

@@ -142,7 +142,15 @@
   <div class="sidebar-backdrop" x-show="sidebarOpen" x-cloak @click="sidebarOpen = false"></div>
   <aside class="sidebar" id="sidebar" :class="{open: sidebarOpen}">
     <button type="button" class="sidebar-close" @click="sidebarOpen = false" aria-label="Close menu"><i class="bi bi-x-lg"></i></button>
-    <div class="brand"><div class="brand-text"><span x-text="siteName || 'Admin'"></span><small>Admin console</small></div></div>
+    <div class="brand"><div class="brand-text"><span x-text="siteName || 'Admin'"></span><small>Admin console</small></div>
+      <div class="site-menu" x-data="{open: false}" @click.outside="open = false" @keydown.escape="open = false">
+        <button type="button" class="site-menu-btn" :aria-expanded="open" aria-haspopup="true" aria-label="Site links" title="View site, sitemap, robots.txt" @click="open = !open"><i class="bi bi-chevron-down chev" :class="{open: open}" aria-hidden="true"></i></button>
+        <div class="site-menu-list" x-show="open" x-cloak role="menu">
+          <a role="menuitem" href="/" target="_blank" rel="noopener"><i class="bi bi-box-arrow-up-right"></i> View site</a>
+          <a role="menuitem" href="/sitemap.xml" target="_blank" rel="noopener"><i class="bi bi-diagram-3"></i> Sitemap</a>
+          <a role="menuitem" href="/robots.txt" target="_blank" rel="noopener"><i class="bi bi-robot"></i> Robots.txt</a>
+        </div>
+      </div></div>
     <button type="button" class="nav-search" @click="$dispatch('open-search'); sidebarOpen = false" aria-label="Search screens, settings and tasks"><i class="bi bi-search" aria-hidden="true"></i><span>Search</span><kbd>⌘K</kbd></button>
     <nav>
       <template x-for="n in nav" :key="n.id">
@@ -163,11 +171,6 @@
         </div>
       </template>
     </nav>
-    <div class="quick-links">
-      <a href="/" target="_blank" rel="noopener"><i class="bi bi-box-arrow-up-right"></i> View site</a>
-      <a href="/sitemap.xml" target="_blank" rel="noopener"><i class="bi bi-diagram-3"></i> Sitemap</a>
-      <a href="/robots.txt" target="_blank" rel="noopener"><i class="bi bi-robot"></i> Robots.txt</a>
-    </div>
     <div class="me">
       <a href="#/account" class="text-white text-decoration-none" :class="{'fw-semibold': route === 'account'}" x-text="user.name" title="My account"></a>
       <small class="muted d-block" x-text="user.role"></small>
@@ -427,6 +430,10 @@
 
     <template x-if="route === 'media-generator'">
       <section x-data="mediaGeneratorPage"></section>
+    </template>
+
+    <template x-if="route === 'log-manager'">
+      <section x-data="logManagerPage"></section>
     </template>
 
     <template x-if="route === 'ai-usage-text'">

@@ -216,7 +216,9 @@ export function createApp(ctx) {
         store: ctx.sessionStore,
         resave: false,
         saveUninitialized: false,
-        rolling: true,
+        // Not rolling: the maximum session length counts from sign-in. Inactivity is tracked below instead, because
+        // rolling renewed the session on every request, including a screen's own background refreshes, so it never ended.
+        rolling: false,
         cookie: {
           httpOnly: true,
           sameSite: 'lax',
@@ -226,6 +228,22 @@ export function createApp(ctx) {
       }),
     ),
   );
+  // Inactivity sign-out. A browser tab says how long its person has been idle (X-User-Idle, seconds); a request from a
+  // screen refreshing itself arrives with a long idle time and so does not keep the session alive. Requests without the
+  // header (scripts, API clients) count as activity.
+  api.use((req, _res, next) => {
+    const s = /** @type {any} */ (req.session);
+    if (!s?.userId) return next();
+    const idleMs = Number(settings.get('security.session_idle_minutes')) * 60_000;
+    const t = Date.now();
+    const last = Number(s.lastActive) || t;
+    if (idleMs > 0 && t - last > idleMs) return s.regenerate(() => next());
+    const header = req.headers['x-user-idle'];
+    const active = header === undefined || Number(header) < 30;
+    if (active && t - last > 15_000) s.lastActive = t;
+    else if (!s.lastActive) s.lastActive = t;
+    next();
+  });
   api.use(cookieParser());
   api.use(ctx.csrf.doubleCsrfProtection); // every non-GET below this line needs a valid token
   api.use(loadPrincipal(ctx));
