@@ -307,6 +307,47 @@ export function createHelp(ctx) {
       return { categories, items };
     },
 
+    /**
+     * A guide (or one prompt) as markdown text for the assistant. Long guides come back as an outline plus the start;
+     * ask again with a `heading` to get one section whole.
+     * @param {string} section @param {string} slug @param {string} [heading] @param {number} [max]
+     */
+    read(section, slug, heading, max = 9000) {
+      if (!SECTION_IDS.has(section) || !SLUG.test(slug)) throw notFound('Guide');
+      const e = load().find((x) => x.section === section && x.slug === slug);
+      if (!e) throw notFound('Guide');
+      const title = e.d.front.title ?? slug;
+      const link = `[${title}](#/help/${section}${section === 'prompts' ? '' : `/${slug}`})`;
+      const body = e.d.body.trim();
+      // Split before each "## " heading, so a section is returned whole.
+      const parts = body.split(/^(?=## )/m);
+      const headings = parts
+        .filter((p) => p.startsWith('## '))
+        .map((p) => p.slice(3, p.indexOf('\n')).trim());
+      if (heading) {
+        const want = String(heading).toLowerCase();
+        const hit = parts.find(
+          (p) => p.startsWith('## ') && p.slice(3, p.indexOf('\n')).toLowerCase().includes(want),
+        );
+        if (!hit)
+          return {
+            title,
+            link,
+            headings,
+            text: '',
+            note: 'No section has that heading; pick one of `headings`.',
+          };
+        return {
+          title,
+          link,
+          headings,
+          text: hit.slice(0, max * 2),
+          truncated: hit.length > max * 2,
+        };
+      }
+      return { title, link, headings, text: body.slice(0, max), truncated: body.length > max };
+    },
+
     /** Words in titles, summaries and text of the guides and prompts, best matches first. */
     search(q) {
       const words = String(q)

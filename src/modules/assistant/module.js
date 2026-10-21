@@ -7,7 +7,7 @@ export default {
   optional: true,
   description:
     'A chat panel that can see and (as the signed-in user) change the site, and keeps the requirements document.',
-  requires: ['site', 'prompts'],
+  requires: ['site', 'prompts', 'help'],
   provides: {
     services: ['assistant'],
     permissions: [

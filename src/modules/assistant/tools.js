@@ -159,6 +159,38 @@ export const TOOLS = [
     },
   },
   {
+    name: 'search_help',
+    description:
+      "Search the built-in Help guides (administration, support, coding guide for Liquid/components/Services/data, AI prompting) and the prompt library. Use it BEFORE answering any 'how do I…', 'what does… mean', troubleshooting or 'what prompt should I use' question about this CMS. Returns titles, snippets and a ready-made markdown `link` for each match.",
+    input_schema: {
+      type: 'object',
+      properties: { query: { type: 'string', description: 'Key words, in the person’s terms.' } },
+      required: ['query'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'read_help',
+    description:
+      'Read one Help guide (or one library prompt) found with search_help. Long guides return an outline of their headings plus the start; call again with `heading` to read one section whole. Answer from what it says, give the `link`, and do not invent steps it does not contain.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        section: {
+          type: 'string',
+          enum: ['administration', 'support', 'coding', 'ai', 'prompts'],
+        },
+        slug: { type: 'string', description: 'The guide’s slug from search_help.' },
+        heading: {
+          type: 'string',
+          description: 'Part of a section heading to read just that section.',
+        },
+      },
+      required: ['section', 'slug'],
+      additionalProperties: false,
+    },
+  },
+  {
     name: 'web_search',
     description:
       'Search the web. Returns titles, addresses and snippets only; read a result with fetch_page before relying on it.',

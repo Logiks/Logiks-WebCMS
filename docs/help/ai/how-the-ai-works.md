@@ -57,6 +57,10 @@ in each conversation.
 5. **Checks itself**: validates the site and, where the server has a headless browser, looks at screenshots of key pages on desktop and mobile, then fixes what it sees.
 6. **Reports**: what exists, what is placeholder, what only you can supply.
 
+## It reads these guides
+
+For "how do I…" questions the assistant searches the Help guides and the prompt library (the `search_help` and `read_help` tools) and answers from them, with a link to the guide. If the guides do not cover something it should say so. Because it reads the same files you do, keeping a guide accurate keeps its answers accurate.
+
 ## Safety nets
 
 - **Every change is recorded**, one entry per turn, with a diff, under **System → Change history**. **Revert** puts back only the documents that are still as that change left them.

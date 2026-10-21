@@ -294,6 +294,50 @@ describe('assistant tools', () => {
     );
     assert.deepEqual(JSON.parse(limited.text).matches, []);
   });
+
+  test('search_help and read_help let the assistant answer from the Help guides', async () => {
+    const [found] = await run(
+      [{ name: 'search_help', input: { query: 'webhook signature' } }],
+      only('admin.access'),
+    );
+    const m = JSON.parse(found.text).matches;
+    const hit = m.find((x) => x.slug === 'automation');
+    assert.ok(hit, JSON.stringify(m));
+    assert.equal(hit.link, '[Automation, analytics and testing](#/help/administration/automation)');
+
+    const [whole] = await run(
+      [{ name: 'read_help', input: { section: 'administration', slug: 'automation' } }],
+      only('admin.access'),
+    );
+    const g = JSON.parse(whole.text);
+    assert.ok(g.headings.includes('Webhooks'));
+    assert.match(g.text, /X-CMS-Signature/);
+
+    const [part] = await run(
+      [
+        {
+          name: 'read_help',
+          input: { section: 'administration', slug: 'automation', heading: 'scheduler' },
+        },
+      ],
+      only('admin.access'),
+    );
+    const p = JSON.parse(part.text);
+    assert.match(p.text, /^## Scheduler/);
+    assert.doesNotMatch(p.text, /X-CMS-Signature/);
+
+    const [prompt] = await run(
+      [{ name: 'read_help', input: { section: 'prompts', slug: 'site-brief' } }],
+      only('admin.access'),
+    );
+    assert.match(JSON.parse(prompt.text).text, /\[\[Audience\]\]/);
+
+    const [missing] = await run(
+      [{ name: 'read_help', input: { section: 'coding', slug: 'nope' } }],
+      only('admin.access'),
+    );
+    assert.equal(missing.error, true);
+  });
 });
 
 describe('the guide', () => {
