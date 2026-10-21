@@ -39,7 +39,7 @@
           <span class="hist-msg" x-text="c.message"></span>
           <span class="small muted">
             #<span x-text="c.id"></span> · <span x-text="c.author"></span> · <span x-text="ago(c.createdAt)"></span> · <span x-text="c.files + (c.files === 1 ? ' file' : ' files')"></span>
-            <span x-show="c.kind === 'revert'"> · revert</span><span x-show="c.kind === 'manual'"> · committed by hand</span><span x-show="c.revertedBy"> · reverted</span>
+            <span x-show="c.kind === 'revert'"> · revert</span><span x-show="c.kind === 'manual'"> · committed by hand</span><span x-show="['auto','pull','branch','restore'].includes(c.kind)" x-text="' · ' + ({auto: 'automatic commit', pull: 'pulled', branch: 'branch switch', restore: 'restore'})[c.kind]"></span><span x-show="c.revertedBy"> · reverted</span>
           </span>
         </a>
       </template>

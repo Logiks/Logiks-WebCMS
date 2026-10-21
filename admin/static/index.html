@@ -312,6 +312,11 @@
       </div>
     </template>
 
+    <!-- Publish & Git -->
+    <template x-if="route === 'publish'">
+      <section x-data="publishPage"></section>
+    </template>
+
     <!-- Automation: Scheduler -->
     <template x-if="route === 'scheduler'">
       <div>

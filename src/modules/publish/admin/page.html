@@ -1,0 +1,103 @@
+<div class="page-head d-flex justify-content-between align-items-end flex-wrap gap-2">
+  <div><h1>Publish &amp; Git</h1><p>Commit the site, publish a numbered release, and keep it in step with your git repository. Publishing also refreshes caches so visitors get the new version.</p></div>
+  <button type="button" class="btn btn-outline-secondary btn-sm" :disabled="busy" @click="load(true)">Check remote</button>
+</div>
+<div class="alert alert-danger" role="alert" x-show="error" x-text="error"></div>
+<div class="alert alert-success" role="status" x-show="notice" x-text="notice"></div>
+<div class="alert alert-warning" x-show="s && !s.git">The git copy is switched off. Turn it on under <a href="#/settings">Settings → Assistant</a> to push, pull and use branches. Commits and releases still work.</div>
+
+<div class="row g-3 mb-3" x-show="s">
+  <div class="col-md-4"><div class="panel p-3 h-100">
+    <div class="muted small">Branch</div>
+    <div class="d-flex gap-2 mt-1 flex-wrap">
+      <select class="form-select form-select-sm" style="max-width:14rem" aria-label="Branch" data-branch :disabled="busy || !can('publish.manage') || !(s && s.git)" x-model="branch" @change="switchTo(branch)">
+        <template x-for="b in branches" :key="b.name"><option :value="b.name" x-text="b.name + (b.local ? '' : ' (remote only)')" :selected="b.current"></option></template>
+      </select>
+      <button type="button" class="btn btn-outline-secondary btn-sm" x-show="can('publish.manage') && s && s.git" :disabled="busy" @click="newBranch()">New branch</button>
+    </div>
+    <div class="small muted mt-2" x-show="s && s.remote">Remote <span class="mono" x-text="s && s.remote"></span></div>
+    <div class="small muted mt-2" x-show="s && s.git && !s.remote">No remote set. Add one under <a href="#/settings">Settings → Assistant</a>.</div>
+  </div></div>
+  <div class="col-md-4"><div class="panel p-3 h-100">
+    <div class="muted small">Against the remote</div>
+    <div class="mt-1" data-aheadbehind x-text="aheadBehind()"></div>
+    <div class="small text-danger mt-1" x-show="s && s.remoteError" x-text="s && s.remoteError"></div>
+    <div class="small muted mt-2">Latest release <strong x-text="s && s.release ? 'v' + s.release : 'none yet'"></strong> · cache version <span class="mono" x-text="s && s.cacheVersion"></span></div>
+  </div></div>
+  <div class="col-md-4"><div class="panel p-3 h-100">
+    <div class="muted small">Not committed yet</div>
+    <div class="mt-1" data-pending x-text="s && s.tracking ? (s.pendingFiles.length ? s.pendingFiles.length + (s.pendingFiles.length === 1 ? ' file' : ' files') : 'Nothing: the site matches the last commit') : 'Not tracking yet. Your first commit starts it.'"></div>
+    <div class="small muted mt-2" x-text="s && s.autoCommit ? 'Committed automatically every ' + s.autoCommitMinutes + ' minutes' + (s.autoPush ? ' and pushed' : '') : 'Automatic commits are off'"></div>
+    <div class="small mt-1"><a href="#/settings">Change automatic commits</a></div>
+  </div></div>
+</div>
+
+<div class="panel p-3 mb-3" x-show="s && s.pendingFiles.length">
+  <div class="fw-semibold mb-1">Changed since the last commit</div>
+  <ul class="small mb-0 ps-3"><template x-for="f in s.pendingFiles.slice(0, 15)" :key="f.path"><li><span class="mono" x-text="f.path"></span> <span class="muted" x-text="f.status"></span></li></template></ul>
+  <div class="small muted" x-show="s.pendingFiles.length > 15" x-text="'…and ' + (s.pendingFiles.length - 15) + ' more'"></div>
+</div>
+
+<div class="panel p-3 mb-3 border-warning" x-show="conflicts.length" role="alert" data-conflicts>
+  <div class="fw-semibold mb-1">Both sides changed these pages</div>
+  <ul class="small ps-3"><template x-for="c in conflicts" :key="c"><li class="mono" x-text="c"></li></template></ul>
+  <div class="small mb-2">Nothing was changed. Choose which version to keep for these; everything else is merged either way.</div>
+  <div class="d-flex gap-2 flex-wrap">
+    <button type="button" class="btn btn-outline-primary btn-sm" :disabled="busy" @click="resolve('ours')">Keep this site's version</button>
+    <button type="button" class="btn btn-outline-primary btn-sm" :disabled="busy" @click="resolve('theirs')">Take the remote's version</button>
+    <button type="button" class="btn btn-link btn-sm" @click="conflicts = []">Decide later</button>
+  </div>
+</div>
+
+<div class="row g-3 mb-3">
+  <div class="col-lg-6" x-show="can('publish.commit')"><div class="panel p-3 h-100">
+    <form @submit.prevent="commit()">
+      <label class="form-label mb-1" for="pub-msg">Commit</label>
+      <input id="pub-msg" class="form-control" maxlength="300" placeholder="What changed? (optional)" x-model="message">
+      <div class="form-text">Saves the site as it is now, including edits made by hand.</div>
+      <button class="btn btn-primary mt-2" :disabled="busy" data-commit>Commit now</button>
+    </form>
+  </div></div>
+  <div class="col-lg-6" x-show="can('publish.manage')"><div class="panel p-3 h-100">
+    <form @submit.prevent="publish()">
+      <label class="form-label mb-1" for="pub-note">Publish a release</label>
+      <input id="pub-note" class="form-control" maxlength="300" placeholder="Release note (optional)" x-model="note">
+      <div class="form-check mt-2" x-show="s && s.git && s.remote"><input class="form-check-input" type="checkbox" id="pub-push" x-model="pushAfter"><label class="form-check-label" for="pub-push">Push to the remote afterwards</label></div>
+      <div class="form-text">Commits what is pending, names the result the next version, tags it in git and refreshes caches.</div>
+      <button class="btn btn-primary mt-2" :disabled="busy" data-publish>Publish</button>
+    </form>
+  </div></div>
+</div>
+
+<div class="panel p-3 mb-3" x-show="can('publish.manage') && s && s.git">
+  <div class="d-flex gap-2 flex-wrap align-items-center">
+    <button type="button" class="btn btn-outline-secondary" :disabled="busy || !(s && s.remote)" data-pull @click="pull()">Pull</button>
+    <button type="button" class="btn btn-outline-secondary" :disabled="busy || !(s && s.remote)" data-push @click="push()">Push</button>
+    <button type="button" class="btn btn-outline-secondary" :disabled="busy || !(s && s.remote)" data-sync @click="sync()">Sync (pull, then push)</button>
+    <span class="flex-grow-1"></span>
+    <button type="button" class="btn btn-outline-secondary" :disabled="busy" data-purge @click="purge()">Refresh caches</button>
+  </div>
+  <div class="small muted mt-2">Pull brings the remote's pages and components into this site as one entry you can undo under Change history. Refresh caches makes every visitor fetch fresh pages and files.</div>
+</div>
+
+<div class="row g-3">
+  <div class="col-lg-6"><div class="panel p-3 h-100">
+    <div class="fw-semibold mb-2">Releases</div>
+    <div class="empty" x-show="!versions.length">No releases yet. Publish one to create v1.</div>
+    <div class="table-responsive" x-show="versions.length"><table class="table table-sm mb-0">
+      <thead><tr><th>Version</th><th>Note</th><th>When</th><th></th></tr></thead>
+      <tbody><template x-for="v in versions" :key="v.version"><tr>
+        <td><strong x-text="'v' + v.version"></strong> <span class="muted small" x-show="v.pushed">· pushed</span></td>
+        <td x-text="v.note || '—'"></td>
+        <td class="small muted" x-text="new Date(v.createdAt).toLocaleString()"></td>
+        <td class="text-end"><button type="button" class="btn btn-outline-danger btn-sm" x-show="can('publish.manage') && s && s.git && v.sha" :disabled="busy" @click="restore(v)">Restore</button></td>
+      </tr></template></tbody>
+    </table></div>
+  </div></div>
+  <div class="col-lg-6"><div class="panel p-3 h-100">
+    <div class="fw-semibold mb-2">Recent commits</div>
+    <div class="empty" x-show="!log.length">Nothing committed yet.</div>
+    <ul class="list-unstyled small mb-0"><template x-for="c in log" :key="c.id"><li class="mb-1"><span x-text="c.message"></span> <span class="muted" x-text="'· ' + kindLabel(c.kind) + ' · ' + c.author + ' · ' + new Date(c.createdAt).toLocaleString()"></span></li></template></ul>
+    <div class="small mt-2"><a href="#/history">Open Change history</a></div>
+  </div></div>
+</div>

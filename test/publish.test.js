@@ -233,7 +233,6 @@ test('automatic commits happen on the schedule when switched on, never when off,
     false,
     'nothing changed, so nothing is committed',
   );
-  assert.ok(node.ctx.jobs.stats ? true : true);
 });
 
 test('without a remote, pull and push say what to set; permissions are separate', async () => {

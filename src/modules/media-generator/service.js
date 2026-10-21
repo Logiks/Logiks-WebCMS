@@ -5,8 +5,8 @@ import { HttpError } from '../../core/http/errors.js';
 // time; these are correct to the shape of each provider's real REST API as documented, but — like every external
 // integration added this session — have not been exercised against a real key, since one was never shared here.
 const DEFAULTS = {
-  openai: { model: 'dall-e-3', size: '1024x1024' },
-  google: { model: 'imagen-3.0-generate-002' },
+  openai: { model: 'gpt-image-1', size: '1024x1024' },
+  google: { model: 'gemini-2.5-flash-image' },
   stability: { model: 'core' },
 };
 
@@ -89,30 +89,41 @@ async function generateOpenAI(apiKey, prompt, fetchImpl) {
       prompt,
       size: DEFAULTS.openai.size,
       n: 1,
-      response_format: 'b64_json',
     }),
-    signal: AbortSignal.timeout(60_000),
+    signal: AbortSignal.timeout(180_000),
   });
   const body = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(body.error?.message || `OpenAI returned HTTP ${res.status}.`);
-  const base64 = body.data?.[0]?.b64_json;
+  // No `response_format`: newer image models reject it and always return base64; older ones (dall-e-3) return a URL.
+  const item = body.data?.[0];
+  let base64 = item?.b64_json;
+  if (!base64 && item?.url) {
+    const img = await fetchImpl(item.url, { signal: AbortSignal.timeout(60_000) });
+    if (!img.ok) throw new Error(`Could not download the generated image (HTTP ${img.status}).`);
+    base64 = Buffer.from(await img.arrayBuffer()).toString('base64');
+  }
   if (!base64) throw new Error('OpenAI did not return an image.');
   return { base64, mime: 'image/png' };
 }
 
 async function generateGoogle(apiKey, prompt, fetchImpl) {
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${DEFAULTS.google.model}:predict?key=${encodeURIComponent(apiKey)}`;
+  // Imagen's `:predict` endpoint isn't offered on every key; the Gemini image models are, via `generateContent`.
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${DEFAULTS.google.model}:generateContent`;
   const res = await fetchImpl(url, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ instances: [{ prompt }], parameters: { sampleCount: 1 } }),
-    signal: AbortSignal.timeout(60_000),
+    headers: { 'content-type': 'application/json', 'x-goog-api-key': apiKey },
+    body: JSON.stringify({
+      contents: [{ parts: [{ text: prompt }] }],
+      generationConfig: { responseModalities: ['IMAGE'] },
+    }),
+    signal: AbortSignal.timeout(120_000),
   });
   const body = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(body.error?.message || `Google returned HTTP ${res.status}.`);
-  const prediction = body.predictions?.[0];
-  if (!prediction?.bytesBase64Encoded) throw new Error('Google did not return an image.');
-  return { base64: prediction.bytesBase64Encoded, mime: prediction.mimeType || 'image/png' };
+  const parts = body.candidates?.[0]?.content?.parts ?? [];
+  const img = parts.map((p) => p.inlineData || p.inline_data).find((d) => d?.data);
+  if (!img) throw new Error('Google did not return an image.');
+  return { base64: img.data, mime: img.mimeType || img.mime_type || 'image/png' };
 }
 
 async function generateStability(apiKey, prompt, fetchImpl) {

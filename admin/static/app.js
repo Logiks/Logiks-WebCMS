@@ -1162,6 +1162,7 @@ document.addEventListener('alpine:init', () => {
               perm: 'requirements.read',
             },
             { id: 'prompts', label: 'Prompts', perm: 'prompts.read' },
+            { id: 'publish', label: 'Publish & Git', module: 'publish', perm: 'publish.read' },
             {
               id: 'history',
               label: 'Change history',
@@ -2382,6 +2383,172 @@ document.addEventListener('alpine:init', () => {
       } catch (e) {
         this.error = e.message;
       }
+    },
+  }));
+
+  // ───────── System → Publish & Git (docs/DECISIONS.md D-117) ─────────
+  Alpine.data('publishPage', () => ({
+    ...H,
+    s: null,
+    branches: [],
+    branch: '',
+    versions: [],
+    log: [],
+    conflicts: [],
+    message: '',
+    note: '',
+    pushAfter: false,
+    busy: false,
+    error: '',
+    notice: '',
+    async init() {
+      if (!(await this.mountFragment('publish', 'page'))) return;
+      await this.load();
+    },
+    async load(refresh = false) {
+      try {
+        const [s, b, v, l] = await Promise.all([
+          api('GET', '/admin/publish/status' + (refresh ? '?refresh=true' : '')),
+          api('GET', '/admin/publish/branches'),
+          api('GET', '/admin/publish/versions'),
+          api('GET', '/admin/publish/log'),
+        ]);
+        this.s = s;
+        this.branches = b.branches;
+        this.branch = b.current;
+        this.versions = v.versions;
+        this.log = l.commits;
+      } catch (e) {
+        this.error = e.message;
+      }
+    },
+    aheadBehind() {
+      const s = this.s;
+      if (!s || !s.remote) return 'No remote';
+      if (s.ahead == null) return 'Not checked yet. Use Check remote.';
+      if (!s.ahead && !s.behind) return 'In step with the remote';
+      return [s.ahead ? `${s.ahead} to push` : '', s.behind ? `${s.behind} to pull` : '']
+        .filter(Boolean)
+        .join(' · ');
+    },
+    kindLabel: (k) =>
+      ({
+        auto: 'automatic',
+        manual: 'committed by hand',
+        pull: 'pulled',
+        branch: 'branch switch',
+        restore: 'restore',
+        revert: 'revert',
+      })[k] || 'change',
+    /** Run one action: show the outcome, refresh the screen, and keep the server's reason when it fails. */
+    async run(fn) {
+      this.busy = true;
+      this.error = '';
+      this.notice = '';
+      try {
+        await fn();
+      } catch (e) {
+        this.error = e.message;
+      } finally {
+        this.busy = false;
+        await this.load();
+      }
+    },
+    commit() {
+      return this.run(async () => {
+        const r = await api('POST', '/admin/publish/commit', { message: this.message });
+        this.notice = r.clean
+          ? 'Nothing to commit: the site matches the last commit.'
+          : r.started
+            ? 'Tracking started. Later commits record what changes from here.'
+            : 'Committed.';
+        this.message = '';
+      });
+    },
+    publish() {
+      return this.run(async () => {
+        const r = await api('POST', '/admin/publish/publish', {
+          note: this.note,
+          push: this.pushAfter,
+        });
+        this.notice = `Published v${r.version}. Caches refreshed.` + (r.pushed ? ' Pushed.' : '');
+        if (r.pushError) this.error = `Published, but the push did not go through: ${r.pushError}`;
+        this.note = '';
+      });
+    },
+    push() {
+      return this.run(async () => {
+        await api('POST', '/admin/publish/push');
+        this.notice = 'Pushed.';
+      });
+    },
+    report(r) {
+      this.conflicts = r.conflicts || [];
+      if (r.status === 'conflict') {
+        this.error = 'Some pages were changed on both sides. Choose which version to keep below.';
+        return;
+      }
+      const bits = {
+        up_to_date: 'Already up to date.',
+        fast_forwarded: `Pulled ${r.applied} ${r.applied === 1 ? 'file' : 'files'}.`,
+        merged: `Merged ${r.applied} ${r.applied === 1 ? 'file' : 'files'} from the remote.`,
+      };
+      this.notice = bits[r.status] || 'Done.';
+      if (r.failed?.length) this.error = r.failed.map((f) => `${f.path}: ${f.reason}`).join(' · ');
+    },
+    pull(prefer) {
+      return this.run(async () =>
+        this.report(await api('POST', '/admin/publish/pull', prefer ? { prefer } : {})),
+      );
+    },
+    resolve(prefer) {
+      return this.pull(prefer);
+    },
+    sync() {
+      return this.run(async () => {
+        const r = await api('POST', '/admin/publish/sync', {});
+        this.report(r.pulled);
+        if (r.pushed) this.notice += ' Pushed.';
+      });
+    },
+    purge() {
+      return this.run(async () => {
+        await api('POST', '/admin/publish/purge-cache');
+        this.notice = 'Caches refreshed. Visitors will fetch fresh pages and files.';
+      });
+    },
+    switchTo(name) {
+      return this.run(async () => {
+        const r = await api('POST', '/admin/publish/branch', { name });
+        this.notice =
+          r.status === 'already_there'
+            ? `Already on ${name}.`
+            : `Switched to ${name}. ${r.applied} ${r.applied === 1 ? 'file' : 'files'} changed.`;
+        if (r.failed?.length)
+          this.error = r.failed.map((f) => `${f.path}: ${f.reason}`).join(' · ');
+      });
+    },
+    newBranch() {
+      const name = window.prompt('New branch name (it starts from where the site is now)');
+      if (!name?.trim()) return;
+      return this.run(async () => {
+        await api('POST', '/admin/publish/branch', { name: name.trim(), create: true });
+        this.notice = `Created and switched to ${name.trim()}.`;
+      });
+    },
+    restore(v) {
+      if (
+        !confirm(
+          `Put the site back as it was at v${v.version}? Anything not committed is committed first, and this is recorded as one change you can undo.`,
+        )
+      )
+        return;
+      return this.run(async () => {
+        const r = await api('POST', '/admin/publish/restore', { version: v.version });
+        this.notice = `Restored v${v.version} (${r.applied} ${r.applied === 1 ? 'file' : 'files'} changed).`;
+        if (r.failed?.length)
+          this.error = r.failed.map((f) => `${f.path}: ${f.reason}`).join(' · ');
+      });
     },
   }));
 

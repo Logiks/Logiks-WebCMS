@@ -101,7 +101,15 @@ describe('generate()', () => {
     );
     const google = createMediaGenerator(node.ctx, {
       fetch: fakeFetch([
-        { body: { predictions: [{ bytesBase64Encoded: TINY_PNG_B64, mimeType: 'image/png' }] } },
+        {
+          body: {
+            candidates: [
+              {
+                content: { parts: [{ inlineData: { mimeType: 'image/png', data: TINY_PNG_B64 } }] },
+              },
+            ],
+          },
+        },
       ]),
     });
     const g = await google.generate({ provider: 'google', prompt: 'a blue sphere' });
