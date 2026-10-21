@@ -1,7 +1,7 @@
         <div class="page-head d-flex justify-content-between align-items-end flex-wrap gap-2">
           <div><h1>Sitemap</h1><p>The list of addresses search engines read at /sitemap.xml. It is built from your site and content, and rebuilt whenever they change.</p></div>
           <div class="d-flex gap-2 flex-wrap">
-            <a class="btn btn-outline-secondary" :href="sum.publicUrl" target="_blank" rel="noopener" x-show="sum.enabled">Open sitemap.xml</a>
+            <a class="btn btn-outline-secondary" href="/sitemap.xml" target="_blank" rel="noopener" x-show="sum.enabled">Open sitemap.xml</a>
             <a class="btn btn-outline-secondary" href="/api/admin/sitemap/download">Download</a>
             <button class="btn btn-outline-secondary" x-show="can('sitemap.manage')" :disabled="busy" @click="rebuild()">Rebuild now</button>
           </div>

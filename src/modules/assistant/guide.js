@@ -153,7 +153,7 @@ const SCREENS = [
   [
     'requirements',
     'System',
-    'Requirements',
+    'Requirement',
     'requirements.read',
     'assistant',
     'documentation spec brief project',

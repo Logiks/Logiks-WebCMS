@@ -3,7 +3,7 @@ import cors from 'cors';
 import cookieParser from 'cookie-parser';
 import session from 'express-session';
 import { pinoHttp } from 'pino-http';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -147,9 +147,19 @@ export function createApp(ctx) {
   // A plugin's own admin/*.html, unlike the fixed loop above, can appear or disappear after boot (install/enable),
   // so it's served by a small dynamic middleware (src/modules/plugins/routes.js) instead of a fixed static mount.
   app.use(pluginAdminFragments(ctx));
+  // Cache buster: the shell's own assets and the SPA's fragment fetches carry ?v=<fingerprint of the admin files>, so a
+  // browser (or CDN/ALB) never pairs a new index.html with an old app.js. Computed once at boot: an update restarts the node.
+  const adminVersion = adminFingerprint(
+    path.join(ROOT, 'admin/static'),
+    path.join(ROOT, 'src/modules'),
+  );
+  const adminShell = fs
+    .readFileSync(path.join(ROOT, 'admin/static/index.html'), 'utf8')
+    .replace(/(["'])(\/admin\/static\/[^"'?]+)\1/g, `$1$2?v=${adminVersion}$1`)
+    .replace('<head>', `<head>\n  <meta name="admin-version" content="${adminVersion}">`);
   app.get(['/admin', '/admin/*splat'], (_req, res) => {
     res.setHeader('Cache-Control', 'no-cache');
-    res.sendFile(path.join(ROOT, 'admin/static/index.html'));
+    res.type('html').send(adminShell);
   });
 
   // Uploaded files and installed libraries (public, cookie-less, immutable)
@@ -272,3 +282,24 @@ export function createApp(ctx) {
 
 const page = (title, body) =>
   `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(title)}</title><style>body{font:16px/1.6 system-ui,sans-serif;max-width:36rem;margin:12vh auto;padding:0 1.25rem;color:#1b2b30}a{color:#2b59c3}</style>${body}</html>`;
+
+/** Short hash of every admin file's path, size and mtime (static dir + each module's admin/ fragments). */
+function adminFingerprint(/** @type {string} */ staticDir, /** @type {string} */ modulesDir) {
+  const h = createHash('sha1');
+  const walk = (/** @type {string} */ dir) => {
+    if (!fs.existsSync(dir)) return;
+    for (const e of fs
+      .readdirSync(dir, { withFileTypes: true })
+      .sort((a, b) => a.name.localeCompare(b.name))) {
+      const f = path.join(dir, e.name);
+      if (e.isDirectory()) walk(f);
+      else {
+        const st = fs.statSync(f);
+        h.update(`${f}:${st.size}:${st.mtimeMs}`);
+      }
+    }
+  };
+  walk(staticDir);
+  for (const m of fs.readdirSync(modulesDir)) walk(path.join(modulesDir, m, 'admin'));
+  return h.digest('hex').slice(0, 10);
+}

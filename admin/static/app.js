@@ -459,12 +459,14 @@ function joinPageBody({ markup, css, js }) {
 // (memoized per URL, same idiom as `loadEditor` below) from the owning module's own admin/ folder
 // and injected on that page's first visit.
 const fragmentCache = new Map();
+// Stamped into index.html by the server (src/app.js) so a new release fetches new fragments, not cached ones.
+const ADMIN_V = document.querySelector('meta[name="admin-version"]')?.content || '';
 function loadFragment(mod, file) {
   const key = `${mod}/${file}`;
   if (!fragmentCache.has(key))
     fragmentCache.set(
       key,
-      fetch(`/admin/modules/${mod}/${file}.html`).then((r) => {
+      fetch(`/admin/modules/${mod}/${file}.html${ADMIN_V ? `?v=${ADMIN_V}` : ''}`).then((r) => {
         if (!r.ok) throw new Error(`${r.status}`);
         return r.text();
       }),
@@ -1173,7 +1175,7 @@ document.addEventListener('alpine:init', () => {
           items: [
             {
               id: 'requirements',
-              label: 'Requirements',
+              label: 'Requirement',
               module: 'assistant',
               perm: 'requirements.read',
             },
