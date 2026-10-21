@@ -30,6 +30,7 @@ import visual from './visual/module.js';
 import testing from './testing/module.js';
 import api from './api/module.js';
 import features from './features/module.js';
+import help from './help/module.js';
 
 /**
  * Every built-in module, in the order their admin routers mount (the registry moves a module after what it
@@ -68,4 +69,5 @@ export const builtinModules = [
   assistant,
   api,
   features,
+  help,
 ];

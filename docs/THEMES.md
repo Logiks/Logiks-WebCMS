@@ -1,3 +1,10 @@
+---
+section: coding
+title: 'Reference: writing a theme'
+summary: 'Theme layout, theme.json, what templates receive, the sandbox rules and helpers.'
+order: 110
+---
+
 # Writing a theme
 
 A theme is the **frame** around the site: layouts, common components (header, footer), styles, scripts, wording and images. It does not

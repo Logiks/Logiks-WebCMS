@@ -1,3 +1,10 @@
+---
+section: coding
+title: 'Reference: modules, pages and the API'
+summary: 'How modules, public API operations, API keys, page bindings and plugins fit together.'
+order: 120
+---
+
 # Modules, pages and the API
 
 How the platform is put together, and how to add to it. Decisions: D-067 (modules), D-068 (API), D-069 (page binding).

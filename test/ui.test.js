@@ -107,8 +107,9 @@ test('signing in shows the shell with navigation for an administrator', async ()
       'Security',
       'Operations',
       'Automation',
+      'Help',
     ],
-    'top level: one link and eleven groups (Applications only appears once a plugin has a screen)',
+    'top level: one link and twelve groups (Applications only appears once a plugin has a screen)',
   );
   assert.deepEqual(subLinks(), [], 'groups start collapsed on Overview');
 

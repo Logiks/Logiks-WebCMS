@@ -92,6 +92,12 @@ The platform is Page → Module → Service (`docs/MODULES.md`): every feature i
 `npm run cli -- module:new <id>` scaffolds one. The site reads its data through a versioned public API, `/api/v1`
 (`{ data, meta }`, OpenAPI at `/api/v1/openapi.json`); apps use the same API with an API key from System → API.
 
+## Help and documentation
+
+The admin has a **Help** menu group: Administration, Support, a Coding guide (Liquid, pages, components, getting data from the database into the UI), AI prompting and a prompt library.
+It is **driven by the markdown in `docs/`**: a file whose front matter says `section: administration | support | coding | ai | prompts` appears there (D-115).
+Guides live in `docs/help/<section>/`, prompts in `docs/help/ai/prompts/` (`[[Blank]]` marks a fill-in). Files without `section` are developer notes. `test/help.test.js` fails on a broken link or a malformed file.
+
 ## CLI
 
 `npm run cli -- help` lists everything: `config:list|get|set|reset`, `user:create|reset-password|unlock`, `module:new|list`, `migrate*`.

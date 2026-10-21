@@ -1217,6 +1217,19 @@ document.addEventListener('alpine:init', () => {
             { id: 'testing', label: 'AI Testing', module: 'testing', perm: 'testing.read' },
           ],
         },
+        {
+          // Guides and the prompt library, read from the markdown in docs/ (D-115). Open to everyone who can sign in.
+          id: 'help',
+          label: 'Help',
+          icon: 'bi-life-preserver',
+          items: [
+            { id: 'help/administration', label: 'Administration', perm: 'admin.access' },
+            { id: 'help/support', label: 'Support', perm: 'admin.access' },
+            { id: 'help/coding', label: 'Coding guide', perm: 'admin.access' },
+            { id: 'help/ai', label: 'AI prompting', perm: 'admin.access' },
+            { id: 'help/prompts', label: 'Prompt library', perm: 'admin.access' },
+          ],
+        },
       ];
       if (!this.user) return [];
       // `module` ties an entry to an optional module; while that is switched off the entry is not offered.
@@ -1409,7 +1422,11 @@ document.addEventListener('alpine:init', () => {
     syncRoute() {
       const [first, second] = this.parts;
       const key =
-        (first || 'overview') === 'content' ? `content/${second || ''}` : first || 'overview';
+        (first || 'overview') === 'content'
+          ? `content/${second || ''}`
+          : first === 'help'
+            ? `help/${second || 'administration'}`
+            : first || 'overview';
       // Plugin Editor is reached from a button in Plugin Manager, not its own nav link (still permission-gated),
       // the same "reachable but not listed" shape 'account' already has.
       const ok =
@@ -6363,6 +6380,171 @@ document.addEventListener('alpine:init', () => {
     },
   }));
 
+  // ───────── Help (docs/DECISIONS.md D-115): guides and the prompt library, read from docs/*.md ─────────
+  // Addresses: #/help/<section> (the section's guides), #/help/<section>/<guide>, #/help/prompts (the library).
+  Alpine.data('helpPage', () => ({
+    ...H,
+    index: null, // { sections: [{id,title,summary,docs:[]}], promptCount }
+    section: 'administration',
+    slug: '',
+    doc: null,
+    prompts: null, // { categories, items }
+    category: '',
+    promptQuery: '',
+    openPrompt: '',
+    blanks: {}, // prompt id → { blank text → what was typed }
+    copied: '',
+    q: '',
+    results: null,
+    loaded: false,
+    error: '',
+    _onHash: null,
+    async init() {
+      if (!(await this.mountFragment('help', 'page'))) return;
+      this._onHash = () => this.show();
+      window.addEventListener('hashchange', this._onHash);
+      try {
+        this.index = await api('GET', '/admin/help');
+      } catch (e) {
+        this.error = e.message;
+      }
+      this.loaded = true;
+      await this.show();
+    },
+    destroy() {
+      if (this._onHash) window.removeEventListener('hashchange', this._onHash);
+    },
+    /** Reads the address and loads what it names. */
+    async show() {
+      const [r, section, slug] = location.hash.replace(/^#\/?/, '').split('/');
+      if (r !== 'help') return;
+      this.section = section || 'administration';
+      this.slug = slug || '';
+      this.results = null;
+      this.error = '';
+      try {
+        if (this.section === 'prompts') {
+          this.doc = null;
+          this.prompts ||= await api('GET', '/admin/help/prompts');
+        } else if (this.slug) {
+          this.doc = (
+            await api(
+              'GET',
+              `/admin/help/${encodeURIComponent(this.section)}/${encodeURIComponent(this.slug)}`,
+            )
+          ).doc;
+          this.$nextTick(() => {
+            this.addCopyButtons();
+            this.$el.querySelector('.help-doc')?.scrollIntoView?.({ block: 'start' });
+          });
+        } else this.doc = null;
+      } catch (e) {
+        this.doc = null;
+        this.error = e.message;
+      }
+    },
+    get current() {
+      return this.index?.sections.find((s) => s.id === this.section) || null;
+    },
+    get sectionTitle() {
+      return this.section === 'prompts' ? 'Prompt library' : (this.current?.title ?? 'Help');
+    },
+    go(section, slug) {
+      location.hash = `#/help/${section}${slug ? `/${slug}` : ''}`;
+    },
+    async search() {
+      const q = this.q.trim();
+      if (q.length < 2) {
+        this.results = null;
+        return;
+      }
+      try {
+        this.results = (await api('GET', `/admin/help/search?q=${encodeURIComponent(q)}`)).items;
+      } catch (e) {
+        this.error = e.message;
+      }
+    },
+    clearSearch() {
+      this.q = '';
+      this.results = null;
+    },
+    scrollToHeading(id) {
+      this.$el.querySelector(`.help-doc [id="${id}"]`)?.scrollIntoView?.({ behavior: 'smooth' });
+    },
+    /** A copy button on each code sample in a guide. */
+    addCopyButtons() {
+      for (const pre of this.$el.querySelectorAll('.help-doc pre')) {
+        if (pre.querySelector('.help-copy')) continue;
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'help-copy btn btn-sm btn-outline-secondary';
+        b.textContent = 'Copy';
+        b.addEventListener('click', async () => {
+          await this.copyText(pre.querySelector('code')?.textContent ?? '');
+          b.textContent = 'Copied';
+          setTimeout(() => (b.textContent = 'Copy'), 1500);
+        });
+        pre.appendChild(b);
+      }
+    },
+    async copyText(text) {
+      try {
+        await window.navigator.clipboard.writeText(text);
+        return true;
+      } catch {
+        // Plain-HTTP staging has no clipboard API: fall back to selecting a hidden field.
+        const t = document.createElement('textarea');
+        t.value = text;
+        t.setAttribute('readonly', '');
+        t.style.position = 'fixed';
+        t.style.opacity = '0';
+        document.body.appendChild(t);
+        t.select();
+        let ok = false;
+        try {
+          ok = document.execCommand('copy');
+        } catch {
+          /* nothing else to try */
+        }
+        t.remove();
+        return ok;
+      }
+    },
+    // ── prompt library ──
+    get promptItems() {
+      if (!this.prompts) return [];
+      const words = this.promptQuery.toLowerCase().split(/\s+/).filter(Boolean);
+      return this.prompts.items.filter((p) => {
+        if (this.category && p.category !== this.category) return false;
+        const hay =
+          `${p.title} ${p.summary} ${p.category} ${p.tags.join(' ')} ${p.body}`.toLowerCase();
+        return words.every((w) => hay.includes(w));
+      });
+    },
+    toggle(p) {
+      this.openPrompt = this.openPrompt === p.id ? '' : p.id;
+    },
+    typed(p, blank) {
+      return this.blanks[p.id]?.[blank] ?? '';
+    },
+    setBlank(p, blank, v) {
+      this.blanks = { ...this.blanks, [p.id]: { ...this.blanks[p.id], [blank]: v } };
+    },
+    /** The prompt with the blanks the person has filled in; the rest stay as [[Blank]] so they are easy to spot. */
+    filled(p) {
+      return p.body.replace(
+        /\[\[([^\][\n]{1,60})\]\]/g,
+        (m, b) => this.blanks[p.id]?.[b.trim()] || m,
+      );
+    },
+    async copyPrompt(p) {
+      if (await this.copyText(this.filled(p))) {
+        this.copied = p.id;
+        setTimeout(() => (this.copied = ''), 1800);
+      } else this.error = 'Could not copy. Select the text and copy it by hand.';
+    },
+  }));
+
   // ───────── System → Prompts (docs/DECISIONS.md D-082) ─────────
   Alpine.data('promptsPage', () => ({
     ...H,
@@ -7760,6 +7942,11 @@ document.addEventListener('alpine:init', () => {
     'theme-editor': 'theme files layout template css edit code header footer',
     menus: 'navigation menu header footer links nav',
     requirements: 'requirements documentation readme spec brief project',
+    'help/administration': 'help guide manual documentation admin how to',
+    'help/support': 'help support troubleshooting problem fix faq error report',
+    'help/coding': 'help coding guide liquid component page developer query database data template',
+    'help/ai': 'help ai prompting guide assistant prompt tips',
+    'help/prompts': 'help prompt library prompts copy ai templates',
     testing:
       'testing tests check qa layout responsive mobile spelling accessibility links broken report audit seo',
     prompts: 'prompts project type system prompt instructions ai assistant master quality',

@@ -48,6 +48,7 @@
     "ioredis": "^6.0.0",
     "knex": "^3.3.0",
     "liquidjs": "^10.29.0",
+    "marked": "^14.1.4",
     "monaco-editor": "^0.57.0",
     "mysql2": "^3.24.4",
     "nodemailer": "^10.0.10",

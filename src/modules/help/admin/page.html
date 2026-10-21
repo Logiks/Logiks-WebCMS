@@ -1,0 +1,123 @@
+<div class="page-head d-flex justify-content-between align-items-end flex-wrap gap-2">
+  <div>
+    <h1 x-text="sectionTitle"></h1>
+    <p x-show="section !== 'prompts'" x-text="current ? current.summary : ''"></p>
+    <p x-show="section === 'prompts'">Ready-made prompts for the assistant and the AI builders. Fill in the blanks, then copy.</p>
+  </div>
+  <form class="help-search" role="search" @submit.prevent="search()">
+    <label class="visually-hidden" for="help-q">Search the guides and prompts</label>
+    <div class="input-group">
+      <input id="help-q" type="search" class="form-control" placeholder="Search the guides and prompts" x-model="q" @input.debounce.300ms="search()" autocomplete="off" />
+      <button type="submit" class="btn btn-outline-secondary">Search</button>
+    </div>
+  </form>
+</div>
+<div class="alert alert-danger" role="alert" x-show="error" x-text="error"></div>
+
+<!-- Search results -->
+<section class="panel p-3 mb-3" x-show="results !== null" aria-labelledby="help-res-h">
+  <div class="d-flex justify-content-between align-items-center">
+    <h2 class="h6 mb-2" id="help-res-h">Search results</h2>
+    <button type="button" class="btn btn-sm btn-link" @click="clearSearch()">Clear search</button>
+  </div>
+  <p class="muted" x-show="results !== null && !results.length">Nothing matches that. Try fewer or different words.</p>
+  <div class="list-group list-group-flush">
+    <template x-for="r in (results || [])" :key="r.section + '/' + r.slug">
+      <a class="list-group-item list-group-item-action" :href="r.section === 'prompts' ? '#/help/prompts' : '#/help/' + r.section + '/' + r.slug" @click="clearSearch()">
+        <div class="fw-semibold" x-text="r.title"></div>
+        <div class="small muted" x-text="r.snippet || r.summary"></div>
+      </a>
+    </template>
+  </div>
+</section>
+
+<div x-show="results === null">
+  <!-- A section with no guide chosen: the list of its guides -->
+  <div class="row g-3" x-show="section !== 'prompts' && !slug && current">
+    <template x-for="d in (current ? current.docs : [])" :key="d.slug">
+      <div class="col-md-6 col-xl-4">
+        <a class="panel p-3 h-100 d-block text-decoration-none help-card" :href="'#/help/' + section + '/' + d.slug">
+          <h2 class="h6" x-text="d.title"></h2>
+          <p class="small muted mb-0" x-text="d.summary"></p>
+        </a>
+      </div>
+    </template>
+    <p class="muted" x-show="loaded && current && !current.docs.length">There are no guides in this section yet.</p>
+  </div>
+
+  <!-- One guide -->
+  <div class="row g-3" x-show="section !== 'prompts' && slug && doc">
+    <div class="col-lg-3">
+      <nav class="panel p-2 help-nav" aria-label="Guides in this section">
+        <div class="list-group list-group-flush">
+          <template x-for="d in (current ? current.docs : [])" :key="d.slug">
+            <a class="list-group-item list-group-item-action" :class="{active: d.slug === slug}" :href="'#/help/' + section + '/' + d.slug" x-text="d.title"></a>
+          </template>
+        </div>
+      </nav>
+    </div>
+    <div class="col-lg-9">
+      <article class="panel p-3 p-md-4">
+        <nav class="help-toc small mb-3" x-show="doc && doc.toc.length > 2" aria-label="On this page">
+          <strong>On this page</strong>
+          <ul class="list-unstyled mb-0 mt-1">
+            <template x-for="t in (doc ? doc.toc : [])" :key="t.id">
+              <li :class="t.level === 3 ? 'ps-3' : ''"><a href="#" @click.prevent="scrollToHeading(t.id)" x-text="t.text"></a></li>
+            </template>
+          </ul>
+        </nav>
+        <!-- The server renders the guide from markdown with raw HTML turned into text, so this is the only html that reaches the page. -->
+        <div class="help-doc" x-html="doc ? doc.html : ''"></div>
+        <div class="d-flex justify-content-between gap-2 mt-4 pt-3 border-top flex-wrap">
+          <a class="btn btn-outline-secondary" x-show="doc && doc.previous" :href="doc && doc.previous ? '#/help/' + section + '/' + doc.previous.slug : '#'">← <span x-text="doc && doc.previous ? doc.previous.title : ''"></span></a>
+          <span x-show="!(doc && doc.previous)"></span>
+          <a class="btn btn-outline-secondary" x-show="doc && doc.next" :href="doc && doc.next ? '#/help/' + section + '/' + doc.next.slug : '#'"><span x-text="doc && doc.next ? doc.next.title : ''"></span> →</a>
+        </div>
+      </article>
+    </div>
+  </div>
+
+  <!-- The prompt library -->
+  <div x-show="section === 'prompts'">
+    <div class="d-flex gap-2 flex-wrap mb-3 align-items-center">
+      <label class="visually-hidden" for="help-pq">Filter prompts</label>
+      <input id="help-pq" type="search" class="form-control w-auto help-pq" placeholder="Filter prompts" x-model="promptQuery" autocomplete="off" />
+      <div class="btn-group flex-wrap" role="group" aria-label="Category">
+        <button type="button" class="btn btn-sm" :class="category === '' ? 'btn-primary' : 'btn-outline-secondary'" @click="category = ''">All</button>
+        <template x-for="c in (prompts ? prompts.categories : [])" :key="c">
+          <button type="button" class="btn btn-sm" :class="category === c ? 'btn-primary' : 'btn-outline-secondary'" @click="category = c" x-text="c"></button>
+        </template>
+      </div>
+    </div>
+    <p class="muted" x-show="prompts && !promptItems.length">No prompt matches. Clear the filter to see them all.</p>
+    <div class="d-grid gap-2">
+      <template x-for="p in promptItems" :key="p.id">
+        <section class="panel help-prompt">
+          <button type="button" class="help-prompt-head w-100 text-start p-3" :aria-expanded="openPrompt === p.id" @click="toggle(p)">
+            <span class="d-flex justify-content-between gap-2 flex-wrap">
+              <span class="fw-semibold" x-text="p.title"></span>
+              <span class="badge text-bg-light" x-text="p.category"></span>
+            </span>
+            <span class="d-block small muted" x-text="p.summary"></span>
+          </button>
+          <div class="px-3 pb-3" x-show="openPrompt === p.id">
+            <p class="small muted" x-show="p.where">Use it in: <span x-text="p.where"></span></p>
+            <div class="row g-2 mb-2" x-show="p.blanks.length">
+              <template x-for="b in p.blanks" :key="b">
+                <div class="col-md-6">
+                  <label class="form-label small mb-1" x-text="b"></label>
+                  <input type="text" class="form-control form-control-sm" :value="typed(p, b)" @input="setBlank(p, b, $event.target.value)" :placeholder="b" />
+                </div>
+              </template>
+            </div>
+            <pre class="help-prompt-body" x-text="filled(p)"></pre>
+            <div class="d-flex gap-2 align-items-center">
+              <button type="button" class="btn btn-primary btn-sm" @click="copyPrompt(p)">Copy prompt</button>
+              <span class="small text-success" role="status" x-show="copied === p.id">Copied</span>
+            </div>
+          </div>
+        </section>
+      </template>
+    </div>
+  </div>
+</div>

@@ -997,3 +997,84 @@ a {
   font-weight: 600;
   box-shadow: 0 1px 2px rgba(242, 106, 27, 0.35);
 }
+
+/* Help (D-115): guides rendered from docs/*.md and the prompt library. */
+.help-search {
+  min-width: min(100%, 22rem);
+}
+.help-nav {
+  position: sticky;
+  top: 1rem;
+}
+.help-card:hover {
+  border-color: var(--bs-primary);
+}
+.help-pq {
+  min-width: 14rem;
+}
+.help-prompt-head {
+  background: none;
+  border: 0;
+  color: inherit;
+}
+.help-prompt-head:focus-visible {
+  outline: 2px solid var(--bs-primary);
+  outline-offset: -2px;
+}
+.help-prompt-body {
+  white-space: pre-wrap;
+  background: var(--soft, #f4f7f6);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0.75rem;
+  max-height: 24rem;
+  overflow: auto;
+  font-size: 0.875rem;
+}
+.help-doc {
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+}
+.help-doc h1 {
+  font-size: 1.6rem;
+  margin-bottom: 1rem;
+}
+.help-doc h2 {
+  font-size: 1.25rem;
+  margin: 2rem 0 0.75rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--line);
+}
+.help-doc h3 {
+  font-size: 1.05rem;
+  margin: 1.5rem 0 0.5rem;
+}
+.help-doc pre {
+  position: relative;
+  background: var(--soft, #f4f7f6);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0.75rem;
+  overflow: auto;
+  font-size: 0.85rem;
+}
+.help-doc pre .help-copy {
+  position: absolute;
+  top: 0.4rem;
+  right: 0.4rem;
+}
+.help-doc :not(pre) > code {
+  background: var(--soft, #f4f7f6);
+  border-radius: 4px;
+  padding: 0.1em 0.35em;
+  font-size: 0.875em;
+}
+.help-doc blockquote {
+  border-left: 3px solid var(--line);
+  margin: 1rem 0;
+  padding: 0.25rem 1rem;
+  color: var(--muted);
+}
+.help-doc table {
+  font-size: 0.9rem;
+}

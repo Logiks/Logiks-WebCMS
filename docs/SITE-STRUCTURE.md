@@ -1,3 +1,10 @@
+---
+section: coding
+title: 'Reference: site structure'
+summary: 'Pages, routing, components, data, languages, caching and security of the site tree, in full.'
+order: 100
+---
+
 # Site structure: one system
 
 Everything a visitor sees is a **page** of the site, shown in a **theme**. Content (posts, content pages, custom types) is **data**

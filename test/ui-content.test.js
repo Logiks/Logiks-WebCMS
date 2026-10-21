@@ -503,7 +503,7 @@ test('an author sees only what they can use, and can only save drafts', async ()
     const tops = a.$$('.nav-link-x:not(.nav-sub-link)').map((x) => x.textContent.trim());
     assert.deepEqual(
       tops,
-      ['Overview', 'Content', 'Media Manager'],
+      ['Overview', 'Content', 'Media Manager', 'Help'],
       'no themes, settings, security or operations',
     );
     a.click(a.button('Content'));

@@ -327,11 +327,12 @@ test('Menu: opening a screen by its address expands its group; groups with nothi
     'audit.read moved to Logs, so Security has no visible items',
   );
   b.click(b.button('Logs'));
-  await until(() => b.$$('.nav-sub-link').some(b.visible));
+  await until(() => b.$$('.nav-sub').some(b.visible));
   assert.deepEqual(
     b
-      .$$('.nav-sub-link')
+      .$$('.nav-sub')
       .filter(b.visible)
+      .flatMap((g) => [...g.querySelectorAll('.nav-sub-link')])
       .map((a) => a.textContent.trim()),
     ['Audit log'],
   );
