@@ -394,3 +394,39 @@ test('Components: New component asks what it should be, the AI writes and saves 
 
   await node.ctx.siteFiles.remove('components/ui_ai_banner.html', null);
 });
+
+test('Pages: New page asks what it should say, the AI writes and saves it, and the editor opens on it', async () => {
+  const { createAiPageWriter } = await import('../src/modules/site/page-ai.js');
+  node.ctx.aiPageWriter = createAiPageWriter(node.ctx, {
+    client: {
+      messages: {
+        async create() {
+          return {
+            content: [
+              {
+                type: 'text',
+                text: 'ADDRESS: ui-ai-page\n\n---\ntitle: AI page\n---\n<h1>Hi</h1>',
+              },
+            ],
+          };
+        },
+      },
+    },
+  });
+  b.go('#/pages');
+  const list = () => b.$('section[x-data="pagesList"]');
+  await wait(() => list() && /blog/.test(list().textContent));
+  await wait(
+    () => list().querySelector('#gen-panel') && !b.visible(list().querySelector('#gen-panel')),
+  );
+  b.click([...list().querySelectorAll('button')].find((x) => x.textContent === 'New page'));
+  await wait(() => b.visible(list().querySelector('#gen-panel')));
+  setValue(list().querySelector('#gen-desc'), 'A page that greets visitors');
+  const go = () =>
+    [...list().querySelectorAll('button')].find((x) => /Write it with AI/.test(x.textContent));
+  await wait(() => !go().disabled);
+  b.click(go());
+  await wait(() => node.ctx.siteFiles.list().some((f) => f.path === 'pages/ui-ai-page.html'));
+  await wait(() => /ui-ai-page/.test(b.win.location.hash));
+  await node.ctx.siteFiles.remove('pages/ui-ai-page.html', null);
+});

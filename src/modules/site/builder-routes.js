@@ -329,6 +329,37 @@ export default function siteBuilderRoutes(ctx) {
     },
   );
 
+  // Webmaster → Site pages → New page → "Write it for me": same shape as components above.
+  const generatePageBody = z.object({
+    description: z
+      .string()
+      .trim()
+      .min(
+        10,
+        'Describe the page in a sentence or two, for example "An about page for a family bakery".',
+      )
+      .max(3000),
+    address: z.string().trim().max(190).optional(),
+  });
+  r.post(
+    '/site/pages/generate',
+    requirePermission('pages.write'),
+    docs({ body: generatePageBody }),
+    async (req, res) => {
+      const b = parse(generatePageBody, req.body);
+      const out = await ctx.aiPageWriter.generate(b);
+      await siteFiles.put(out.path, out.content, actorOf(req));
+      await ctx.audit.log({
+        actor: actorOf(req),
+        action: 'site.page_ai_generated',
+        entity: 'page',
+        entityId: out.address,
+        meta: { path: out.path },
+      });
+      res.status(201).json({ address: out.address, path: out.path });
+    },
+  );
+
   // Browse HyperUI / PrebuiltUI and add components from their open-source repositories (D-106).
   const catalog = createCatalog({ cache: ctx.cache });
   const asInvalid = (e) => {

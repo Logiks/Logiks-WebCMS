@@ -3,7 +3,19 @@
                 <div class="d-flex gap-2 flex-wrap">
                   <a class="btn btn-outline-secondary" href="/api/admin/services/export">Export .zip</a>
                   <label class="btn btn-outline-secondary mb-0" x-show="can('services.write')" :class="{disabled: importBusy}">Import .zip<input type="file" hidden accept=".zip,application/zip" @change="importZip($event.target.files[0]); $event.target.value = ''"></label>
-                  <a class="btn btn-primary" x-show="can('services.write')" href="#/services/new">New service</a>
+                  <button class="btn btn-primary" type="button" x-show="can('services.write')" @click="gen.open = !gen.open" :aria-expanded="gen.open">New service</button>
+                </div>
+              </div>
+              <div class="panel p-3 p-lg-4 mb-3" id="gen-panel" x-show="gen.open && can('services.write')">
+                <h2 class="h6">New service</h2>
+                <p class="muted small mb-3">Describe the data you need and the AI sets up a Service over the right content type (sort, page size, fields). It is saved <strong>switched off</strong> and opens in the editor, so nothing is served until you turn it on. SQL and script Services are never written by the AI.</p>
+                <div class="alert alert-danger" role="alert" style="white-space:pre-wrap" x-show="gen.error" x-text="gen.error"></div>
+                <label class="form-label" for="gen-desc">What should the Service return?</label>
+                <textarea id="gen-desc" class="form-control" rows="4" maxlength="3000" placeholder="The latest 6 blog posts, newest first, with just the title and excerpt." x-model="gen.description" :disabled="gen.busy"></textarea>
+                <div class="d-flex gap-2 flex-wrap align-items-center mt-3">
+                  <button class="btn btn-primary" type="button" :disabled="gen.busy || gen.description.trim().length < 10" @click="generate()"><i class="bi bi-stars me-1"></i><span x-text="gen.busy ? 'Writing the Service…' : 'Write it with AI'"></span></button>
+                  <a class="btn btn-outline-secondary" href="#/services/new" :class="{disabled: gen.busy}">Start blank instead</a>
+                  <span class="muted small" x-show="gen.busy">This can take up to a minute.</span>
                 </div>
               </div>
               <div class="alert alert-danger" role="alert" style="white-space:pre-wrap" x-show="importError" x-text="importError"></div>

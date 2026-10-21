@@ -59,6 +59,33 @@ export default function servicesRoutes(ctx) {
     },
   );
 
+  // "New service" → "Write it for me": a query-mode Service over one content type, saved switched OFF.
+  const generateBody = z.object({
+    description: z
+      .string()
+      .trim()
+      .min(10, 'Say what the Service should return, for example "the latest 6 blog posts".')
+      .max(2000),
+  });
+  r.post(
+    '/services/generate',
+    requirePermission('services.write'),
+    docs({ body: generateBody }),
+    async (req, res) => {
+      const b = parse(generateBody, req.body);
+      const defn = await ctx.aiServiceWriter.generate(b);
+      const saved = await services.create(defn, actorOf(req));
+      await ctx.audit.log({
+        actor: actorOf(req),
+        action: 'services.ai_generated',
+        entity: 'service',
+        entityId: defn.slug,
+        meta: { mode: defn.mode },
+      });
+      res.status(201).json({ slug: saved.slug ?? defn.slug });
+    },
+  );
+
   r.get('/services/:slug', requirePermission('services.read'), async (req, res) => {
     res.json(await services.get(req.params.slug));
   });

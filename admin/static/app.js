@@ -3263,9 +3263,29 @@ document.addEventListener('alpine:init', () => {
     ...fileImportExport('pages'),
     pages: [],
     loaded: false,
+    // "New …" with AI: describe it, the AI writes and saves it, then the editor opens on it.
+    gen: { open: false, description: '', address: '', busy: false, error: '' },
     async init() {
       if (!(await this.mountFragment('site', 'pages-list'))) return;
       await this.load();
+    },
+    async generate() {
+      const g = this.gen;
+      g.busy = true;
+      g.error = '';
+      try {
+        const r = await api('POST', '/admin/site/pages/generate', {
+          description: g.description.trim(),
+          address: g.address.trim() || undefined,
+        });
+        toast(`Page "${r.address}" created. Review it and save any changes.`);
+        Object.assign(g, { open: false, description: '', address: '' });
+        location.hash = `#/pages/${encodeURIComponent(r.address)}`;
+      } catch (e) {
+        g.error = e.message;
+      } finally {
+        g.busy = false;
+      }
     },
     async load() {
       this.pages = (await api('GET', '/admin/site/pages')).pages;
@@ -4102,11 +4122,30 @@ document.addEventListener('alpine:init', () => {
     ...H,
     services: [],
     loaded: false,
+    // "New …" with AI: describe it, the AI writes and saves it, then the editor opens on it.
+    gen: { open: false, description: '', busy: false, error: '' },
     importBusy: false,
     importError: '',
     async init() {
       if (!(await this.mountFragment('services', 'list'))) return;
       await this.load();
+    },
+    async generate() {
+      const g = this.gen;
+      g.busy = true;
+      g.error = '';
+      try {
+        const r = await api('POST', '/admin/services/generate', {
+          description: g.description.trim(),
+        });
+        toast(`Service "${r.slug}" created. Review it and save any changes.`);
+        Object.assign(g, { open: false, description: '' });
+        location.hash = `#/services/${encodeURIComponent(r.slug)}`;
+      } catch (e) {
+        g.error = e.message;
+      } finally {
+        g.busy = false;
+      }
     },
     async load() {
       this.services = (await api('GET', '/admin/services')).services;
@@ -4446,6 +4485,10 @@ document.addEventListener('alpine:init', () => {
     loaded: false,
     busy: false,
     error: '',
+    aiHint: '',
+    aiBusy: false,
+    aiError: '',
+    aiNote: '',
 
     async init() {
       if (!(await this.mountFragment('seo', 'edit'))) return;
@@ -4493,6 +4536,31 @@ document.addEventListener('alpine:init', () => {
     },
     removeMetaTag(i) {
       this.metaTags.splice(i, 1);
+    },
+
+    /** Fill the form with the AI's suggestion. Nothing is saved: the person reads it, changes it and saves. */
+    async suggest() {
+      this.aiBusy = true;
+      this.aiError = '';
+      this.aiNote = '';
+      try {
+        const r = await api('POST', '/admin/seo/suggest', {
+          pattern: this.pattern.trim(),
+          hint: this.aiHint.trim() || undefined,
+        });
+        this.title = r.title;
+        this.description = r.description;
+        this.type = r.type;
+        this.twitterCard = r.twitterCard;
+        if (r.ldJson.length) this.ldJsonText = JSON.stringify(r.ldJson, null, 2);
+        this.aiNote = `Filled in${r.ldJson.length ? ', with structured data' : ''}${
+          r.readPage ? ' from the page’s text' : ' from your description'
+        }. Read it, change what you like, then save the rule.`;
+      } catch (e) {
+        this.aiError = e.message;
+      } finally {
+        this.aiBusy = false;
+      }
     },
 
     buildBody() {

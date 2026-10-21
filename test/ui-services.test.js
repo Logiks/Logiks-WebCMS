@@ -194,3 +194,36 @@ test('the Raw SQL mode is hidden from a user without services.sql', async () => 
     b2.close();
   }
 });
+
+test('Services: New service asks what it should return, the AI sets it up switched off, and the editor opens on it', async () => {
+  const { createAiServiceWriter } = await import('../src/modules/services/ai.js');
+  node.ctx.aiServiceWriter = createAiServiceWriter(node.ctx, {
+    client: {
+      messages: {
+        async create() {
+          return {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify({ slug: 'ui-ai-posts', name: 'AI posts', type: 'post' }),
+              },
+            ],
+          };
+        },
+      },
+    },
+  });
+  b.go('#/services');
+  const list = () => b.$('section[x-data="servicesList"]');
+  await wait(() => list()?.querySelector('#gen-panel'));
+  await wait(() => !b.visible(list().querySelector('#gen-panel')));
+  b.click([...list().querySelectorAll('button')].find((x) => x.textContent === 'New service'));
+  await wait(() => b.visible(list().querySelector('#gen-panel')));
+  setValue(list().querySelector('#gen-desc'), 'The latest blog posts');
+  const go = () =>
+    [...list().querySelectorAll('button')].find((x) => /Write it with AI/.test(x.textContent));
+  await wait(() => !go().disabled);
+  b.click(go());
+  await wait(async () => (await node.ctx.services.list()).some((s) => s.slug === 'ui-ai-posts'));
+  await wait(() => /ui-ai-posts/.test(b.win.location.hash));
+});

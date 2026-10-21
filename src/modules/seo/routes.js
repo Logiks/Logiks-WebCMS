@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
+import { parse } from '../../core/http/errors.js';
 import { actorOf, requirePermission } from '../../core/http/middleware.js';
 import { docs } from '../../core/http/docs.js';
 
@@ -29,6 +30,20 @@ export default function seoRoutes(ctx) {
     docs({ body: seo.schemas.rule, response: z.object({ rule }), status: 201 }),
     async (req, res) => {
       res.status(201).json({ rule: await seo.create(req.body ?? {}, actorOf(req)) });
+    },
+  );
+
+  // Suggestions for the rule editor's form. Nothing is saved: the person reviews the fields and saves the rule.
+  const suggestBody = z.object({
+    pattern: z.string().trim().min(1).max(500),
+    hint: z.string().trim().max(1000).optional(),
+  });
+  r.post(
+    '/seo/suggest',
+    requirePermission('seo.write'),
+    docs({ body: suggestBody }),
+    async (req, res) => {
+      res.json(await ctx.aiSeoWriter.suggest(parse(suggestBody, req.body)));
     },
   );
 

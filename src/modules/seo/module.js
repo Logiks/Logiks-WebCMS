@@ -1,5 +1,6 @@
 import seoRoutes from './routes.js';
 import { createSeo } from './service.js';
+import { createAiSeoWriter } from './ai.js';
 
 export default {
   id: 'seo',
@@ -14,6 +15,7 @@ export default {
       cache: ctx.cache,
       audit: ctx.audit,
     });
+    ctx.aiSeoWriter = createAiSeoWriter(ctx);
   },
   routes: { admin: [seoRoutes] },
 };

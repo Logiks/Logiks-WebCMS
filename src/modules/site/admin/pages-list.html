@@ -4,7 +4,20 @@
                   <a class="btn btn-outline-secondary" href="/api/admin/site/pages/export">Export .zip</a>
                   <label class="btn btn-outline-secondary mb-0" x-show="can('pages.write')" :class="{disabled: importBusy}">Import .zip<input type="file" hidden accept=".zip,application/zip" @change="importZip($event.target.files[0]); $event.target.value = ''"></label>
                   <div class="d-inline-block" x-data="templatePicker('pages')"></div>
-                  <a class="btn btn-primary" x-show="can('pages.write')" href="#/pages/new">New page</a>
+                  <button class="btn btn-primary" type="button" x-show="can('pages.write')" @click="gen.open = !gen.open" :aria-expanded="gen.open">New page</button>
+                </div>
+              </div>
+              <div class="panel p-3 p-lg-4 mb-3" id="gen-panel" x-show="gen.open && can('pages.write')">
+                <h2 class="h6">New page</h2>
+                <p class="muted small mb-3">Describe the page and the AI writes it, using your existing components where they fit, saves it and opens it in the editor. Nothing is shared with visitors you have not already published to; check the result before you rely on it.</p>
+                <div class="alert alert-danger" role="alert" style="white-space:pre-wrap" x-show="gen.error" x-text="gen.error"></div>
+                <label class="form-label" for="gen-desc">What should the page say?</label>
+                <textarea id="gen-desc" class="form-control" rows="4" maxlength="3000" placeholder="An about page for a family bakery: our story, what we bake, and how to order." x-model="gen.description" :disabled="gen.busy"></textarea>
+                <div class="row g-2 mt-1"><div class="col-md-6"><label class="form-label" for="pg-gen-addr">Address (optional)</label><div class="input-group"><span class="input-group-text mono">/</span><input id="pg-gen-addr" class="form-control mono" maxlength="190" placeholder="about" x-model="gen.address" :disabled="gen.busy"></div></div></div>
+                <div class="d-flex gap-2 flex-wrap align-items-center mt-3">
+                  <button class="btn btn-primary" type="button" :disabled="gen.busy || gen.description.trim().length < 10" @click="generate()"><i class="bi bi-stars me-1"></i><span x-text="gen.busy ? 'Writing the page…' : 'Write it with AI'"></span></button>
+                  <a class="btn btn-outline-secondary" href="#/pages/new" :class="{disabled: gen.busy}">Start blank instead</a>
+                  <span class="muted small" x-show="gen.busy">This can take up to a minute.</span>
                 </div>
               </div>
               <div class="form-check mb-2" x-show="can('pages.write')"><input id="p-prune" class="form-check-input" type="checkbox" x-model="prune"><label class="form-check-label small" for="p-prune">Importing replaces the whole tree (deletes pages the zip doesn't have) instead of adding to it</label></div>

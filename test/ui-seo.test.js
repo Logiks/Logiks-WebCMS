@@ -76,3 +76,42 @@ test('the Page Manager SEO section round-trips seo_type and twitter_card', async
   assert.match(saved, /seo_type: article/);
   assert.match(saved, /twitter_card: summary_large_image/);
 });
+
+test('SEO rule editor: "Suggest with AI" fills the form from the page and saves nothing', async () => {
+  const { createAiSeoWriter } = await import('../src/modules/seo/ai.js');
+  node.ctx.aiSeoWriter = createAiSeoWriter(node.ctx, {
+    client: {
+      messages: {
+        async create() {
+          return {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify({
+                  title: 'AI title',
+                  description: 'An AI written description of the page.',
+                  type: 'article',
+                  twitterCard: 'summary',
+                  ldJson: [],
+                }),
+              },
+            ],
+          };
+        },
+      },
+    },
+  });
+  b.go('#/seo/new');
+  const ed = () => b.$('section[x-data^="seoRuleEditor"]');
+  await wait(() => ed()?.querySelector('#seo-pattern'));
+  setValue(ed().querySelector('#seo-pattern'), '/blog/*');
+  setValue(ed().querySelector('#seo-hint'), 'The bakery blog');
+  const btn = () =>
+    [...ed().querySelectorAll('button')].find((x) => /Suggest with AI/.test(x.textContent));
+  await wait(() => !btn().disabled);
+  b.click(btn());
+  await wait(() => ed().querySelector('#seo-title').value === 'AI title');
+  assert.equal(ed().querySelector('#seo-desc').value, 'An AI written description of the page.');
+  assert.equal(ed().querySelector('#seo-type').value, 'article');
+  assert.equal((await node.ctx.seo.list()).length, 0, 'nothing is saved until the person saves');
+});

@@ -1,9 +1,8 @@
-import Anthropic from '@anthropic-ai/sdk';
 import { HttpError } from '../../core/http/errors.js';
+import { createAiOnce } from '../../core/ai-once.js';
 import { slugName } from './snippet.js';
 
 const NAME = /^[a-z][a-z0-9_]*$/;
-const MODEL_DEFAULT = 'claude-sonnet-5-5';
 const MAX_TRIES = 2;
 
 const SYSTEM = `You write ONE reusable component for a website builder (Webmaster → Components). Reply with the finished component file and nothing else.
@@ -38,6 +37,7 @@ Rules of the platform:
  */
 export function createAiComponentWriter(ctx, { client: injectedClient } = {}) {
   const { settings, siteFiles } = ctx;
+  const ai = createAiOnce(ctx, { client: injectedClient });
 
   /** Splits the reply into the name the model chose and the file. Tolerates a code fence round the file. */
   function split(raw) {
@@ -72,19 +72,7 @@ export function createAiComponentWriter(ctx, { client: injectedClient } = {}) {
      * @returns {Promise<{ name: string, path: string, content: string }>} a file that has passed validation
      */
     async generate({ description, name }) {
-      const { anthropic_api_key, model } = settings.ns('ai');
-      if (!injectedClient && !anthropic_api_key)
-        throw new HttpError(
-          422,
-          'ai_not_configured',
-          'Set an Anthropic API key under Settings → AI first.',
-        );
-      const client = injectedClient ?? new Anthropic({ apiKey: anthropic_api_key });
-      // The site's project type and quality standard (D-082); the writer works without them if they can't be read.
-      const guidance = await ctx.prompts
-        ?.compose()
-        .then((c) => c.text)
-        .catch(() => '');
+      const guidance = await ai.guidance();
       const system = guidance ? `${SYSTEM}\n\n${guidance}` : SYSTEM;
       const existing = siteFiles
         .list('components/')
@@ -102,22 +90,7 @@ export function createAiComponentWriter(ctx, { client: injectedClient } = {}) {
 
       let lastProblem = '';
       for (let attempt = 0; attempt < MAX_TRIES; attempt++) {
-        let raw;
-        try {
-          const res = await client.messages.create({
-            model: model || MODEL_DEFAULT,
-            max_tokens: 16000,
-            system,
-            messages,
-          });
-          raw = res.content?.find((b) => b.type === 'text')?.text ?? '';
-        } catch (e) {
-          throw new HttpError(
-            502,
-            'ai_failed',
-            `The AI request failed: ${e.message}. Check the API key under Settings → AI and try again.`,
-          );
-        }
+        const raw = await ai.ask({ system, messages });
         const parsed = split(raw);
         const chosen = freeName(name ? slugName(name) : parsed.name);
         const path = `components/${chosen}.html`;

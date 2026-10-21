@@ -1,5 +1,6 @@
 import servicesRoutes from './routes.js';
 import { createServices } from './service.js';
+import { createAiServiceWriter } from './ai.js';
 
 export default {
   id: 'services',
@@ -26,6 +27,7 @@ export default {
   // RUN time, well after every one of these is finished.
   create(ctx) {
     ctx.services = createServices(ctx);
+    ctx.aiServiceWriter = createAiServiceWriter(ctx);
   },
   routes: { admin: [servicesRoutes] },
 };

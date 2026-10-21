@@ -19,6 +19,12 @@
                   <div class="panel p-3 mb-3">
                     <div class="panel-h">Overrides</div>
                     <div class="help small muted mb-2">Leave a field blank to use what the page would otherwise show.</div>
+                    <div class="d-flex gap-2 flex-wrap align-items-end mb-3" x-show="can('seo.write')">
+                      <div class="flex-grow-1" style="min-width:16rem"><label class="form-label small mb-0" for="seo-hint">What is this page about? (optional)</label><input id="seo-hint" class="form-control form-control-sm" maxlength="1000" placeholder="Read from the page itself when the address is exact" x-model="aiHint" :disabled="aiBusy"></div>
+                      <button type="button" class="btn btn-outline-secondary btn-sm" :disabled="aiBusy || !pattern.trim()" @click="suggest()"><i class="bi bi-stars me-1"></i><span x-text="aiBusy ? 'Writing…' : 'Suggest with AI'"></span></button>
+                    </div>
+                    <div class="alert alert-danger py-2 small" role="alert" x-show="aiError" x-text="aiError"></div>
+                    <div class="alert alert-secondary py-2 small" role="status" x-show="aiNote" x-text="aiNote"></div>
                     <label class="form-label" for="seo-title">Title</label>
                     <input id="seo-title" class="form-control" maxlength="200" x-model="title">
                     <label class="form-label mt-2" for="seo-desc">Description</label>
