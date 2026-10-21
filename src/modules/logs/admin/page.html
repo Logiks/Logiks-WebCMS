@@ -1,0 +1,23 @@
+        <div class="page-head"><h1>Log manager</h1><p>Every log the platform keeps. Set how long each is kept (older entries are removed every night), or prune one now. Pruning can't be undone.</p></div>
+        <div class="alert alert-danger" role="alert" x-show="error" x-text="error"></div>
+        <div class="panel mb-3">
+          <table class="table mb-0"><thead><tr><th>Log</th><th class="text-end">Entries</th><th>Oldest</th><th style="width:11rem">Keep for (days)</th><th class="text-end">Prune now</th></tr></thead><tbody>
+            <template x-for="l in logs" :key="l.id"><tr :class="{'table-active': open === l.id}">
+              <td><button type="button" class="btn btn-link p-0 fw-semibold text-start" @click="view(l.id)" x-text="l.label"></button><div class="muted small" x-text="l.help"></div></td>
+              <td class="text-end" x-text="n(l.count)"></td>
+              <td class="muted small text-nowrap" x-text="l.oldest ? ago(l.oldest) : '–'"></td>
+              <td><div class="input-group input-group-sm"><input type="number" min="0" class="form-control" :aria-label="'Keep ' + l.label + ' for (days)'" x-model.number="edit[l.id]" @keydown.enter="save(l)"><button type="button" class="btn btn-outline-secondary" @click="save(l)">Save</button></div><div class="muted small" x-show="l.canKeepForever">0 = forever</div></td>
+              <td class="text-end text-nowrap">
+                <div class="input-group input-group-sm justify-content-end"><span class="input-group-text">older than</span><input type="number" min="0" class="form-control" style="max-width:4.5rem" :aria-label="'Prune ' + l.label + ' older than (days)'" x-model.number="age[l.id]"><span class="input-group-text">days</span><button type="button" class="btn btn-outline-danger" :data-prune="l.id" @click="prune(l)">Prune</button></div>
+              </td>
+            </tr></template>
+          </tbody></table>
+        </div>
+        <div class="panel" x-show="open">
+          <div class="panel-h"><span x-text="(current ? current.label : '') + ' — newest first'"></span><button type="button" class="btn-close" aria-label="Close" @click="open = ''"></button></div>
+          <div class="empty" x-show="!rows.length">Nothing logged yet.</div>
+          <table class="table table-sm mb-0" x-show="rows.length"><tbody>
+            <template x-for="r in rows" :key="r.id"><tr><td class="muted text-nowrap small" x-text="ago(r.at)" :title="new Date(r.at).toLocaleString()"></td><td class="mono small" x-text="r.title"></td><td class="muted small" x-text="r.detail"></td></tr></template>
+          </tbody></table>
+          <div class="p-2" x-show="more"><button type="button" class="btn btn-outline-secondary btn-sm" @click="loadMore()">Load more</button></div>
+        </div>
