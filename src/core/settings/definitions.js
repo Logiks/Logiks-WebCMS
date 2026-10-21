@@ -421,11 +421,11 @@ export function defineCoreSettings(registry) {
     },
   });
 
-  // Which optional modules an administrator has switched off (System → Modules, D-070). Hidden: it is edited through
+  // Which optional modules an administrator has switched off (Settings → Modules, D-070). Hidden: it is edited through
   // that screen, which also checks what depends on what, not as a free-text list.
   registry.define('modules', {
     title: 'Modules',
-    description: 'Optional modules that are switched off. Change these under System → Modules.',
+    description: 'Optional modules that are switched off. Change these under Settings → Modules.',
     order: 41,
     fields: {
       disabled: { type: 'list', label: 'Switched-off modules', default: [], hidden: true },
@@ -521,8 +521,12 @@ export function defineCoreSettings(registry) {
         default: 'https://github.com/Logiks/Logiks-WebCMS.git',
         max: 300,
         validate: (v) =>
-          /^[^\s-]\S*$/.test(v) ? null : 'Enter a git URL, like https://github.com/owner/repo.git.',
-        help: 'Servers pull new code from this repository. Git needs read access already (an SSH key or stored credential); do not put passwords in the URL.',
+          !/^[^\s-]\S*$/.test(v)
+            ? 'Enter a git URL, like https://github.com/owner/repo.git.'
+            : /^[a-z][a-z0-9+.-]*:\/\/[^/@\s]*:[^/@\s]*@/i.test(v)
+              ? 'Remove the password from the URL. Give the server an SSH key or a git credential helper instead; settings and logs would otherwise store it in plain text.'
+              : null,
+        help: 'Servers pull new code from this repository. Git needs read access already (an SSH key or stored credential); passwords in the URL are refused.',
       },
       source_branch: {
         type: 'string',

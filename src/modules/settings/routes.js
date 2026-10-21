@@ -15,7 +15,12 @@ export default function settingsRoutes(ctx) {
   const { settings } = ctx;
 
   r.get('/settings', requirePermission('settings.read'), (_req, res) => {
-    res.json({ configVersion: settings.version, namespaces: settings.describeAll() });
+    // A namespace whose fields are all hidden (modules, featureset) is written by its own screen, not edited here: listing it
+    // would show an empty card. Its values still load, save and propagate exactly as before.
+    res.json({
+      configVersion: settings.version,
+      namespaces: settings.describeAll().filter((n) => n.fields.length > 0),
+    });
   });
 
   r.get('/settings/history', requirePermission('settings.read'), async (req, res) => {

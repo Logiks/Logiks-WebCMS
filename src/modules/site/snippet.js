@@ -66,7 +66,18 @@ const TAILWIND_INPUT = `@import "tailwindcss/theme.css" layer(theme);
 @plugin "@tailwindcss/typography";`;
 
 /** @param {string} html */
-const candidates = (html) => [...new Set(html.match(/[^\s"'`<>=]+/g) ?? [])];
+const candidates = (html) => [...new Set(decodeEntities(html).match(/[^\s"'`<>=]+/g) ?? [])];
+
+/** The markup is serialised HTML, so a class like `[&::-webkit-slider-thumb]:size-7` arrives as `[&amp;::-webkit-…]`.
+ * Tailwind has to see the class the browser will see, or it cannot recognise the variant and writes no CSS for it. */
+function decodeEntities(html) {
+  return html
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#0*39;|&apos;/g, "'")
+    .replace(/&amp;/g, '&');
+}
 
 /**
  * Tailwind 4 wraps its output in cascade layers and themes on `:root`. Both are wrong for a component: unlayered rules
@@ -120,11 +131,107 @@ function compatibilityNotes(html) {
     notes.push(
       'It relies on a JavaScript plugin (Flowbite, Preline, …). Add that script to the theme for it to react.',
     );
+  const scripts = [...html.matchAll(/<script\b[^>]*\ssrc=["'](https?:\/\/[^"']+)["']/gi)].map(
+    (m) => m[1],
+  );
+  if (scripts.length)
+    notes.push(
+      `It loads ${[...new Set(scripts.map((u) => hostOf(u)))].join(', ')} as a script from the internet and runs code of its own. The site's security policy only runs its own scripts, so this is copied onto this site when you add it (it needs Settings → Libraries → scripts on), and the preview shows its layout only.`,
+    );
+  else if (/<script\b(?![^>]*application\/json)/i.test(html))
+    notes.push(
+      'It runs a script of its own; the preview shows its layout only, without running it.',
+    );
   if (/<img\b[^>]*\bsrc=["']\//i.test(html))
     notes.push(
       'It points at images on the library’s own site paths; replace them with your media.',
     );
   return notes;
+}
+
+const hostOf = (/** @type {string} */ u) => {
+  try {
+    return new URL(u).host;
+  } catch {
+    return u;
+  }
+};
+
+/** A neutral grey picture, as a data: address — the one kind of image the site's policy always allows. */
+export const PLACEHOLDER_IMAGE = `data:image/svg+xml,${encodeURIComponent(
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 400" preserveAspectRatio="xMidYMid slice"><rect width="640" height="400" fill="#e5e9ee"/><circle cx="470" cy="130" r="34" fill="#c9d1da"/><path d="M0 400V300l150-120 120 100 90-70 280 150v40z" fill="#c9d1da"/></svg>',
+)}`;
+
+/**
+ * Pictures from another website can't load here (the site's policy only allows its own images and data: ones), so a
+ * component that shows them would have empty holes. They become a neutral placeholder the person swaps for their own
+ * media — and the note says how many and from where, instead of leaving the gap unexplained.
+ * @param {string} markup
+ * @returns {{markup: string, notes: string[]}}
+ */
+export function replaceExternalImages(markup) {
+  const hosts = new Set();
+  let n = 0;
+  const swap = (/** @type {string} */ url) => {
+    hosts.add(hostOf(url));
+    n += 1;
+    return PLACEHOLDER_IMAGE;
+  };
+  let out = markup.replace(
+    /(<img\b[^>]*?\ssrc=)(["'])(https?:\/\/[^"']+)\2/gi,
+    (_m, pre, q, url) => `${pre}${q}${swap(url)}${q}`,
+  );
+  // a srcset of other-site pictures would still be requested and blocked
+  out = out.replace(/(<img\b[^>]*?)\ssrcset=(["'])[^"']*https?:\/\/[^"']*\2/gi, '$1');
+  out = out.replace(
+    /(style=["'][^"']*?)url\((['"&#;a-z0-9]*?)(https?:\/\/[^)'"]+)\2?\)/gi,
+    (_m, pre, _q, url) => `${pre}url(${swap(url)})`,
+  );
+  const notes = n
+    ? [
+        `${n} picture${n === 1 ? '' : 's'} from ${[...hosts].join(', ')} ${n === 1 ? 'was' : 'were'} replaced with a grey placeholder: the site only loads its own images. Swap in your own from the media library.`,
+      ]
+    : [];
+  return { markup: out, notes };
+}
+
+/**
+ * Copy the scripts a component loads from the internet onto this site (the Libraries module's mirror), and point the
+ * component at the copies. Only what the caller is allowed to copy is copied; the rest stays as it was, with a note.
+ * @param {string} content a converted component
+ * @param {{mirror?: (url: string) => Promise<{url: string, note?: string}>}} o `mirror` absent = the caller may not copy files
+ * @returns {Promise<{content: string, notes: string[]}>}
+ */
+export async function localizeScripts(content, { mirror } = {}) {
+  const re = /(<script\b[^>]*?\ssrc=)(["'])(https?:\/\/[^"']+)\2/gi;
+  const urls = [...new Set([...content.matchAll(re)].map((m) => m[3]))];
+  if (!urls.length) return { content, notes: [] };
+  const notes = [];
+  /** @type {Map<string, string>} */
+  const local = new Map();
+  for (const url of urls) {
+    if (!mirror) {
+      notes.push(
+        `${hostOf(url)} could not be copied onto this site (copying needs the "libraries.manage" permission), so its script will be blocked until someone with that permission adds it under System → Libraries → Files from a CDN.`,
+      );
+      continue;
+    }
+    try {
+      const r = await mirror(url);
+      local.set(url, r.url);
+      if (r.note) notes.push(`${url.split('/').pop()}: ${r.note}`);
+    } catch (e) {
+      notes.push(
+        `${url} could not be copied onto this site (${e.message}); its script will be blocked.`,
+      );
+    }
+  }
+  return {
+    content: content.replace(re, (m, pre, q, url) =>
+      local.has(url) ? `${pre}${q}${local.get(url)}${q}` : m,
+    ),
+    notes,
+  };
 }
 
 /**
@@ -150,9 +257,10 @@ export async function convertSnippet(input) {
       'Give the component a name made of letters, numbers and underscores.',
     );
 
-  const markup = extractMarkup(raw);
-  if (!markup)
+  const extracted = extractMarkup(raw);
+  if (!extracted)
     throw new SiteFormatError('Nothing was left of the snippet after removing page wrappers.');
+  const { markup, notes: imageNotes } = replaceExternalImages(extracted);
   const css = (await compileTailwind(markup)).trim();
 
   const meta = {
@@ -179,7 +287,7 @@ export async function convertSnippet(input) {
     name,
     path: `components/${name}.html`,
     content,
-    notes: [...compatibilityNotes(markup)],
+    notes: [...imageNotes, ...compatibilityNotes(markup)],
     utilities: css.length > 0,
   };
 }

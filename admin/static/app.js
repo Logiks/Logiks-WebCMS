@@ -196,18 +196,41 @@ const H = {
    * Core modules never need this (they use pre-registered Alpine.data() components), so mountFragment above is
    * left untouched. */
   async mountPluginFragment(slug) {
+    let html;
     try {
-      this.$el.innerHTML = await loadFragment('plugin-' + slug, 'index');
+      html = await loadFragment('plugin-' + slug, 'index');
     } catch {
       this.$el.innerHTML =
         '<div class="alert alert-danger">Could not load this plugin’s admin screen.</div>';
       return false;
     }
-    // Two passes, not one: a script registering `Alpine.data(...)` must run BEFORE initTree() walks markup that
-    // uses it via x-data, regardless of which order the plugin author wrote them in the fragment's HTML.
+    // The page's CSP only runs scripts served from this site, so a plugin ships its code as `<script src="…">`.
+    // Those load BEFORE the markup goes in: Alpine binds `x-data="…"` the moment it appears, so its
+    // `Alpine.data(...)` must already exist. (Once per page; a changed script needs a reload.)
+    const probe = document.createElement('template');
+    probe.innerHTML = html;
+    await Promise.all(
+      [...probe.content.querySelectorAll('script[src]')].map(
+        (el) =>
+          new Promise((done) => {
+            const src = el.getAttribute('src');
+            if ([...document.scripts].some((s) => s.getAttribute('src') === src)) return done();
+            const s = document.createElement('script');
+            s.src = src;
+            s.onload = s.onerror = () => done();
+            document.head.append(s);
+          }),
+      ),
+    );
+    this.$el.innerHTML = html;
+    // Inline scripts (only where the CSP allows them) run before Alpine walks the markup that uses them.
     const children = [...this.$el.children];
     for (const child of children) {
       if (child.tagName !== 'SCRIPT') continue;
+      if (child.getAttribute('src')) {
+        child.remove(); // already loaded above
+        continue;
+      }
       const s = document.createElement('script');
       for (const a of child.attributes) s.setAttribute(a.name, a.value);
       s.textContent = child.textContent;
@@ -956,7 +979,7 @@ document.addEventListener('alpine:init', () => {
     },
     contentTypes: [],
     pluginNav: [],
-    // Optional modules an administrator switched off (System → Modules): their menu entries are hidden.
+    // Optional modules an administrator switched off (Settings → Modules): their menu entries are hidden.
     disabledModules: [],
     path: 'overview',
     picker: { open: false, items: [], busy: false, error: '', q: '', resolve: null },
@@ -1149,7 +1172,6 @@ document.addEventListener('alpine:init', () => {
             { id: 'libraries', label: 'Libraries', perm: 'libraries.read' },
             { id: 'dbms', label: 'Database', module: 'dbms', perm: 'dbms.read' },
             { id: 'api', label: 'API', perm: 'api.read' },
-            { id: 'modules', label: 'Modules', perm: 'cluster.read' },
           ],
         },
         {
@@ -1163,6 +1185,7 @@ document.addEventListener('alpine:init', () => {
             // Plugin Editor is reached from a button inside Plugin Manager itself (not its own nav entry) — its
             // route stays reachable via syncRoute()'s special-case, the same way 'account' is.
             { id: 'plugins', label: 'Plugin Manager', perm: 'plugins.read' },
+            { id: 'modules', label: 'Modules', perm: 'cluster.read' },
           ],
         },
         {
@@ -3342,8 +3365,13 @@ document.addEventListener('alpine:init', () => {
       liquidHints.apis = [
         ...new Set(this.components.flatMap((c) => (c.meta?.api ?? []).map((a) => a.name))),
       ];
-      if (this.isNew) this.originalContent = this.content();
-      else await this.load();
+      if (this.isNew) {
+        this.originalContent = this.content();
+        // chosen in the Templates panel on the Pages list (one use only: a reload starts blank)
+        const picked = window.__pageTemplate;
+        window.__pageTemplate = null;
+        if (picked) this.applyTemplate(picked);
+      } else await this.load();
       this.loaded = true;
       this.$watch(
         () =>
@@ -3626,6 +3654,20 @@ document.addEventListener('alpine:init', () => {
       if (id === 'preview') this.runPreview();
     },
 
+    /** Fill this new page from a template: its address, title, description and code (Code tab, with its style). */
+    applyTemplate(t) {
+      const parts = splitPageBody(t.body.trim());
+      this.pageName = t.name;
+      this.front.title = t.front.title || '';
+      this.front.description = t.front.description || '';
+      this.code = parts.markup;
+      if (parts.css) this.css = parts.css;
+      if (parts.js) this.js = parts.js;
+      this.mode = 'code';
+      this.tab = 'code';
+      toast('Template applied. Change anything you like, then Save.');
+    },
+
     importFile(file) {
       if (!file) return;
       const reader = new FileReader();
@@ -3699,6 +3741,8 @@ document.addEventListener('alpine:init', () => {
     snipBusy: false,
     snipError: '',
     snipNotes: [],
+    // "New component": describe it, the AI writes and saves it, then it opens in the editor.
+    gen: { open: false, description: '', name: '', busy: false, error: '' },
     // "Library": browse HyperUI / PrebuiltUI from their open-source repositories, preview, and add several at once.
     lib: {
       open: false,
@@ -3710,6 +3754,7 @@ document.addEventListener('alpine:init', () => {
       busy: false,
       error: '',
       overwrite: false,
+      notes: [], // what to know about the components just added (pictures swapped, scripts copied…)
       preview: { title: '', html: '', notes: [], busy: false, error: '' },
     },
     async init() {
@@ -3780,6 +3825,7 @@ document.addEventListener('alpine:init', () => {
       const l = this.lib;
       l.busy = true;
       l.error = '';
+      l.notes = [];
       try {
         const r = await api('POST', '/admin/site/components/catalog/import', {
           source: l.source,
@@ -3790,6 +3836,7 @@ document.addEventListener('alpine:init', () => {
           `${r.saved.length} added${r.skipped.length ? `, ${r.skipped.length} already there` : ''}${r.errors.length ? `, ${r.errors.length} failed` : ''}.`,
         );
         if (r.errors.length) l.error = r.errors.map((e) => e.message).join('\n');
+        l.notes = r.notes || [];
         l.picked = l.picked.filter((p) => r.errors.some((e) => e.path === p));
         await this.load();
       } catch (e) {
@@ -3819,6 +3866,24 @@ document.addEventListener('alpine:init', () => {
         this.snipError = e.message;
       } finally {
         this.snipBusy = false;
+      }
+    },
+    async generate() {
+      const g = this.gen;
+      g.busy = true;
+      g.error = '';
+      try {
+        const r = await api('POST', '/admin/site/components/generate', {
+          description: g.description.trim(),
+          name: g.name.trim() || undefined,
+        });
+        toast(`Component "${r.name}" created. Review it and save any changes.`);
+        Object.assign(g, { open: false, description: '', name: '' });
+        location.hash = `#/components/${encodeURIComponent(r.name)}`;
+      } catch (e) {
+        g.error = e.message;
+      } finally {
+        g.busy = false;
       }
     },
     async load() {
@@ -4594,7 +4659,7 @@ document.addEventListener('alpine:init', () => {
     },
   }));
 
-  // ───────── System → Modules (docs/DECISIONS.md D-067): what the platform is made of ─────────
+  // ───────── Settings → Modules (docs/DECISIONS.md D-067): what the platform is made of ─────────
   Alpine.data('modulesPage', () => ({
     ...H,
     modules: [],
@@ -5294,7 +5359,7 @@ document.addEventListener('alpine:init', () => {
         this.$nextTick(() => document.getElementById('chat-input')?.focus());
       };
       window.addEventListener('assistant-ask', (e) => takePrefill(e.detail));
-      window.addEventListener('assistant-focus', (e) => this.pin(e.detail));
+      window.addEventListener('assistant-focus', (e) => this.pin(e.detail, true));
       if (window.__assistantPrefill) takePrefill(window.__assistantPrefill);
       try {
         await this.loadSessions();
@@ -5311,7 +5376,7 @@ document.addEventListener('alpine:init', () => {
       }
       this.loaded = true;
       // A screen asked for a pin before this panel was on the page.
-      if (window.__assistantFocus) await this.pin(window.__assistantFocus);
+      if (window.__assistantFocus) await this.pin(window.__assistantFocus, true);
     },
     async loadSessions() {
       this.sessions = (await api('GET', '/admin/assistant/sessions')).sessions;
@@ -5513,11 +5578,20 @@ document.addEventListener('alpine:init', () => {
         href: k?.href || '#/',
       };
     },
-    /** Pin this chat to a page, component or plugin (starting a chat if there is none yet). */
-    async pin(path) {
+    /**
+     * Pin this chat to a page, component or plugin (starting a chat if there is none yet).
+     * `fresh` is an "Ask the assistant" button: an earlier conversation about something else would colour the answer,
+     * so it opens a new chat unless this one is empty or already about the same thing.
+     */
+    async pin(path, fresh = false) {
       window.__assistantFocus = null;
       this.error = '';
       try {
+        if (fresh && path && this.session && this.items.length && this.focus !== path) {
+          const { session } = await api('POST', '/admin/assistant/sessions');
+          await this.loadSessions();
+          await this.open(session.id);
+        }
         if (!this.session) {
           const { session } = await api('POST', '/admin/assistant/sessions');
           this.session = session;
@@ -6352,6 +6426,138 @@ document.addEventListener('alpine:init', () => {
   }));
 
   // ───────── Webmaster → AI Page Designer (docs/DECISIONS.md D-065) ─────────
+  // ───────── startup templates: one picker for Site pages and the AI Page Designer ─────────
+  // The button and the panel are one fragment (site/template-picker.html), mounted into whichever screen asks for it.
+  // `mode` decides what "Use this template" does: 'designer' starts a Page Designer session with the template staged as
+  // its draft; 'pages' opens the page editor on a new page filled from it.
+  const PAGE_ADDRESS = /^pages\/[a-z0-9][a-z0-9/_-]*\.html$/i;
+  Alpine.data('templatePicker', (mode) => ({
+    mode,
+    templates: [],
+    open: false,
+    cat: 'All',
+    tpl: null, // the template shown in the preview
+    detail: null, // …and its page source (front matter + body)
+    html: '',
+    busy: false, // drawing the preview
+    previewError: '',
+    path: '',
+    error: '',
+    starting: false,
+    drawn: new Map(), // template id → { detail, html }: switching back to one is instant
+    async init() {
+      try {
+        this.$el.innerHTML = await loadFragment('site', 'template-picker');
+      } catch {
+        return; // no button: "a brand-new page" still works without templates
+      }
+      for (const child of [...this.$el.children]) Alpine.initTree(child);
+      try {
+        this.templates = (await api('GET', '/admin/site/page-templates')).templates;
+      } catch {
+        /* needs pages.write; without it the button stays hidden */
+      }
+    },
+    get categories() {
+      return ['All', ...new Set(this.templates.map((t) => t.category))];
+    },
+    get shown() {
+      return this.cat === 'All'
+        ? this.templates
+        : this.templates.filter((t) => t.category === this.cat);
+    },
+    get url() {
+      const p = this.path
+        .trim()
+        .replace(/^pages\//, '')
+        .replace(/\.html$/, '');
+      return '/' + (p === 'index' ? '' : p);
+    },
+    openPanel() {
+      this.open = true;
+      this.error = '';
+      if (!this.tpl && this.templates.length) this.pick(this.templates[0]);
+    },
+    async pick(t) {
+      this.tpl = t;
+      this.path = `pages/${t.id}.html`;
+      this.error = '';
+      this.previewError = '';
+      const have = this.drawn.get(t.id);
+      if (have) {
+        this.detail = have.detail;
+        this.html = have.html;
+        return;
+      }
+      this.html = '';
+      this.detail = null;
+      this.busy = true;
+      try {
+        const detail = (await api('GET', `/admin/site/page-templates/${t.id}`)).template;
+        const front = Object.entries(detail.front)
+          .filter(([, v]) => v)
+          .map(([k, v]) => `${k}: "${String(v).replace(/"/g, "'")}"`);
+        const content = (front.length ? `---\n${front.join('\n')}\n---\n` : '') + detail.body;
+        const out = await api('POST', '/admin/site/preview', {
+          mode: 'page',
+          path: `pages/${t.id}.html`,
+          content,
+          url: '/' + t.id,
+        });
+        if (this.tpl?.id !== t.id) return; // the person already picked another one
+        this.detail = detail;
+        this.html = out.html || '';
+        this.drawn.set(t.id, { detail, html: this.html });
+      } catch (e) {
+        this.previewError =
+          'The preview could not be drawn (' + e.message + '). You can still use the template.';
+      } finally {
+        this.busy = false;
+      }
+    },
+    async use() {
+      const path = this.path.trim();
+      this.error = '';
+      if (!PAGE_ADDRESS.test(path)) {
+        this.error =
+          'Use an address like pages/about.html — letters, numbers, dashes and slashes, inside pages/ and ending in .html.';
+        return;
+      }
+      this.starting = true;
+      try {
+        if (this.mode === 'designer') {
+          const { session } = await api('POST', '/admin/page-designer/sessions', {
+            template: this.tpl.id,
+            path,
+          });
+          this.open = false;
+          location.hash = '#/pageDesigner/' + session.id;
+          return;
+        }
+        // Site pages: the editor opens on a NEW page filled from the template. Saving a new page would silently
+        // replace one already at that address, so a taken address is refused here, while it is easy to change.
+        if ((await api('GET', '/admin/site/pages')).pages.some((p) => p.path === path)) {
+          this.error = `A page already exists at ${path}. Choose a different address, or open that page and edit it.`;
+          return;
+        }
+        let detail = this.detail;
+        if (!detail)
+          detail = (await api('GET', `/admin/site/page-templates/${this.tpl.id}`)).template;
+        window.__pageTemplate = {
+          name: path.replace(/^pages\//, '').replace(/\.html$/, ''),
+          front: detail.front,
+          body: detail.body,
+        };
+        this.open = false;
+        location.hash = '#/pages/new';
+      } catch (e) {
+        this.error = e.message; // stays in the panel, beside the address that needs fixing
+      } finally {
+        this.starting = false;
+      }
+    },
+  }));
+
   Alpine.data('pageDesignerList', () => ({
     ...H,
     sessions: [],

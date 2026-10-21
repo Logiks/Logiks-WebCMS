@@ -23,7 +23,5 @@
  "components/features.html": "b0ae4f42956d8e0c4da97d38054067afeec4231805cadca64f584a2771b72e80",
  "components/stats.html": "b568b5ca59f452ea117484928d8048b658fc9ac5fc3b625e7251a3a67fb77f4f",
  "pages/about.html": "c1bbac1bfe77ed6d76a260d8fb44d4228bc59a12255aaa75224fc710d3b75835",
- "pages/services.html": "deff5678d306f3659bb25241905d4059ab374d58829c46a8847799c8eaeec93c",
- "components/ip-viewer/ip-detector.html": "fa876852087b9aa0e4dc5d728e25d1cd250e886e7e8c0bde0a8a421afb6dbc7c",
- "components/weather-demo/current.html": "91436474b418ed1fe9b09ec1e84257455dcf28e137f829d1d74a768076a470e9"
+ "pages/services.html": "deff5678d306f3659bb25241905d4059ab374d58829c46a8847799c8eaeec93c"
 }

@@ -58,7 +58,7 @@ export function createPlugins(ctx, { pluginsDir }) {
   let rows = [];
   let fingerprint = '';
   let timer = null;
-  /** @type {Map<string, {row: any, router: any, manifest: any, adminDir: string}>} */
+  /** @type {Map<string, {row: any, router: any, manifest: any, adminDir: string, components?: Map<string, string>}>} */
   const active = new Map();
   /** @type {Map<string, string>} slug -> why an enabled plugin isn't running */
   const loadErrors = new Map();
@@ -252,6 +252,7 @@ export function createPlugins(ctx, { pluginsDir }) {
   function drop(slug) {
     active.delete(slug);
     ctx.modules.unregister(`plugin-${slug}`);
+    siteChanged();
   }
 
   /**
@@ -426,8 +427,42 @@ export function createPlugins(ctx, { pluginsDir }) {
     }
     for (const perm of p.manifest.permissions ?? [])
       permissions.define(`Plugin: ${p.name}`, { [perm.key]: perm.label });
-    active.set(p.slug, { row: p, router, manifest: p.manifest, adminDir: path.join(dir, 'admin') });
+    const components = await readComponents(path.join(dir, 'components'));
+    active.set(p.slug, {
+      row: p,
+      router,
+      manifest: p.manifest,
+      adminDir: path.join(dir, 'admin'),
+      components,
+    });
+    await siteChanged();
   }
+
+  /**
+   * A plugin's front-end components, read from ITS OWN folder (components/**.html) — never copied into the site tree.
+   * Templates reach them as {% render "plugin/<slug>/<name>" %}. Read once when the plugin loads, so a render never
+   * touches the disk; edits to a component show after the plugin is disabled and enabled again.
+   * @returns {Promise<Map<string, string>>} name (no extension, '/' for sub-folders) → file text
+   */
+  async function readComponents(dir, rel = '', out = new Map()) {
+    let entries;
+    try {
+      entries = await fs.readdir(path.join(dir, rel), { withFileTypes: true });
+    } catch {
+      return out; // this plugin ships no components
+    }
+    for (const e of entries.sort((a, b) => a.name.localeCompare(b.name))) {
+      const r = rel ? `${rel}/${e.name}` : e.name;
+      if (e.isDirectory()) await readComponents(dir, r, out);
+      else if (e.isFile() && e.name.endsWith('.html') && /^[a-z0-9][a-z0-9/_-]*\.html$/i.test(r))
+        out.set(r.slice(0, -5), await fs.readFile(path.join(dir, r), 'utf8'));
+    }
+    return out;
+  }
+
+  /** Rendered pages are cached under the 'sitefiles' tag; a plugin appearing, changing or going away changes what
+   * `{% render "plugin/…" %}` shows, so those pages are stale (the same tag a site-tree edit uses). */
+  const siteChanged = () => ctx.cache?.invalidate?.(['sitefiles']).catch(() => {});
 
   /**
    * A plugin's schema changes (D-103). `migrate.js` may export
@@ -554,6 +589,21 @@ export function createPlugins(ctx, { pluginsDir }) {
           icon: p.manifest.menu.icon,
           perm: p.manifest.permissions?.[0]?.key ?? 'admin.access',
         }));
+    },
+    /** Every enabled plugin's components as the renderer sees them: 'plugin/<slug>/<name>' → file text. */
+    componentFiles() {
+      const out = new Map();
+      for (const [slug, a] of active)
+        for (const [name, text] of a.components ?? []) out.set(`plugin/${slug}/${name}`, text);
+      return out;
+    },
+    /** Changes whenever a plugin's components could have (the site's compiled bundle is keyed on it). */
+    componentsKey() {
+      return [...active]
+        .filter(([, a]) => a.components?.size)
+        .map(([slug, a]) => `${slug}@${a.row.version}:${a.row.updatedAt ?? 0}:${a.components.size}`)
+        .sort()
+        .join(',');
     },
     /** Currently enabled+loaded plugins, keyed by slug — the dynamic request dispatcher and admin-fragment
      * middleware read this directly (src/app.js), never mutating Express's own route stack at runtime. */

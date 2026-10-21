@@ -3,6 +3,7 @@
                 <div class="d-flex gap-2 flex-wrap">
                   <a class="btn btn-outline-secondary" href="/api/admin/site/pages/export">Export .zip</a>
                   <label class="btn btn-outline-secondary mb-0" x-show="can('pages.write')" :class="{disabled: importBusy}">Import .zip<input type="file" hidden accept=".zip,application/zip" @change="importZip($event.target.files[0]); $event.target.value = ''"></label>
+                  <div class="d-inline-block" x-data="templatePicker('pages')"></div>
                   <a class="btn btn-primary" x-show="can('pages.write')" href="#/pages/new">New page</a>
                 </div>
               </div>

@@ -45,7 +45,7 @@ export const moduleManifest = z
     description: z.string().max(300).default(''),
     /** 'plugin' for an installed plugin (registered at run time, D-070); the built-ins are 'core'. */
     kind: z.enum(['core', 'plugin']).default('core'),
-    /** true: an administrator may switch it off (System → Modules). Off hides its screens and API and stops its background work. */
+    /** true: an administrator may switch it off (Settings → Modules). Off hides its screens and API and stops its background work. */
     optional: z.boolean().default(false),
     /**
      * true: the module starts switched OFF and an administrator opts in (D-095). Only meaningful for an optional module.
@@ -53,7 +53,7 @@ export const moduleManifest = z
      * turns off an existing install and a new default-off module never turns on.
      */
     defaultOff: z.boolean().default(false),
-    /** The group System → Modules lists it under ("eCommerce", "Support"); modules without one are "Platform". */
+    /** The group Settings → Modules lists it under ("eCommerce", "Support"); modules without one are "Platform". */
     category: z.string().min(1).max(40).optional(),
     /** The feature (Settings → Features, D-100) this module belongs to. Switching the feature on switches it on. */
     feature: id.optional(),

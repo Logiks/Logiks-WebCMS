@@ -1,7 +1,14 @@
 import { test, before, after, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { makeNode, signedIn } from './helpers.js';
-import { compileTailwind, convertSnippet, snippetAddress } from '../src/modules/site/snippet.js';
+import {
+  PLACEHOLDER_IMAGE,
+  compileTailwind,
+  convertSnippet,
+  localizeScripts,
+  replaceExternalImages,
+  snippetAddress,
+} from '../src/modules/site/snippet.js';
 import {
   SiteFormatError,
   compileComponent,
@@ -385,5 +392,88 @@ describe('the library catalog (HyperUI, PrebuiltUI)', () => {
       password: 'Some-long-pass-12',
     });
     assert.equal((await reader.get('/api/admin/site/components/catalog')).status, 403);
+  });
+});
+
+describe('what used to leave a library component half-drawn', () => {
+  test('arbitrary variants (pseudo-elements like the range thumb, the details marker) produce CSS', async () => {
+    // A full page, as the libraries publish them: reading its <body> re-serialises `&` as `&amp;`
+    const out = await convertSnippet({
+      html: `<!doctype html><html><head><script src="/component.js" defer></script></head><body class="p-6">
+        <details class="group [&_summary::-webkit-details-marker]:hidden"><summary class="flex [&::-webkit-details-marker]:hidden">Q</summary>
+        <input type="range" class="[&::-webkit-slider-thumb]:size-7 [&::-webkit-slider-thumb]:rounded-full"></details></body></html>`,
+      name: 'faq_x',
+    });
+    // before: the classes reached Tailwind HTML-escaped (`[&amp;::…]`), so none of them produced a rule
+    const css = parseComponent(out.content).css;
+    assert.match(css, /::-webkit-slider-thumb/);
+    assert.match(css, /::-webkit-details-marker/);
+    assert.match(css, /summary::-webkit-details-marker/);
+  });
+
+  test('pictures from other websites become a placeholder, and the note says so', async () => {
+    const out = await convertSnippet({
+      html: `<section class="p-4"><img src="https://images.unsplash.com/photo-1?w=800" alt="Team" class="rounded">
+        <img src="https://cdn.example.com/b.jpg" srcset="https://cdn.example.com/b.jpg 2x" alt="B"></section>`,
+      name: 'team_pics',
+    });
+    assert.doesNotMatch(out.content, /unsplash|cdn\.example/);
+    assert.ok(out.content.includes(PLACEHOLDER_IMAGE));
+    assert.match(
+      out.notes.join(' '),
+      /2 pictures from images\.unsplash\.com, cdn\.example\.com were replaced/,
+    );
+    assert.match(out.content, /alt="Team"/, 'alt text is kept');
+    // the placeholder is a data: image, which the site's policy allows
+    assert.match(PLACEHOLDER_IMAGE, /^data:image\/svg\+xml,/);
+  });
+
+  test('a picture on the site itself, and plain text, are left alone', () => {
+    const html = '<img src="/media/1/a.jpg" alt="Mine"><p>Hello</p>';
+    const r = replaceExternalImages(html);
+    assert.equal(r.markup, html);
+    assert.deepEqual(r.notes, []);
+  });
+
+  test('a script loaded from a CDN is copied onto the site and the component points at the copy', async () => {
+    const html = `<div><canvas id="c"></canvas><script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.1/dist/chart.umd.min.js"></script><script>new Chart(c)</script></div>`;
+    const seen = [];
+    const r = await localizeScripts(html, {
+      mirror: async (url) => (seen.push(url), { url: '/lib/_cdn/abc123def456/chart.umd.min.js' }),
+    });
+    assert.deepEqual(seen, ['https://cdn.jsdelivr.net/npm/chart.js@4.5.1/dist/chart.umd.min.js']);
+    assert.match(r.content, /<script src="\/lib\/_cdn\/abc123def456\/chart\.umd\.min\.js">/);
+    assert.match(r.content, /<script>new Chart\(c\)<\/script>/, 'the inline script is untouched');
+    assert.deepEqual(r.notes, []);
+  });
+
+  test('without permission to copy files, or if the copy fails, the script stays and the note explains', async () => {
+    const html = '<script src="https://cdn.example.com/lib.js"></script>';
+    const none = await localizeScripts(html, {});
+    assert.equal(none.content, html);
+    assert.match(none.notes[0], /libraries\.manage/);
+    const failed = await localizeScripts(html, {
+      mirror: async () => {
+        throw new Error('That address is not reachable.');
+      },
+    });
+    assert.equal(failed.content, html);
+    assert.match(failed.notes[0], /not reachable/);
+    const off = await localizeScripts(html, {
+      mirror: async () => ({
+        url: '/lib/_cdn/x/lib.js',
+        note: 'It is a script, and library scripts are off (Settings → Libraries).',
+      }),
+    });
+    assert.match(off.notes[0], /library scripts are off/);
+  });
+
+  test('the note on a CDN script says where it is loaded from, and that previews show layout only', async () => {
+    const out = await convertSnippet({
+      html: '<div class="p-2"><script src="https://cdn.jsdelivr.net/npm/chart.js"></script></div>',
+      name: 'chart_x',
+    });
+    assert.match(out.notes.join(' '), /cdn\.jsdelivr\.net/);
+    assert.match(out.notes.join(' '), /preview shows its layout only/);
   });
 });

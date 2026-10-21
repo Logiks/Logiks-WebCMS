@@ -4,7 +4,10 @@ import { parse } from '../../core/http/errors.js';
 import { actorOf, requirePermission } from '../../core/http/middleware.js';
 import { docs } from '../../core/http/docs.js';
 
-const pageDesignerBody1 = z.object({ path: z.string().max(191).optional() });
+const pageDesignerBody1 = z.object({
+  path: z.string().max(191).optional(),
+  template: z.string().max(60).optional(), // start from a startup template (its page address goes in `path`)
+});
 
 const pageDesignerBody2 = z.object({ text: z.string().max(20_000) });
 
@@ -29,7 +32,10 @@ export default function pageDesignerRoutes(ctx) {
     docs({ body: pageDesignerBody1 }),
     async (req, res) => {
       const body = parse(pageDesignerBody1, req.body);
-      res.status(201).json({ session: await pageDesigner.create(body, actorOf(req)) });
+      const session = body.template
+        ? await pageDesigner.createFromTemplate(body.template, body.path, actorOf(req))
+        : await pageDesigner.create(body, actorOf(req));
+      res.status(201).json({ session });
     },
   );
 

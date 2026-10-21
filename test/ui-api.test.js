@@ -23,7 +23,7 @@ const setValue = (el, v) => {
 const button = (root, text) =>
   [...root.querySelectorAll('button')].find((x) => x.textContent.trim() === text);
 
-test('API and Modules are in the menu under System', async () => {
+test('API is under System and Modules under Settings in the menu', async () => {
   b.go('#/overview');
   const navText = () =>
     `${b.$$('nav a, aside a, nav button, aside button').map((a) => a.textContent.trim())}`;

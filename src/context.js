@@ -162,7 +162,7 @@ export async function createContext({ env, bus: busOverride, log: logOverride, a
   // on a write here — the same "queue it" principle as email (D-014) and webhook delivery (D-050).
   const analytics = createAnalyticsService({ db, dialect: dialect(db) });
   jobs.define('analytics.record', async (data) => {
-    if (ctx.modules && !ctx.modules.isOn('analytics', ctx)) return; // switched off at System → Modules (D-070)
+    if (ctx.modules && !ctx.modules.isOn('analytics', ctx)) return; // switched off at Settings → Modules (D-070)
     await analytics.record(data);
   });
   jobs.define('analytics.prune', async () => {
@@ -324,6 +324,8 @@ export async function createContext({ env, bus: busOverride, log: logOverride, a
   const ctx = {
     env,
     log,
+    // The checkout the running code came from (site/, the built-in themes, live here); plugins read it, e.g. File Manager.
+    appRoot: appRoot ?? fileURLToPath(new URL('..', import.meta.url)),
     // Bound to this file's own location, so a plugin's server.js can `ctx.require('express')` for an npm package
     // the app already depends on, regardless of where plugins/<slug>/ physically lives on disk (it needn't sit
     // inside the app's own node_modules resolution chain — a top-level `import 'express'` in a dynamically

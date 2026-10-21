@@ -180,7 +180,7 @@ const SCREENS = [
   ],
   ['dbms', 'System', 'Database', 'dbms.read', 'dbms', 'tables sql query browse rows'],
   ['api', 'System', 'API', 'api.read', null, 'api keys tokens public openapi swagger external'],
-  ['modules', 'System', 'Modules', 'cluster.read', null, 'features switch on off enable disable'],
+  ['modules', 'Settings', 'Modules', 'cluster.read', null, 'features switch on off enable disable'],
   ['settings', '', 'Settings', 'settings.read', null, 'configuration options preferences'],
   [
     'users',

@@ -81,7 +81,7 @@ test('Plugin Manager is under Settings (Plugin Editor is a button inside it, not
   assert.equal(b.button('Applications'), undefined, 'no plugin screens, no Applications group');
   b.click(b.button('Settings'));
   await wait(() => groupLinks().length);
-  assert.deepEqual(groupLinks(), ['All settings', 'Features', 'Plugin Manager']);
+  assert.deepEqual(groupLinks(), ['All settings', 'Features', 'Plugin Manager', 'Modules']);
 });
 
 test('installing and enabling a plugin from the admin adds its own nav item and screen; disabling removes it', async () => {

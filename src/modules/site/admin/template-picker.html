@@ -1,0 +1,58 @@
+<button class="btn btn-orange" type="button" x-show="templates.length" style="display:none" @click="openPanel()" :aria-expanded="open" aria-haspopup="dialog"><i class="bi bi-layout-text-window-reverse me-1"></i>Templates</button>
+<div class="modal-x" x-show="open" style="display:none" role="dialog" aria-modal="true" aria-labelledby="pd-tpl-title" @keydown.escape.window="open = false">
+  <div class="modal-card pd-panel" x-show="open">
+    <div class="pd-panel-head">
+      <div>
+        <h2 class="h5 mb-0" id="pd-tpl-title">Templates</h2>
+        <p class="muted small mb-0" x-text="mode === 'designer' ? 'Pick a starting point, check it in the preview, and make it yours in the chat.' : 'Pick a starting point, check it in the preview, and edit it in the page editor.'"></p>
+      </div>
+      <button type="button" class="btn-close" aria-label="Close" @click="open = false"></button>
+    </div>
+    <div class="pd-chips" role="group" aria-label="Filter by kind">
+      <template x-for="c in categories" :key="c">
+        <button type="button" class="pd-filter" :class="{ on: cat === c }" :aria-pressed="cat === c" x-text="c + (c === 'All' ? ' (' + templates.length + ')' : '')" @click="cat = c"></button>
+      </template>
+    </div>
+    <div class="pd-panel-body">
+      <div class="pd-list" role="listbox" aria-label="Templates">
+        <template x-for="t in shown" :key="t.id">
+          <button type="button" class="pd-row" :class="{ on: tpl && tpl.id === t.id }" role="option" :aria-selected="tpl && tpl.id === t.id" @click="pick(t)">
+            <span class="pd-row-icon"><i class="bi" :class="t.icon"></i></span>
+            <span class="pd-row-text">
+              <span class="pd-row-name"><span x-text="t.name"></span> <span class="pd-row-cat" x-text="t.category"></span></span>
+              <span class="pd-row-desc" x-text="t.description"></span>
+            </span>
+          </button>
+        </template>
+        <div class="empty" x-show="!shown.length">No templates in this group.</div>
+      </div>
+      <div class="pd-detail">
+        <template x-if="tpl">
+          <div class="pd-detail-in">
+            <div class="d-flex flex-wrap align-items-baseline gap-2 mb-2">
+              <h3 class="h6 mb-0" x-text="tpl.name"></h3>
+              <span class="small muted" x-text="tpl.sections.join(' · ')"></span>
+            </div>
+            <div class="pd-frame">
+              <div class="empty" x-show="busy">Loading preview…</div>
+              <iframe title="Template preview" sandbox="allow-same-origin" :srcdoc="html" x-show="!busy && html"></iframe>
+              <div class="alert alert-warning m-2" role="status" x-show="previewError" x-text="previewError"></div>
+            </div>
+            <div class="row g-2 align-items-end mt-2">
+              <div class="col-md">
+                <label class="form-label mb-1" for="pd-tpl-path">Page address</label>
+                <input id="pd-tpl-path" class="form-control mono" x-model="path" autocomplete="off" spellcheck="false">
+                <div class="form-text">Where the page will live once you save it. <span class="mono" x-text="'→ ' + url"></span></div>
+              </div>
+              <div class="col-md-auto">
+                <button type="button" class="btn btn-orange" :disabled="starting || !path.trim()" @click="use()" x-text="starting ? 'Starting…' : 'Use this template'"></button>
+              </div>
+            </div>
+            <div class="alert alert-danger mt-2 mb-0" role="alert" x-show="error" x-text="error"></div>
+          </div>
+        </template>
+        <div class="empty" x-show="!tpl">Pick a template on the left to see it here.</div>
+      </div>
+    </div>
+  </div>
+</div>

@@ -117,6 +117,10 @@ test('Components: the list shows the starter components, and a new one can be bu
   b.go('#/components/new');
   const ed = () => b.$('section[x-data^="componentsEditor"]');
   await wait(() => ed() && ed().querySelector('#c-name'));
+  // "Ask the assistant" is offered on a new component too (it opens the chat; there is nothing to pin yet).
+  const askBtn = () =>
+    [...ed().querySelectorAll('button')].find((x) => /Ask the assistant/.test(x.textContent));
+  await wait(() => askBtn() && b.visible(askBtn()));
   setValue(ed().querySelector('#c-name'), 'ui-test-widget');
   setValue(ed().querySelector('#c-title'), 'UI test widget');
 
@@ -296,4 +300,97 @@ test('Page editor: six tabs, and Style / Scripts are saved with the page and rea
   b.go('#/pages'); // leave the editor before its file goes
   await wait(() => !ed());
   await node.ctx.siteFiles.remove('pages/ui-tabs.html', null);
+});
+
+test('Pages: the orange Templates button starts a NEW page from a template, filled into the editor and not saved until you save', async () => {
+  b.go('#/pages');
+  const list = () => b.$('section[x-data="pagesList"]');
+  await wait(() => list() && list().querySelector('[x-data^="templatePicker"] button'));
+  const slot = () => list().querySelector('[x-data^="templatePicker"]');
+  const picker = () => b.win.Alpine.$data(slot());
+  const orange = () =>
+    [...slot().querySelectorAll('button.btn-orange')].find((x) => /Templates/.test(x.textContent));
+  await wait(() => orange());
+  assert.equal(picker().open, false);
+  b.click(orange());
+  await wait(() => picker().open === true);
+  const rows = () => [...slot().querySelectorAll('button.pd-row')];
+  await wait(() => rows().length >= 20);
+  b.click(rows().find((r) => /FAQ/.test(r.textContent)));
+  await wait(() => picker().tpl?.id === 'faq' && /Frequently asked/.test(picker().html));
+  const use = () =>
+    [...slot().querySelectorAll('button')].find(
+      (x) => x.textContent.trim() === 'Use this template',
+    );
+
+  // a taken address is refused in the panel, and nothing opens
+  await node.ctx.siteFiles.put('pages/faq.html', '---\ntitle: Mine\n---\n<p>mine</p>', null);
+  b.click(use());
+  await wait(() => /already exists/.test(picker().error));
+  assert.match(b.win.location.hash, /#\/pages$/);
+  await node.ctx.siteFiles.remove('pages/faq.html', null);
+
+  b.click(use());
+  await wait(() => /#\/pages\/new$/.test(b.win.location.hash));
+  const ed = () => b.$('section[x-data^="pagesEditor"]');
+  await wait(() => ed() && b.win.Alpine.$data(ed()).loaded);
+  const d = () => b.win.Alpine.$data(ed());
+  assert.equal(d().pageName, 'faq');
+  assert.equal(d().front.title, 'Frequently asked questions');
+  assert.equal(d().mode, 'code');
+  assert.match(d().code, /Frequently asked questions/);
+  assert.match(d().css, /\.tpl details/, 'its style went to the Style tab');
+  assert.equal(
+    node.ctx.siteFiles.snapshot().files.has('pages/faq.html'),
+    false,
+    'nothing is saved yet',
+  );
+
+  // saving writes the page
+  await d().save();
+  await wait(() => node.ctx.siteFiles.snapshot().files.has('pages/faq.html'));
+  await node.ctx.siteFiles.remove('pages/faq.html', null);
+});
+
+test('Components: New component asks what it should be, the AI writes and saves it, and the editor opens on it', async () => {
+  const { createAiComponentWriter } = await import('../src/modules/site/component-ai.js');
+  const asked = [];
+  node.ctx.aiComponentWriter = createAiComponentWriter(node.ctx, {
+    client: {
+      messages: {
+        async create(p) {
+          asked.push(p.messages[0].content);
+          return {
+            content: [{ type: 'text', text: 'NAME: ui_ai_banner\n\n<p class="b">Banner</p>' }],
+          };
+        },
+      },
+    },
+  });
+  b.go('#/components');
+  const list = () => b.$('section[x-data="componentsList"]');
+  await wait(() => list() && /hero/.test(list().textContent));
+  await wait(
+    () => list().querySelector('#gen-panel') && !b.visible(list().querySelector('#gen-panel')),
+  );
+  b.click([...list().querySelectorAll('button')].find((x) => x.textContent === 'New component'));
+  await wait(() => b.visible(list().querySelector('#gen-panel')));
+
+  const go = () =>
+    [...list().querySelectorAll('button')].find((x) => /Write it with AI/.test(x.textContent));
+  assert.equal(go().disabled, true, 'needs a description first');
+  setValue(list().querySelector('#gen-desc'), 'A slim banner announcing a sale');
+  await wait(() => !go().disabled);
+  b.click(go());
+
+  await wait(() =>
+    node.ctx.siteFiles.list().some((f) => f.path === 'components/ui_ai_banner.html'),
+  );
+  assert.match(asked[0], /slim banner announcing a sale/);
+  // The editor opens on the saved component, and offers the assistant to refine it.
+  const ed = () => b.$('section[x-data^="componentsEditor"]');
+  await wait(() => ed() && ed().querySelector('#c-name')?.value === 'ui_ai_banner');
+  await wait(() => /Banner/.test(ed().querySelector('#c-template')?.value || ''));
+
+  await node.ctx.siteFiles.remove('components/ui_ai_banner.html', null);
 });

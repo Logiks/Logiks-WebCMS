@@ -60,3 +60,45 @@ test('starting a new session opens the chat screen; sending a message without an
   await wait(() => /Set an Anthropic API key/.test(sec('pageDesignerChat').textContent));
   assert.equal(textarea().value, 'Build me a simple About page.');
 });
+
+test('the orange Templates button opens a panel; picking a template previews it and opens a session with the draft ready', async () => {
+  b.go('#/pageDesigner');
+  await wait(() => sec('pageDesignerList'));
+  const slot = () => sec('pageDesignerList').querySelector('[x-data^="templatePicker"]');
+  const data = () => b.win.Alpine.$data(slot());
+  const open = () =>
+    [...sec('pageDesignerList').querySelectorAll('button')].find(
+      (x) => /Templates/.test(x.textContent) && x.classList.contains('btn-orange'),
+    );
+  await wait(() => open());
+  assert.equal(data().open, false, 'the panel is closed until asked for');
+  b.click(open());
+  await wait(() => data().open === true);
+  const rows = () => [...sec('pageDesignerList').querySelectorAll('button.pd-row')];
+  await wait(() => rows().length >= 20);
+  // the first template is already previewing
+  await wait(() => data().tpl && data().html);
+  // filter by kind
+  const chip = (name) =>
+    [...sec('pageDesignerList').querySelectorAll('button.pd-filter')].find((x) =>
+      x.textContent.startsWith(name),
+    );
+  b.click(chip('Legal'));
+  await wait(() => rows().length === 2 && rows().every((r) => /Privacy|Terms/.test(r.textContent)));
+  b.click(chip('All'));
+  await wait(() => rows().length >= 20);
+  b.click(rows().find((r) => /Pricing/.test(r.textContent)));
+  await wait(() => data().tpl?.id === 'pricing');
+  assert.equal(data().path, 'pages/pricing.html');
+  await wait(() => /Choose the plan that fits/.test(data().html));
+  const use = () =>
+    [...sec('pageDesignerList').querySelectorAll('button')].find(
+      (x) => x.textContent.trim() === 'Use this template',
+    );
+  b.click(use());
+  await wait(() => /#\/pageDesigner\/\d+$/.test(b.win.location.hash));
+  await wait(() => sec('pageDesignerChat'));
+  const chat = () => b.win.Alpine.$data(sec('pageDesignerChat'));
+  await wait(() => chat().currentDraft?.path === 'pages/pricing.html');
+  assert.equal(chat().currentDraft.front_matter.title, 'Pricing');
+});

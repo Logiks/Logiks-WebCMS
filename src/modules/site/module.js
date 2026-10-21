@@ -4,6 +4,7 @@ import siteBuilderRoutes from './builder-routes.js';
 import siteLocalesRoutes from './locales-routes.js';
 import { createI18n } from './i18n.js';
 import { createAiTranslator } from './translate.js';
+import { createAiComponentWriter } from './component-ai.js';
 import { createPublicData } from './data.js';
 import { createSitePages } from './sitepages.js';
 import { fileURLToPath } from 'node:url';
@@ -60,6 +61,7 @@ export default {
       shippedDir: fileURLToPath(new URL('../../../site/locales', import.meta.url)),
     });
     ctx.aiTranslator = createAiTranslator(ctx);
+    ctx.aiComponentWriter = createAiComponentWriter(ctx);
     ctx.publicData = createPublicData(ctx);
     ctx.publicData.verify(); // every declared API operation has a handler, and the other way round (D-068)
     ctx.sitePages = createSitePages(ctx);

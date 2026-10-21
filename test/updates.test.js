@@ -84,9 +84,16 @@ function makeRepos({ servers = ['server'] } = {}) {
 async function nodeFor(appRoot, opts = {}) {
   const node = await startNode({ seed: true, appRoot, ...opts });
   // The source is a setting (default: the GitHub repo); the fixture's "origin" stands in for it.
-  await node.ctx.settings.update('updates', {
-    values: { source_url: git(appRoot, 'remote', 'get-url', 'origin'), source_branch: 'main' },
-  });
+  let url = null;
+  try {
+    url = git(appRoot, 'remote', 'get-url', 'origin');
+  } catch {
+    /* not a git checkout: there is no source to point at */
+  }
+  if (url)
+    await node.ctx.settings.update('updates', {
+      values: { source_url: url, source_branch: 'main' },
+    });
   await until(() => node.ctx.updates.snapshot().git);
   return node;
 }
@@ -332,22 +339,28 @@ test('a server that is not a git checkout says so and cannot update', async () =
   }
 });
 
-test('a failed fetch changes nothing, says how to fix it, and never shows credentials in the remote URL', async () => {
+test('a failed fetch changes nothing and says how to fix it; a URL with a password is refused so it never reaches settings, audit or logs', async () => {
   const repos = makeRepos();
   const node = await nodeFor(repos.server);
   try {
+    await assert.rejects(
+      node.ctx.settings.update('updates', {
+        values: { source_url: 'https://deploy:hunter2secret@127.0.0.1:1/repo.git' },
+      }),
+    );
     await node.ctx.settings.update('updates', {
-      values: { source_url: 'https://deploy:hunter2secret@127.0.0.1:1/repo.git' },
+      values: { source_url: 'https://deploy@127.0.0.1:1/repo.git' },
     });
     const before = repos.head(repos.server);
-    await until(() => /\*\*\*@/.test(node.ctx.updates.snapshot().git?.sourceUrl ?? ''));
-    assert.match(node.ctx.updates.snapshot().git.sourceUrl, /^https:\/\/\*\*\*@127\.0\.0\.1/);
 
     await node.ctx.updates.dispatch(self(node), 'apply', {}, null);
     await finished(node);
     const snap = node.ctx.updates.snapshot();
     assert.equal(snap.status, 'failed');
-    assert.match(snap.message, /Couldn't fetch branch "main" from https:\/\/\*\*\*@.*read access/);
+    assert.match(
+      snap.message,
+      /Couldn't fetch branch "main" from https:\/\/\*\*\*@127\.0\.0\.1.*read access/,
+    );
     assert.equal(repos.head(repos.server), before);
 
     await node.ctx.nodes.start();
@@ -504,6 +517,11 @@ test('cluster: an update requested on one server runs on the server you picked, 
   });
   const b = await startNode({ dbUrl: db.url, bus: busFor(emitter), appRoot: repos.two });
   try {
+    // One shared setting: both servers follow it.
+    await a.ctx.settings.update('updates', {
+      values: { source_url: repos.origin, source_branch: 'main' },
+    });
+    await until(() => b.ctx.settings.get('updates.source_url') === repos.origin);
     await until(() => a.ctx.updates.snapshot().git && b.ctx.updates.snapshot().git);
     await a.ctx.nodes.start();
     await b.ctx.nodes.start();

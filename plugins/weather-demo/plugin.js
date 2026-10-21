@@ -1,4 +1,4 @@
-import { readFile, readdir } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
@@ -14,14 +14,11 @@ import path from 'node:path';
  *   - reads its own `config` (plugin.json → the `plugin_weather_demo` settings namespace, D-061) the ordinary way,
  *     `ctx.settings.ns(...)` — nothing plugin-specific to it; Plugin Manager's "Configure" screen (or the generic
  *     Settings screen, since the namespace is registered either way) is where an admin changes these values
- *   - on load, seeds a front-end (public-site) Service + the site component(s) shipped in its own components/
- *     folder (D-062) — a worked example of a plugin reaching the public-facing side of the CMS, not just its own
- *     admin screen. The component's actual markup lives as a real file here (components/current.html), the same
- *     "ships as a file in the plugin" convention admin/*.html already follows — never a string baked into this
- *     file — so exporting or copying this plugin elsewhere carries its front-end with it (mobilisation). Each
- *     component is seeded into the site tree once, at components/weather-demo/<name>.html, and never overwritten
- *     afterwards: an admin who edits it through Webmaster → Components keeps full ownership from then on, exactly
- *     like the starter site's own defaults (D-041)
+ *   - ships a front-end (public-site) component as a real file in its OWN folder, components/current.html, and
+ *     a public-site Service it reads, seeded on load (D-062). The component is NOT copied into the site tree: a
+ *     page renders it straight from this folder as {% render "plugin/weather-demo/current" %}, so exporting,
+ *     copying or uninstalling the plugin takes its front-end with it and nothing is left behind in the site
+ *     (the Service is the one thing seeded: Services are data in the database, an admin edits them there)
  * @param {any} ctx the whole platform context
  */
 export default async function (ctx) {
@@ -151,7 +148,7 @@ async function ensureFrontend(ctx) {
           slug: SERVICE_SLUG,
           name: 'Weather Demo: latest lookup',
           description:
-            "Returns the Weather Demo plugin's most recent lookup, for its front-end component (plugins/weather-demo/components/current.html).",
+            "Returns the Weather Demo plugin's most recent lookup, for its front-end component (plugin/weather-demo/current).",
           mode: 'script',
           access: 'public',
           enabled: true,
@@ -163,30 +160,21 @@ async function ensureFrontend(ctx) {
       ctx.log.warn({ err: e.message }, 'weather-demo: could not seed its Service');
     }
   }
-  await seedComponents(ctx);
+  await removeLegacyCopy(ctx);
 }
 
-/** Every components/*.html this plugin ships on disk → components/weather-demo/<name>.html in the site tree,
- * namespaced by slug (components/<plugin-slug>/<name>.html, rendered as {% render "weather-demo/<name>" %}) so
- * two plugins can never collide on a component name. Ships as real files here, never a string in this file, so
- * exporting or copying this plugin elsewhere (mobilisation) carries its front-end components with it. */
-async function seedComponents(ctx) {
-  const dir = path.join(PLUGIN_DIR, 'components');
-  let entries;
+/** Before 1.4.0 this plugin copied its component into the site tree (components/weather-demo/current.html). Now it is
+ * rendered from the plugin's own folder, so that old copy is removed — but only if nobody edited it; an edited copy
+ * is the admin's own and stays (and keeps working under its old name). */
+async function removeLegacyCopy(ctx) {
+  const dest = 'components/weather-demo/current.html';
   try {
-    entries = await readdir(dir, { withFileTypes: true });
-  } catch {
-    return; // this plugin ships no components
-  }
-  for (const e of entries) {
-    if (!e.isFile() || !e.name.endsWith('.html')) continue;
-    const dest = `components/weather-demo/${e.name}`;
-    if (ctx.siteFiles.snapshot().files.has(dest)) continue;
-    try {
-      const content = await readFile(path.join(dir, e.name), 'utf8');
-      await ctx.siteFiles.put(dest, content, systemActor);
-    } catch (err) {
-      ctx.log.warn({ err: err.message, dest }, 'weather-demo: could not seed a component');
-    }
+    const old = ctx.siteFiles.snapshot().files.get(dest);
+    if (!old) return;
+    const shipped = await readFile(path.join(PLUGIN_DIR, 'components', 'current.html'), 'utf8');
+    if (old.content === shipped) await ctx.siteFiles.remove(dest, systemActor);
+    else ctx.log.warn({ dest }, 'weather-demo: left an edited copy of its component in the site tree');
+  } catch (err) {
+    ctx.log.warn({ err: err.message }, 'weather-demo: could not clean up its old component copy');
   }
 }

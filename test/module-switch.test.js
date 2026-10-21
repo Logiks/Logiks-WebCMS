@@ -14,6 +14,16 @@ after(() => node.close());
 const toggle = (id, enabled) => admin.put(`/api/admin/system/modules/${id}`).send({ enabled });
 const state = async () => (await admin.get('/api/admin/system/modules/state')).body.disabled;
 
+test('Settings → All settings does not list the Modules (or Feature switches) card: it has nothing to edit', async () => {
+  const names = (await admin.get('/api/admin/settings')).body.namespaces.map((n) => n.namespace);
+  assert.ok(names.includes('general'), 'ordinary namespaces are still listed');
+  assert.ok(!names.includes('modules') && !names.includes('featureset'));
+  // …and the switches themselves still work
+  assert.equal((await toggle('seo', false)).status, 200);
+  assert.deepEqual(await state(), ['seo']);
+  await toggle('seo', true);
+});
+
 describe('switching optional modules on and off', () => {
   test('a module that is off answers 404 on every route it owns, and comes back when switched on', async () => {
     assert.equal((await admin.get('/api/admin/seo/rules')).status, 200);
@@ -23,7 +33,7 @@ describe('switching optional modules on and off', () => {
     const r = await admin.get('/api/admin/seo/rules');
     assert.equal(r.status, 404);
     assert.equal(r.body.error.code, 'module_disabled');
-    assert.match(r.body.error.message, /System → Modules/);
+    assert.match(r.body.error.message, /Settings → Modules/);
     assert.equal((await admin.post('/api/admin/seo/rules').send({ pattern: '/x' })).status, 404);
     // Routes that were never the module's are untouched.
     assert.equal((await admin.get('/api/admin/webhooks')).status, 200);

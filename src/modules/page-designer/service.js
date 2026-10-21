@@ -4,6 +4,7 @@ import { now } from '../../core/db/index.js';
 import { HttpError, notFound, forbidden } from '../../core/http/errors.js';
 import { siteGlobals } from '../site/public.js';
 import { TOOLS } from './tools.js';
+import { templateById } from '../site/page-templates.js';
 
 const MAX_ITERATIONS = 30; // same runaway-loop guard as Plugin Editor (D-063)
 const MODEL_DEFAULT = 'claude-opus-5';
@@ -426,6 +427,90 @@ How a page is built here:
         .select('content');
       const draft = findLatestDraft(rows.map((r) => ({ content: JSON.parse(r.content) })));
       return renderDraft(draft, await pendingComponentOverlay(id));
+    },
+
+    /**
+     * A new session that starts from a template: the template is staged as the session's draft, written into the
+     * conversation as the same `write_page_draft` tool call the AI itself would have made — so the preview, "Save
+     * page" and every later "change this" in the chat work on it with no special case, and the AI sees the draft in
+     * its history. Works without an Anthropic key (preview and save need none; editing by chat does).
+     * @param {string} templateId
+     * @param {string|undefined} path where the page will live (default pages/<template>.html)
+     */
+    async createFromTemplate(templateId, path, actor = null) {
+      const tpl = templateById(templateId);
+      if (!tpl) throw notFound('That template');
+      const draftPath = (path || `pages/${tpl.id}.html`).trim();
+      if (!/^pages\/[a-z0-9][a-z0-9/_-]*\.html$/i.test(draftPath))
+        throw new HttpError(
+          422,
+          'invalid_input',
+          'Use an address like pages/about.html — letters, numbers, dashes and slashes, inside pages/ and ending in .html.',
+        );
+      if (siteFiles.snapshot().files.has(draftPath))
+        throw new HttpError(
+          409,
+          'exists',
+          `A page already exists at ${draftPath}. Choose a different address, or use “Work on” to edit that page instead.`,
+        );
+      // The same checks saving would make, so a template that can't be saved is caught here, not at the end.
+      siteFiles.validate(draftPath, `${serializeFrontMatter(tpl.front)}${tpl.body}`);
+
+      const t = now();
+      const id = await ctx.dialect.insertGetId(db('page_designer_sessions'), {
+        path: null,
+        title: `From template: ${tpl.name}`,
+        created_by: actor?.id ?? null,
+        created_at: t,
+        updated_at: t,
+      });
+      const callId = `toolu_template_${Math.random().toString(36).slice(2, 12)}`;
+      const rows = [
+        { role: 'user', content: `Start from the “${tpl.name}” template.` },
+        {
+          role: 'assistant',
+          content: [
+            {
+              type: 'text',
+              text: `I've staged the “${tpl.name}” template as your draft at ${draftPath}.`,
+            },
+            {
+              type: 'tool_use',
+              id: callId,
+              name: 'write_page_draft',
+              input: { path: draftPath, front_matter: tpl.front, body: tpl.body },
+            },
+          ],
+        },
+        {
+          role: 'user',
+          content: [{ type: 'tool_result', tool_use_id: callId, content: 'Draft staged.' }],
+        },
+        {
+          role: 'assistant',
+          content: [
+            {
+              type: 'text',
+              text: 'It is ready in the preview. Tell me what to change — the wording, sections, colours, pictures — or click Save page to use it as it is. Nothing is live until you save.',
+            },
+          ],
+        },
+      ];
+      for (const row of rows)
+        await db('page_designer_messages').insert({
+          session_id: id,
+          role: row.role,
+          content: JSON.stringify(row.content),
+          created_at: t,
+        });
+      await audit.log({
+        actor,
+        action: 'page_designer.template_started',
+        entity: 'page_designer_session',
+        entityId: id,
+        meta: { template: tpl.id, path: draftPath },
+      });
+      return fromRow(await db('page_designer_sessions').where({ id }).first());
     },
 
     /** @param {{path?: string}} opts edit an existing page by passing its path; omit to start a brand-new one */

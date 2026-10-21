@@ -39,6 +39,7 @@ const sha = (s) => createHash('sha256').update(s).digest('hex');
  *   pages/[...path].html         → page "[...path]"      (catch-all: the rest of the address)
  *   components/hero.html         → component "hero"
  *   locales/fr.json              → locale "fr"           (translations for the site's own strings; merged with the theme's)
+ * `components/plugin/…` is reserved the same way for plugins' own components (`{% render "plugin/<slug>/<name>" %}`).
  * `components/theme/…` is reserved: that is where the ACTIVE THEME's components appear to templates (`{% render "theme/header" %}`).
  * @param {unknown} p
  * @returns {{kind: 'page'|'component'|'locale', name: string, params: string[], catchAll: boolean}}
@@ -83,6 +84,10 @@ export function classify(p) {
   const name = names.join('/');
   if (top === 'components' && (name === 'theme' || name.startsWith('theme/')))
     throw bad('The name "theme" is reserved for the active theme’s own components.');
+  if (top === 'components' && (name === 'plugin' || name.startsWith('plugin/')))
+    throw bad(
+      'The name "plugin" is reserved for components that plugins ship in their own folders.',
+    );
   if (top === 'pages' && SERVER_OWNED.has(names[0]))
     throw bad(
       `"${names[0]}" is an address the server answers itself, so a page there could never be shown.`,
@@ -277,6 +282,18 @@ export function createSiteFiles({
     return out;
   }
 
+  /** Remove empty folders under `dir`, deepest first. `dir` itself stays unless `self`. */
+  async function pruneEmptyDirs(dir, self = true) {
+    let entries;
+    try {
+      entries = await fs.readdir(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of entries) if (e.isDirectory()) await pruneEmptyDirs(path.join(dir, e.name));
+    if (self) await fs.rmdir(dir).catch(() => {}); // fails (and is ignored) if anything is still inside
+  }
+
   async function mirror() {
     let state = {};
     try {
@@ -319,6 +336,9 @@ export function createSiteFiles({
           else await fs.rm(inside(p), { force: true });
         }
       }
+    // Deleting a file leaves its folder behind; the tree has no empty folders, so neither should the mirror. Only truly
+    // empty ones go (rmdir refuses a folder that still holds anything, e.g. a hand-kept `.local` copy).
+    for (const top of MANAGED) await pruneEmptyDirs(path.join(root, top), false);
     await fs.mkdir(root, { recursive: true });
     await fs.writeFile(path.join(root, STATE_FILE), JSON.stringify(next, null, 1));
   }

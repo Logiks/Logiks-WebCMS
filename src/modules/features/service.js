@@ -16,7 +16,7 @@ function globToRegExp(glob) {
 
 /**
  * Features (D-100): which subsystems this site has switched on. The state is one hidden setting (`featureset.enabled`),
- * so every server reads the same list live; turning a feature on or off also switches its modules (System → Modules)
+ * so every server reads the same list live; turning a feature on or off also switches its modules (Settings → Modules)
  * and tells the site renderer, which skips what the feature gates. Nothing is deleted, ever.
  *
  * @param {{ ctx: any, definitions: any[] }} deps  `ctx` is read lazily: modules and the site are built around this service.
@@ -165,7 +165,7 @@ export function createFeatures({ ctx, definitions }) {
           for (const dep of ctx.modules.dependents(m.id, ctx))
             if (!going.has(dep))
               blockedBy.push(
-                `${ctx.modules.get(dep)?.label ?? dep} needs ${m.label}. Switch it off first (System → Modules).`,
+                `${ctx.modules.get(dep)?.label ?? dep} needs ${m.label}. Switch it off first (Settings → Modules).`,
               );
       }
       return { features, modules, blockedBy: [...new Set(blockedBy)] };

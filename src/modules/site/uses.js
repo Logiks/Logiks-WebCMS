@@ -49,7 +49,7 @@ const RENDER = /\{%-?\s*render\s+["']([^"']+)["']/g;
 
 /**
  * What a page would need, from its source: follow {% render "x" %} into site components, read the endpoints each declares
- * (the same ones the renderer will run) and map them to modules. Theme components (`theme/…`) are the frame and skipped.
+ * (the same ones the renderer will run) and map them to modules. Theme (`theme/…`) and plugin (`plugin/…`) components are shipped code and skipped.
  * @param {{source: string, read: (path: string) => string|null, ops: any[]}} o
  * @returns {{modules: string[], services: string[], components: string[]}}
  */
@@ -60,7 +60,7 @@ export function inferUses({ source, read, ops }) {
   const walk = (/** @type {string} */ src) => {
     for (const m of src.matchAll(RENDER)) {
       const name = m[1];
-      if (name.startsWith('theme/') || seen.has(name)) continue;
+      if (name.startsWith('theme/') || name.startsWith('plugin/') || seen.has(name)) continue;
       seen.add(name);
       const text = read(`components/${name}.html`);
       if (text == null) continue;

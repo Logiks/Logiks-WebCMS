@@ -72,11 +72,16 @@ test('Updates screen: check, see what is coming, update without restarting, then
     const section = 'section[x-data="updatesPage"]';
     await wait(() => b.$(`${section} #upd-url`)?.value === origin);
     assert.equal(b.$(`${section} #upd-branch`).value, 'main');
+    const saveSource = async () => {
+      await wait(() => !b.button('Save source').disabled); // Alpine enables it a tick after the input
+      b.click(b.button('Save source'));
+    };
     b.type(b.$(`${section} #upd-branch`), 'release');
-    b.click(b.button('Save source'));
+    await saveSource();
     await until(() => node.ctx.settings.get('updates.source_branch') === 'release');
+    await wait(() => b.button('Save source').disabled); // the page has taken the saved value as its baseline
     b.type(b.$(`${section} #upd-branch`), 'main');
-    b.click(b.button('Save source'));
+    await saveSource();
     await until(() => node.ctx.settings.get('updates.source_branch') === 'main');
 
     b.click(b.button('Check for updates'));

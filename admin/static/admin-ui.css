@@ -977,3 +977,23 @@ a {
   cursor: pointer;
   padding: 0.3rem 0;
 }
+
+/* The one warm call-to-action colour: for the button that opens something people should notice (Component Library,
+   Page Designer templates). Same orange family as the public starter theme's accent. */
+.btn-orange {
+  --bs-btn-color: #fff;
+  --bs-btn-bg: #f26a1b;
+  --bs-btn-border-color: #f26a1b;
+  --bs-btn-hover-color: #fff;
+  --bs-btn-hover-bg: #d95b12;
+  --bs-btn-hover-border-color: #d95b12;
+  --bs-btn-focus-shadow-rgb: 242, 106, 27;
+  --bs-btn-active-color: #fff;
+  --bs-btn-active-bg: #c4520f;
+  --bs-btn-active-border-color: #c4520f;
+  --bs-btn-disabled-color: #fff;
+  --bs-btn-disabled-bg: #f26a1b;
+  --bs-btn-disabled-border-color: #f26a1b;
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgba(242, 106, 27, 0.35);
+}

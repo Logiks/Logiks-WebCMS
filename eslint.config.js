@@ -27,7 +27,7 @@ export default [
     rules: { 'no-unused-vars': ['warn', { argsIgnorePattern: '^_' }] },
   },
   {
-    files: ['admin/static/**/*.js'],
+    files: ['admin/static/**/*.js', 'plugins/*/admin/**/*.js'], // a plugin's admin script runs in the same page
     languageOptions: {
       globals: {
         window: 'readonly',
@@ -42,6 +42,7 @@ export default [
         URLSearchParams: 'readonly',
         FileReader: 'readonly',
         HTMLTextAreaElement: 'readonly',
+        Blob: 'readonly',
       },
     },
   },

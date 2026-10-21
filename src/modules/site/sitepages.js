@@ -53,9 +53,10 @@ const themeError = (id, e) =>
  * Data reaches templates only through the `api` endpoints components declare (see component.js / tags.js), run in-process
  * against the public data layer. A required endpoint that answers 404 makes the whole page a 404.
  *
- * What a template can reach is two namespaces that never mix:
+ * What a template can reach is three namespaces that never mix:
  *   {% render "hero" %}          a SITE component   (components/hero.html)
  *   {% render "theme/header" %}  a THEME component  (the active theme's components/header.html)
+ *   {% render "plugin/shop/cart" %}  a PLUGIN component (plugins/shop/components/cart.html, read from the plugin's own folder)
  * A page picks a theme LAYOUT by name (`layout: landing`, default `default`).
  * @param {any} ctx
  */
@@ -355,7 +356,7 @@ export function createSitePages(ctx) {
     // A preview's draft content never touches the shared bundle cache: it is rebuilt fresh and thrown away after the render.
     const key = overlay
       ? null
-      : `${snap.version}|${rt.id}|${rt.hash}|${limits().renderMs}|${limits().memoryMb}|f${featureVersion()}`;
+      : `${snap.version}|${rt.id}|${rt.hash}|${limits().renderMs}|${limits().memoryMb}|f${featureVersion()}|p${ctx.plugins?.componentsKey?.() ?? ''}`;
     const hit = key && bundles.get(key);
     if (hit) return hit;
 
@@ -373,7 +374,7 @@ export function createSitePages(ctx) {
         files.set(target, c.template);
         if (c.css) css.set(c.id, c.css);
         if (c.apis.length) apis.set(c.id, c.apis);
-        if (c.apis.length && ck.startsWith('theme:')) frame.add(c.id);
+        if (c.apis.length && (ck.startsWith('theme:') || ck.startsWith('plugin:'))) frame.add(c.id);
       } catch (e) {
         // Saving validates every file, so this only happens if a row was changed behind our back. One bad file must not
         // take the site down: it is skipped, and rendering anything that uses it reports the missing component.
@@ -406,6 +407,10 @@ export function createSitePages(ctx) {
         );
       else if (p.startsWith('layouts/') && p.endsWith('.html')) files.set(p, content);
     }
+    // A plugin's components come from its own folder; like the theme's, they are shipped code, not the page's own
+    // content, so they are not held to a page's `uses` (frame, above).
+    for (const [name, content] of ctx.plugins?.componentFiles?.() ?? [])
+      add(`components/${name}.html`, `plugin:${name}`, content, `plugin component ${name}`);
     // {{ 'key' | t }} / {{ 'key' | t: 'English fallback' }}: edited strings over the shipped ones over the theme's, in the visitor's language.
     const translate = makeTranslator({
       layers: [siteLocales(snap.files), ctx.i18n.shippedLocales(), rt.locales ?? {}],

@@ -12,6 +12,7 @@ const sourceBody = z.object({
     .string()
     .trim()
     .regex(/^[^\s-]\S*$/)
+    .regex(/^(?![a-z][a-z0-9+.-]*:\/\/[^/@\s]*:[^/@\s]*@)/i, 'Remove the password from the URL.')
     .max(300),
   branch: z
     .string()

@@ -7,8 +7,9 @@ import { classify } from './files.js';
 import { SiteFormatError, parseComponent, parsePage } from './component.js';
 import { siteGlobals } from './public.js';
 import { inferUses, usesIssues, usesOf } from './uses.js';
-import { convertSnippet, fetchSnippet, slugName } from './snippet.js';
+import { convertSnippet, fetchSnippet, localizeScripts, slugName } from './snippet.js';
 import { createCatalog } from './catalog.js';
+import { templateById, templateCards } from './page-templates.js';
 
 /**
  * What the page manager and component builder need beyond plain file CRUD (files-routes.js):
@@ -20,6 +21,16 @@ import { createCatalog } from './catalog.js';
 export default function siteBuilderRoutes(ctx) {
   const r = Router();
   const { siteFiles, content, themes, settings, site, sitePages } = ctx;
+
+  /** Scripts a component loads from the internet are copied onto this site as it is added (the Libraries mirror), but
+   * only by someone who may copy files there; otherwise they stay as they are and the note says what to do. */
+  const withLocalScripts = (/** @type {{content: string, notes: string[]}} */ out, req) =>
+    localizeScripts(out.content, {
+      mirror:
+        req.user?.can('libraries.manage') && ctx.libraries?.mirrors
+          ? (url) => ctx.libraries.mirrors.mirror(url, actorOf(req))
+          : undefined,
+    }).then((l) => ({ ...out, content: l.content, notes: [...out.notes, ...l.notes] }));
 
   r.get('/site/pages', requireRead('pages'), (req, res) => {
     void req;
@@ -74,6 +85,18 @@ export default function siteBuilderRoutes(ctx) {
       .max(300)
       .regex(/^\/[^\s?#]*$/, 'A preview address starts with / and has no spaces.')
       .optional(),
+  });
+
+  // Startup templates for a new page (Site pages and the AI Page Designer both offer them). The list leaves the page
+  // source out; one template comes with its front matter and body so a screen can preview it (POST /site/preview) or
+  // start a page from it.
+  r.get('/site/page-templates', requirePermission('pages.write'), (_req, res) => {
+    res.json({ templates: templateCards() });
+  });
+  r.get('/site/page-templates/:id', requirePermission('pages.write'), (req, res) => {
+    const t = templateById(req.params.id);
+    if (!t) throw new HttpError(404, 'not_found', 'That template does not exist.');
+    res.json({ template: t });
   });
 
   r.post('/site/preview', docs({ body: previewBody }), async (req, res) => {
@@ -253,18 +276,56 @@ export default function siteBuilderRoutes(ctx) {
             `A component named "${out.name}" already exists. Pick another name, or tick "Replace it" to overwrite it.`,
             { field: 'name' },
           );
-        await siteFiles.put(out.path, out.content, actorOf(req));
+        const done = await withLocalScripts(out, req);
+        await siteFiles.put(out.path, done.content, actorOf(req));
         res.status(exists ? 200 : 201).json({
           path: out.path,
           name: out.name,
           created: !exists,
-          notes: out.notes,
+          notes: done.notes,
         });
       } catch (e) {
         // A snippet the importer can't accept is the author's to fix: say what, as a 422, not a server error.
         if (e instanceof SiteFormatError) throw new HttpError(422, 'invalid_input', e.message);
         throw e;
       }
+    },
+  );
+
+  // Webmaster → Components → New component → "Write it for me": the AI writes the file, we validate and save it, and the
+  // screen opens it in the component editor. Saving happens here (not in the browser) so a refused file is never half-made.
+  const generateBody = z.object({
+    description: z
+      .string()
+      .trim()
+      .min(
+        10,
+        'Describe the component in a sentence or two, for example "A pricing table with three plans".',
+      )
+      .max(3000),
+    name: z
+      .string()
+      .trim()
+      .regex(/^[a-z][a-z0-9_]*$/, 'A name is lowercase letters, numbers and underscores.')
+      .max(64)
+      .optional(),
+  });
+  r.post(
+    '/site/components/generate',
+    requirePermission('components.write'),
+    docs({ body: generateBody }),
+    async (req, res) => {
+      const b = parse(generateBody, req.body);
+      const out = await ctx.aiComponentWriter.generate(b);
+      await siteFiles.put(out.path, out.content, actorOf(req));
+      await ctx.audit.log({
+        actor: actorOf(req),
+        action: 'site.component_ai_generated',
+        entity: 'component',
+        entityId: out.name,
+        meta: { path: out.path },
+      });
+      res.status(201).json({ name: out.name, path: out.path });
     },
   );
 
@@ -321,6 +382,8 @@ export default function siteBuilderRoutes(ctx) {
       const saved = [];
       const skipped = [];
       const errors = [];
+      /** @type {{name: string, notes: string[]}[]} what to know about the ones added (pictures, scripts…) */
+      const notes = [];
       const have = new Set(siteFiles.list('components/').map((f) => f.path));
       try {
         await catalog.list(b.source); // fails the whole call with one clear message if GitHub is unreachable
@@ -334,9 +397,11 @@ export default function siteBuilderRoutes(ctx) {
             skipped.push(out.name);
             continue;
           }
-          await siteFiles.put(out.path, out.content, actorOf(req), undefined);
+          const done = await withLocalScripts(out, req);
+          await siteFiles.put(out.path, done.content, actorOf(req), undefined);
           have.add(out.path);
           saved.push({ name: out.name, path: out.path });
+          if (done.notes.length) notes.push({ name: out.name, notes: done.notes });
         } catch (e) {
           errors.push({
             path,
@@ -347,7 +412,7 @@ export default function siteBuilderRoutes(ctx) {
           });
         }
       }
-      res.json({ saved, skipped, errors });
+      res.json({ saved, skipped, errors, notes });
     },
   );
 

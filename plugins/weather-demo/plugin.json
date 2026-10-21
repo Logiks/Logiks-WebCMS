@@ -1,11 +1,19 @@
 {
   "slug": "weather-demo",
   "name": "Weather Demo",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "author": "SmartinfoLogiks",
-  "description": "Demo plugin: an admin component calling this plugin's own backend service, which calls the Open-Meteo weather API and logs each lookup to the plugin's own table. Also seeds a public-site Service and a `weather-current` component, so a visitor-facing page can show the latest lookup too.",
-  "menu": { "label": "Weather Demo", "icon": "bi-cloud-sun" },
-  "permissions": [{ "key": "weather_demo.view", "label": "View the Weather Demo plugin" }],
+  "description": "Demo plugin: an admin screen calling its own backend, which calls the Open-Meteo weather API and logs each lookup. Ships a `current` component in its own folder: {% render \"plugin/weather-demo/current\" %}.",
+  "menu": {
+    "label": "Weather Demo",
+    "icon": "bi-cloud-sun"
+  },
+  "permissions": [
+    {
+      "key": "weather_demo.view",
+      "label": "View the Weather Demo plugin"
+    }
+  ],
   "config": {
     "default_city": {
       "type": "string",
@@ -18,8 +26,14 @@
       "label": "Temperature units",
       "default": "celsius",
       "options": [
-        { "value": "celsius", "label": "Celsius (°C)" },
-        { "value": "fahrenheit", "label": "Fahrenheit (°F)" }
+        {
+          "value": "celsius",
+          "label": "Celsius (°C)"
+        },
+        {
+          "value": "fahrenheit",
+          "label": "Fahrenheit (°F)"
+        }
       ]
     }
   }

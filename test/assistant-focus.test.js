@@ -114,4 +114,60 @@ describe('Ask the assistant from a screen', () => {
       b.close();
     }
   });
+
+  test('with an earlier conversation open, the button starts a new chat instead of pinning that one', async () => {
+    const root = { id: null, email: null, can: () => true };
+    await node.ctx.siteFiles.put(
+      'pages/fresh-chat.html',
+      '---\ntitle: Fresh\n---\n<h1>Hi</h1>',
+      root,
+    );
+    const old = await node.ctx.db('assistant_sessions').orderBy('id', 'desc').first();
+    await node.ctx.db('assistant_messages').insert({
+      session_id: old.id,
+      role: 'user',
+      content: 'something about another page',
+      created_at: Date.now(),
+    });
+    const before = await node.ctx.db('assistant_sessions').count({ n: '*' }).first();
+    const b = await openAdmin(node.url);
+    try {
+      await b.signIn(ADMIN.email, ADMIN.password);
+      const wait = (fn) => until(fn, { timeout: 8000, every: 50 });
+      b.go('#/pages');
+      const row = () =>
+        [...b.$$('section[x-data="pagesList"] tbody tr')].find((r) =>
+          r.textContent.includes('fresh-chat'),
+        );
+      await wait(() => row());
+      b.click(row().querySelector('button[aria-label="Ask the assistant about this page"]'));
+      await wait(() => b.$('aside.chat-dock .ac-chip-focus'));
+      const latest = await node.ctx.db('assistant_sessions').orderBy('id', 'desc').first();
+      assert.notEqual(latest.id, old.id, 'a new chat was started');
+      assert.equal(latest.focus, 'pages/fresh-chat.html');
+      assert.equal(
+        (await node.ctx.db('assistant_sessions').where({ id: old.id }).first()).focus ===
+          'pages/fresh-chat.html',
+        false,
+        'the earlier chat keeps its own context',
+      );
+      assert.equal(
+        Number((await node.ctx.db('assistant_sessions').count({ n: '*' }).first()).n),
+        Number(before.n) + 1,
+      );
+    } finally {
+      b.close();
+    }
+  });
+});
+
+describe('blank chats are reused', () => {
+  test('creating a chat while an empty one exists returns that one, without its old focus', async () => {
+    const svc = createAssistant(node.ctx, { client: fake() });
+    const a = await svc.create(adm);
+    await svc.setFocus(a.id, 'pages/about.html', adm);
+    const b = await svc.create(adm);
+    assert.equal(b.id, a.id);
+    assert.ok(!b.focus);
+  });
 });

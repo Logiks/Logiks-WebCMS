@@ -16,7 +16,7 @@ const moduleOff = (/** @type {string} */ label) =>
   new HttpError(
     404,
     'module_disabled',
-    `${label} is switched off. Turn it on under System → Modules.`,
+    `${label} is switched off. Turn it on under Settings → Modules.`,
   );
 
 /**

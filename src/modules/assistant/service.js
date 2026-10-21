@@ -770,6 +770,21 @@ export function createAssistant(ctx, { client: injectedClient } = {}) {
 
     async create(actor) {
       const t = now();
+      // A chat nobody has written in yet is reused rather than piling up empty ones; it starts clean (no pinned focus).
+      const blank = await db('assistant_sessions as s')
+        .where({ 's.created_by': actor?.id ?? -1 })
+        .whereNotExists(
+          db('assistant_messages as m').select(db.raw('1')).whereRaw('m.session_id = s.id'),
+        )
+        .orderBy('s.updated_at', 'desc')
+        .select('s.id')
+        .first();
+      if (blank) {
+        await db('assistant_sessions')
+          .where({ id: blank.id })
+          .update({ focus: null, updated_at: t });
+        return sessionRow(await db('assistant_sessions').where({ id: blank.id }).first());
+      }
       const id = await dialect.insertGetId(db('assistant_sessions'), {
         title: '',
         created_by: actor?.id ?? null,

@@ -13,7 +13,7 @@
                 </ul>
                 <div class="pe-actions">
                   <span class="muted small" x-show="dirty && !isNew">Unsaved changes</span>
-                  <button type="button" class="btn btn-outline-secondary btn-sm" x-show="!isNew && assistantAvailable()" @click="askAssistant('components/' + name + '.html')" title="Open the assistant, focused on this component"><i class="bi bi-stars"></i> Ask the assistant</button>
+                  <button type="button" class="btn btn-outline-secondary btn-sm" x-show="assistantAvailable()" @click="askAssistant(isNew ? '' : 'components/' + name + '.html')" title="Open the assistant, focused on this component"><i class="bi bi-stars"></i> Ask the assistant</button>
                   <button type="button" class="btn btn-outline-secondary btn-sm" x-show="!isNew && dirty" @click="discard()">Discard</button>
                   <a href="#/components" class="btn btn-outline-secondary btn-sm">Back to components</a>
                   <button class="btn btn-primary btn-sm" type="button" :disabled="busy" @click="save()" x-text="isNew ? 'Create component' : 'Save component'"></button>

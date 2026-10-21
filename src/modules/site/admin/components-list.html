@@ -3,12 +3,27 @@
                 <div class="d-flex gap-2 flex-wrap">
                   <a class="btn btn-outline-secondary" href="/api/admin/site/components/export">Export .zip</a>
                   <label class="btn btn-outline-secondary mb-0" x-show="can('components.write')" :class="{disabled: importBusy}">Import .zip<input type="file" hidden accept=".zip,application/zip" @change="importZip($event.target.files[0]); $event.target.value = ''"></label>
-                  <button class="btn btn-outline-secondary" type="button" x-show="can('components.write')" @click="openLibrary()" :aria-expanded="lib.open">Library</button>
+                  <button class="btn btn-orange" type="button" x-show="can('components.write')" @click="openLibrary()" :aria-expanded="lib.open"><i class="bi bi-collection me-1"></i>Library</button>
                   <button class="btn btn-outline-secondary" type="button" x-show="can('components.write')" @click="snip.open = !snip.open" :aria-expanded="snip.open">Import snippet</button>
-                  <a class="btn btn-primary" x-show="can('components.write')" href="#/components/new">New component</a>
+                  <button class="btn btn-primary" type="button" x-show="can('components.write')" @click="gen.open = !gen.open" :aria-expanded="gen.open">New component</button>
                 </div>
               </div>
-              <div class="panel mb-3" x-show="lib.open && can('components.write')">
+              <div class="panel p-3 p-lg-4 mb-3" id="gen-panel" x-show="gen.open && can('components.write')">
+                <h2 class="h6">New component</h2>
+                <p class="muted small mb-3">Describe what you need and the AI writes the component, saves it and opens it in the editor, where you can change anything. Nothing goes on a page until you add it there.</p>
+                <div class="alert alert-danger" role="alert" style="white-space:pre-wrap" x-show="gen.error" x-text="gen.error"></div>
+                <label class="form-label" for="gen-desc">What should the component be?</label>
+                <textarea id="gen-desc" class="form-control" rows="4" maxlength="3000" placeholder="A pricing table with three plans. The middle plan is highlighted and has a &quot;Most popular&quot; badge." x-model="gen.description" :disabled="gen.busy"></textarea>
+                <div class="row g-2 mt-1">
+                  <div class="col-md-6"><label class="form-label" for="gen-name">Name (optional)</label><input id="gen-name" class="form-control mono" maxlength="64" placeholder="pricing_table" x-model="gen.name" :disabled="gen.busy"></div>
+                </div>
+                <div class="d-flex gap-2 flex-wrap align-items-center mt-3">
+                  <button class="btn btn-primary" type="button" :disabled="gen.busy || gen.description.trim().length < 10" @click="generate()"><i class="bi bi-stars me-1"></i><span x-text="gen.busy ? 'Writing the component…' : 'Write it with AI'"></span></button>
+                  <a class="btn btn-outline-secondary" href="#/components/new" :class="{disabled: gen.busy}">Start blank instead</a>
+                  <span class="muted small" x-show="gen.busy">This can take up to a minute.</span>
+                </div>
+              </div>
+              <div class="panel p-3 p-lg-4 mb-3" x-show="lib.open && can('components.write')">
                 <h2 class="h6">Component library</h2>
                 <p class="muted small mb-3">Open-source Tailwind component libraries, read from their GitHub repositories (MIT licence). Preview one, tick the ones you want and add them. A library&rsquo;s website can hold more than its repository does; paste those with Import snippet.</p>
                 <div class="alert alert-danger" role="alert" style="white-space:pre-wrap" x-show="lib.error" x-text="lib.error"></div>
@@ -16,6 +31,10 @@
                   <div><label class="form-label" for="lib-src">Library</label><select id="lib-src" class="form-select" :value="lib.source" @change="pickSource($event.target.value)"><template x-for="s in lib.sources" :key="s.id"><option :value="s.id" :selected="s.id === lib.source" x-text="s.label + ' (' + s.license + ')'"></option></template></select></div>
                   <div x-show="lib.data"><label class="form-label" for="lib-cat">Category</label><select id="lib-cat" class="form-select" x-model="lib.category"><template x-for="c in (lib.data?.categories || [])" :key="c.id"><option :value="c.id" x-text="c.label"></option></template></select></div>
                   <div class="muted small pb-2" x-show="lib.data" x-text="(lib.data?.count || 0) + ' components'"></div>
+                </div>
+                <div class="alert alert-secondary small" role="status" x-show="lib.notes.length">
+                  <div class="fw-semibold mb-1">Good to know about what was added</div>
+                  <template x-for="n in lib.notes" :key="n.name"><div class="mb-1"><span class="mono" x-text="n.name"></span><ul class="mb-0"><template x-for="t in n.notes" :key="t"><li x-text="t"></li></template></ul></div></template>
                 </div>
                 <div class="muted" x-show="lib.busy && !lib.data">Loading the list from GitHub&hellip;</div>
                 <div class="row g-3" x-show="lib.data">
@@ -49,7 +68,7 @@
                   </div>
                 </div>
               </div>
-              <div class="panel mb-3" x-show="snip.open && can('components.write')">
+              <div class="panel p-3 p-lg-4 mb-3" x-show="snip.open && can('components.write')">
                 <h2 class="h6">Import a snippet from a component library</h2>
                 <p class="muted small mb-3">Paste the HTML of a component from HyperUI, PrebuiltUI or similar, or give a GitHub file link. Tailwind classes are compiled into this component&rsquo;s own CSS, so nothing extra loads on your pages. Check the library&rsquo;s licence allows reuse.</p>
                 <div class="alert alert-danger" role="alert" style="white-space:pre-wrap" x-show="snipError" x-text="snipError"></div>

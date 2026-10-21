@@ -1,5 +1,6 @@
               <div class="page-head d-flex justify-content-between align-items-end flex-wrap gap-2">
                 <div><h1>AI Page Designer</h1><p>Describe a page and Claude plans it, picks or proposes components, generates images, and lays it out — you approve anything new before it's built, and nothing goes live until you click Save.</p></div>
+                <div class="d-inline-block" x-data="templatePicker('designer')"></div>
               </div>
               <div class="alert alert-danger" role="alert" x-show="error" x-text="error"></div>
               <div class="panel p-3 mb-3">
@@ -14,6 +15,7 @@
                   <button class="btn btn-primary" type="button" :disabled="busy" @click="start()" x-text="busy ? 'Starting…' : 'Start session'"></button>
                 </div>
               </div>
+              <h2 class="h5 mb-2" x-show="sessions.length">Your sessions</h2>
               <div class="panel">
                 <div class="empty" x-show="loaded && !sessions.length">No sessions yet — start one above.</div>
                 <table class="table" x-show="sessions.length"><thead><tr><th>Session</th><th>Page</th><th></th></tr></thead><tbody>
