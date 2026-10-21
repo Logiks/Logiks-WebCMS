@@ -66,8 +66,8 @@ on a spare machine at least once.
 **System → Publish & Git** keeps the site in step with a git repository and gives every publish a version number.
 
 - **Commit** saves the site as it is now, including edits made by hand. The site is also committed **automatically** every 30 minutes when something changed. Change or turn this off under **Settings → Publish**.
-- **Publish** commits what is pending, names the result the next version (v1, v2…), tags it in git, and refreshes caches so visitors get the new pages. Tick *Push to the remote afterwards* to send it to your repository too.
-- **Pull** brings pages and components from the remote into this site as one entry you can undo under Change history. If both sides changed the same page, nothing is changed until you choose *Keep this site's version* or *Take the remote's version*. **Push** sends this site's commits; **Sync** does both.
+- **Publish** commits what is pending, names the result the next version (v1, v2…), tags it in git, and refreshes caches so visitors get the new pages. Tick _Push to the remote afterwards_ to send it to your repository too.
+- **Pull** brings pages and components from the remote into this site as one entry you can undo under Change history. If both sides changed the same page, nothing is changed until you choose _Keep this site's version_ or _Take the remote's version_. **Push** sends this site's commits; **Sync** does both.
 - **Branches**: pick one to switch (anything uncommitted is committed first), or create a new branch from where the site is now. Switching replaces this site's pages and components with that branch's.
 - **Releases** lists every published version; **Restore** puts the site back as it was then (recorded as one change you can undo).
 - **Refresh caches** makes every visitor fetch fresh pages and files without publishing anything.

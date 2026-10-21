@@ -1,43 +1,54 @@
-        <div class="page-head d-flex justify-content-between align-items-end flex-wrap gap-2"><div><h1>Media</h1><p>Images, videos and documents. Images get a private copy without camera data and smaller sizes for fast pages; videos get a thumbnail and icon.</p></div>
+        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2"><div><h1 class="h4 mb-0">Media</h1><div class="muted small">Images, videos and documents. Images get a private copy without camera data and smaller sizes.</div></div>
           <div class="d-flex gap-2 flex-wrap" x-show="can('media.upload')">
-            <button type="button" class="btn btn-outline-secondary" @click="newFolder()">New folder</button>
-            <label class="btn btn-primary mb-0">Upload files <input type="file" hidden multiple data-upload-files @change="upload($event.target.files); $event.target.value = ''"></label>
-            <label class="btn btn-outline-secondary mb-0">Upload a folder <input type="file" hidden webkitdirectory multiple data-upload-folder @change="upload($event.target.files); $event.target.value = ''"></label>
+            <button type="button" class="btn btn-outline-secondary btn-sm" @click="newFolder()"><i class="bi bi-folder-plus"></i> New folder</button>
+            <label class="btn btn-primary btn-sm mb-0"><i class="bi bi-upload"></i> Upload files <input type="file" hidden multiple data-upload-files @change="upload($event.target.files); $event.target.value = ''"></label>
+            <label class="btn btn-outline-secondary btn-sm mb-0">Upload a folder <input type="file" hidden webkitdirectory multiple data-upload-folder @change="upload($event.target.files); $event.target.value = ''"></label>
           </div></div>
         <div class="alert alert-warning" x-show="!available">Image processing isn't installed on this server, so images can't be uploaded. Run <span class="mono">npm install</span> without <span class="mono">--omit=optional</span>.</div>
         <div class="alert alert-info small" x-show="available && !videoThumbnails">Video thumbnails need <span class="mono">ffmpeg</span> on the server. Videos still upload, without a thumbnail.</div>
         <div class="alert alert-danger" role="alert" x-show="error" x-text="error"></div>
         <div class="d-flex gap-2 mb-2 flex-wrap align-items-center">
-          <input class="form-control" style="max-width:18rem" placeholder="Search files" aria-label="Search files" x-model="q" @input.debounce.300ms="load()">
-          <select class="form-select" style="max-width:10rem" aria-label="Type" x-model="kind" @change="load()"><option value="">All</option><option value="image">Images</option><option value="video">Videos</option><option value="file">Documents</option></select>
-          <div class="form-check mb-0" x-show="can('media.upload')"><input class="form-check-input" type="checkbox" id="m-compress" x-model="compress"><label class="form-check-label" for="m-compress">Compress images</label></div>
+          <input class="form-control form-control-sm" style="max-width:16rem" placeholder="Search files" aria-label="Search files" x-model="q" @input.debounce.300ms="load()">
+          <select class="form-select form-select-sm" style="max-width:9rem" aria-label="Type" x-model="kind" @change="load()"><option value="">All</option><option value="image">Images</option><option value="video">Videos</option><option value="file">Documents</option></select>
+          <div class="form-check mb-0 small" x-show="can('media.upload')"><input class="form-check-input" type="checkbox" id="m-compress" x-model="compress"><label class="form-check-label" for="m-compress">Compress images</label></div>
         </div>
         <div class="small muted mb-2" x-show="can('media.upload') && !compress">Images will be stored exactly as uploaded, including camera data such as location. You can compress them later.</div>
-        <nav class="d-flex align-items-center flex-wrap gap-1 mb-2" aria-label="Folders">
-          <button type="button" class="btn btn-link btn-sm p-0" data-crumb-root @click="goto('')">All files</button>
-          <template x-for="c in crumbs()" :key="c.path"><span class="d-inline-flex align-items-center gap-1"><span class="muted">/</span><button type="button" class="btn btn-link btn-sm p-0" @click="goto(c.path)" x-text="c.name"></button></span></template>
-          <span class="ms-2 d-inline-flex gap-1" x-show="folder && can('media.upload')"><button type="button" class="btn btn-outline-secondary btn-sm" @click="renameFolder()">Rename</button><button type="button" class="btn btn-outline-danger btn-sm" x-show="can('media.delete')" @click="removeFolder()">Delete folder</button></span>
+        <nav class="crumbs d-flex align-items-center flex-wrap gap-2 mb-2" aria-label="Folders">
+          <button type="button" class="crumb" :class="{on: !folder}" data-crumb-root @click="goto('')">All files</button>
+          <template x-for="c in crumbs()" :key="c.path"><span class="d-inline-flex align-items-center gap-1"><i class="bi bi-chevron-right muted small"></i><button type="button" class="crumb" :class="{on: c.path === folder}" @click="goto(c.path)" x-text="c.name"></button></span></template>
+          <span class="ms-2 d-inline-flex gap-1" x-show="folder && can('media.upload')"><button type="button" class="btn btn-outline-secondary btn-sm py-0" @click="renameFolder()">Rename</button><button type="button" class="btn btn-outline-danger btn-sm py-0" x-show="can('media.delete') && folderEmpty()" @click="removeFolder()">Delete folder</button></span>
         </nav>
-        <div class="d-flex gap-2 flex-wrap mb-3" x-show="subfolders().length">
-          <template x-for="f in subfolders()" :key="f.path"><button type="button" class="btn btn-outline-secondary btn-sm" data-subfolder @click="goto(f.path)"><i class="bi bi-folder"></i> <span x-text="f.name"></span> <span class="muted" x-text="'(' + f.files + ')'"></span></button></template>
+        <div class="d-flex gap-1 flex-wrap mb-2" x-show="subfolders().length">
+          <template x-for="f in subfolders()" :key="f.path"><button type="button" class="btn btn-outline-secondary folder-chip" data-subfolder @click="goto(f.path)"><i class="bi bi-folder"></i> <span x-text="f.name"></span> <span class="muted" x-text="'(' + f.files + ')'"></span></button></template>
         </div>
         <div class="panel p-2 mb-3" x-show="progress.total" role="status">
           <div class="small" x-text="progress.done + ' of ' + progress.total + ' uploaded' + (progress.failed.length ? ', ' + progress.failed.length + ' failed' : '') + (progress.running ? '…' : '')"></div>
           <div class="progress my-1" style="height:.4rem"><div class="progress-bar" :style="'width:' + (progress.total ? Math.round(100 * (progress.done + progress.failed.length) / progress.total) : 0) + '%'"></div></div>
           <ul class="small text-danger mb-0 ps-3" x-show="progress.failed.length"><template x-for="f in progress.failed" :key="f.name"><li><span x-text="f.name"></span>: <span x-text="f.message"></span></li></template></ul>
         </div>
+        <div class="bulk-bar d-flex align-items-center flex-wrap gap-2 mb-2" x-show="picked.length" role="region" aria-label="Selected files">
+          <strong class="small" x-text="picked.length + (picked.length === 1 ? ' file selected' : ' files selected')"></strong>
+          <button type="button" class="btn btn-link btn-sm p-0" @click="pickAll()" x-text="picked.length === items.length ? 'Clear' : 'Select all here'"></button>
+          <span class="d-inline-flex gap-1 ms-auto flex-wrap" x-show="can('media.upload')">
+            <select class="form-select form-select-sm" style="width:auto" aria-label="Destination folder" x-model="bulkFolder"><option value="">(top level)</option><template x-for="f in folders" :key="f.path"><option :value="f.path" x-text="f.path"></option></template></select>
+            <button type="button" class="btn btn-outline-primary btn-sm" data-bulk-move @click="bulk('move')">Move</button>
+            <button type="button" class="btn btn-outline-primary btn-sm" data-bulk-copy @click="bulk('copy')">Copy</button>
+          </span>
+          <button type="button" class="btn btn-outline-danger btn-sm" data-bulk-delete x-show="can('media.delete')" @click="bulk('delete')">Delete</button>
+        </div>
         <div class="row g-3">
-          <div :class="current ? 'col-lg-8' : 'col-12'">
+          <div :class="current ? 'col-lg-7 col-xl-8' : 'col-12'">
             <div class="dropzone" :class="{on: dragging}" @dragover.prevent="dragging = true" @dragleave.prevent="dragging = false" @drop.prevent="dragging = false; can('media.upload') && upload($event.dataTransfer.files)">
               <div class="empty" x-show="!items.length">No files here yet. Upload some, or drop them here.</div>
               <div class="media-grid">
-                <template x-for="m in items" :key="m.id"><button type="button" class="media-tile" :class="{sel: current && current.id === m.id}" @click="open(m)"><span class="ph"><img x-show="thumb(m)" :src="thumb(m)" :alt="m.alt" loading="lazy"><i class="bi" :class="m.kind === 'video' ? 'bi-camera-video' : 'bi-file-earmark-pdf'" x-show="!thumb(m)"></i></span><span class="nm" x-text="m.filename"></span></button></template>
+                <template x-for="m in items" :key="m.id"><div class="media-cell" :class="{picked: isPicked(m.id)}"><input type="checkbox" class="media-pick form-check-input" x-show="can('media.upload') || can('media.delete')" :checked="isPicked(m.id)" :aria-label="'Select ' + m.filename" @click.stop="pick(m.id)"><button type="button" class="media-tile" :class="{sel: current && current.id === m.id}" @click="open(m)"><span class="ph"><img x-show="thumb(m)" :src="thumb(m)" :alt="m.alt" loading="lazy"><i class="bi" :class="m.kind === 'video' ? 'bi-camera-video' : 'bi-file-earmark-pdf'" x-show="!thumb(m)"></i></span><span class="nm" x-text="m.filename"></span></button></div></template>
               </div>
             </div>
           </div>
-          <template x-if="current"><div class="col-lg-4">
-            <div class="panel p-3">
-              <div class="ph big mb-2" x-show="current && current.kind === 'image'"><img :src="current ? '/media/' + current.id + '/' + current.originalFile : ''" :alt="current ? current.alt : ''"></div>
+          <template x-if="current"><div class="col-lg-5 col-xl-4" @keydown.escape.window="current = null">
+            <div class="panel media-side">
+              <button type="button" class="btn-close float-end ms-2" aria-label="Close preview" @click="current = null"></button>
+              <div class="ph big mb-2 mp-stage" x-show="current && current.kind === 'image'"><img :src="current ? '/media/' + current.id + '/' + current.originalFile : ''" :alt="current ? current.alt : ''"></div>
               <video class="w-100 mb-2" controls preload="metadata" x-show="current && current.kind === 'video'" :src="current && current.kind === 'video' ? current.url : ''" :poster="thumb(current)"></video>
               <div class="fw-semibold" x-text="current ? current.filename : ''"></div>
               <div class="muted small mb-2" x-text="current ? (current.mime + ' · ' + bytes(current.size) + (current.width ? ' · ' + current.width + '×' + current.height : '')) : ''"></div>

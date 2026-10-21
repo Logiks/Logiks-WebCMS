@@ -616,7 +616,9 @@ How a page is built here:
       const newRows = [{ role: 'user', content: trimmed }];
       messages.push(newRows[0]);
 
-      const client = injectedClient ?? new Anthropic({ apiKey: anthropic_api_key });
+      const rawClient = injectedClient ?? new Anthropic({ apiKey: anthropic_api_key });
+      const client =
+        ctx.aiUsage?.wrap(rawClient, { feature: 'page-designer', userId: actor?.id }) ?? rawClient;
       const tools = toolsFor(session, actor, () => messages, { n: 0 });
       // The site's project type, quality standard and working method (D-082); the Designer works without them if unreadable.
       const guidance = await ctx.prompts

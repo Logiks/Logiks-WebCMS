@@ -107,7 +107,7 @@ export function createAiPageWriter(ctx, { client } = {}) {
       ];
       let lastProblem = '';
       for (let attempt = 0; attempt < MAX_TRIES; attempt++) {
-        const raw = await ai.ask({ system, messages });
+        const raw = await ai.ask({ system, messages, feature: 'pages' });
         const parsed = split(raw);
         let chosen = wanted || parsed.address || 'new-page';
         for (let i = 2; !wanted && taken.includes(chosen); i++)

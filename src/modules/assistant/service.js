@@ -968,7 +968,9 @@ export function createAssistant(ctx, { client: injectedClient } = {}) {
       messages.push(newRows[0]);
       const imageBlocks = new Map(pics.map((p) => [p.ref.mediaId, p.block]));
 
-      const client = injectedClient ?? new Anthropic({ apiKey: anthropic_api_key });
+      const rawClient = injectedClient ?? new Anthropic({ apiKey: anthropic_api_key });
+      const client =
+        ctx.aiUsage?.wrap(rawClient, { feature: 'assistant', userId: actor?.id }) ?? rawClient;
       const usage = { input: 0, output: 0, cacheRead: 0 };
       // Older turns that are about to stop being sent are folded into the running summary first (cheaper model).
       try {

@@ -571,3 +571,70 @@ test('media: folders, bulk upload with progress, and compressing an image stored
   b.click(page().querySelector('[data-compress-copy]'));
   await wait(async () => (await node.ctx.db('media').count({ n: '*' }).first()).n === 3);
 });
+
+test('media: a file opens in a side panel, and "Delete folder" only shows for an empty folder', async () => {
+  await node.ctx.media.createFolder('empty-one');
+  b.go('#/media-analytics'); // leave the page so it loads the new folder when we come back
+  await wait(() => sec('mediaAnalyticsPage'));
+  b.go('#/media');
+  await wait(() => sec('mediaPage'));
+  const del = () =>
+    [...sec('mediaPage').querySelectorAll('button')].find((x) =>
+      /Delete folder/.test(x.textContent),
+    );
+  chooseFiles(sec('mediaPage').querySelector('input[data-upload-files]'), [
+    file(await png(300, 200), 'top.png', 'image/png'),
+  ]);
+  await wait(() => sec('mediaPage').querySelector('.media-tile'));
+  assert.ok(!del() || !b.visible(del()), 'no Delete folder at the top level');
+
+  b.click(sec('mediaPage').querySelector('.media-tile'));
+  await wait(() => sec('mediaPage').querySelector('.media-side'));
+  assert.ok(
+    !sec('mediaPage').querySelector('.modal-x'),
+    'the preview is part of the page, not a popup',
+  );
+  b.click(sec('mediaPage').querySelector('.media-side .btn-close'));
+  await wait(() => !sec('mediaPage').querySelector('.media-side'));
+
+  const sub = (name) =>
+    [...sec('mediaPage').querySelectorAll('[data-subfolder]')].find((x) =>
+      x.textContent.includes(name),
+    );
+  await wait(() => sub('Trips') && sub('empty-one'));
+  b.click(sub('Trips'));
+  await wait(() => sec('mediaPage').querySelector('.media-tile'));
+  assert.ok(!del() || !b.visible(del()), 'a folder holding files cannot be deleted');
+  b.click(
+    [...sec('mediaPage').querySelectorAll('button')].find(
+      (x) => x.textContent.trim() === 'All files',
+    ),
+  );
+  await wait(() => sub('empty-one'));
+  b.click(sub('empty-one'));
+  await wait(() => del() && b.visible(del()));
+});
+
+test('media: tick several files, then move them to a folder in one go', async () => {
+  b.go('#/media-analytics');
+  await wait(() => sec('mediaAnalyticsPage'));
+  b.go('#/media');
+  await wait(() => sec('mediaPage'));
+  await wait(() => sec('mediaPage').querySelector('.media-tile'));
+  b.click(sec('mediaPage').querySelector('.media-pick'));
+  await wait(() => b.visible(sec('mediaPage').querySelector('.bulk-bar')));
+  const moveTo = sec('mediaPage').querySelector('.bulk-bar select');
+  await wait(() => [...moveTo.options].some((o) => o.value === 'empty-one'));
+  setValue(moveTo, 'empty-one');
+  const before = (
+    await node.ctx.db('media').where({ folder: 'empty-one' }).count({ n: '*' }).first()
+  ).n;
+  b.click(sec('mediaPage').querySelector('[data-bulk-move]'));
+  await wait(
+    async () =>
+      Number(
+        (await node.ctx.db('media').where({ folder: 'empty-one' }).count({ n: '*' }).first()).n,
+      ) ===
+      Number(before) + 1,
+  );
+});

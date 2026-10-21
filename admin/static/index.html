@@ -429,6 +429,14 @@
       <section x-data="mediaGeneratorPage"></section>
     </template>
 
+    <template x-if="route === 'ai-usage-text'">
+      <section x-data="aiUsagePage('text')"></section>
+    </template>
+
+    <template x-if="route === 'ai-usage-media'">
+      <section x-data="aiUsagePage('media')"></section>
+    </template>
+
     <template x-if="route === 'media-analytics'">
       <section x-data="mediaAnalyticsPage"></section>
     </template>

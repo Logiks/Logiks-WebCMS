@@ -765,21 +765,25 @@ body {
 }
 .media-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(8.5rem, 1fr));
-  gap: 0.75rem;
-  padding: 0.75rem;
+  grid-template-columns: repeat(auto-fill, minmax(7rem, 1fr));
+  gap: 0.5rem;
+  padding: 0.5rem;
 }
 .media-tile {
   background: var(--surface);
   border: 1px solid var(--line);
-  border-radius: 6px;
-  padding: 0.4rem;
+  border-radius: 8px;
+  padding: 0.3rem;
   text-align: left;
   font: inherit;
   cursor: pointer;
   display: flex;
   flex-direction: column;
-  gap: 0.3rem;
+  gap: 0.25rem;
+  transition: box-shadow 0.15s;
+}
+.media-tile:hover {
+  box-shadow: 0 2px 8px rgba(18, 52, 59, 0.12);
 }
 .media-tile:hover,
 .media-tile.sel {
@@ -816,6 +820,52 @@ body {
 .ph.big {
   aspect-ratio: auto;
   max-height: 14rem;
+}
+.media-side {
+  position: sticky;
+  top: 1rem;
+  padding: 0.9rem;
+  border-radius: 10px;
+  box-shadow: 0 2px 12px rgba(18, 52, 59, 0.08);
+}
+.media-side .ph.big {
+  max-height: 45vh;
+  background: var(--paper);
+}
+.folder-chip {
+  font-size: 0.95rem;
+  padding: 0.45rem 0.9rem;
+  border-radius: 8px;
+  background: var(--surface);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+.folder-chip i {
+  color: var(--cobalt);
+  font-size: 1.1rem;
+}
+.crumbs {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0.4rem 0.75rem;
+}
+.crumb {
+  border: 0;
+  background: none;
+  padding: 0.1rem 0.4rem;
+  border-radius: 5px;
+  color: var(--cobalt);
+  font: inherit;
+  font-size: 0.9rem;
+}
+.crumb:hover {
+  background: var(--paper);
+}
+.crumb.on {
+  color: inherit;
+  font-weight: 600;
 }
 .ph.big img {
   object-fit: contain;
@@ -1544,4 +1594,38 @@ body {
   .pd-frame iframe {
     height: 50vh;
   }
+}
+
+/* Media: ticking several files for a bulk move, copy or delete */
+.media-cell {
+  position: relative;
+  display: flex;
+}
+.media-cell .media-tile {
+  flex: 1;
+  min-width: 0;
+}
+.media-pick {
+  position: absolute;
+  top: 0.55rem;
+  left: 0.55rem;
+  z-index: 2;
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+.media-cell:hover .media-pick,
+.media-cell.picked .media-pick,
+.media-pick:focus-visible,
+.media-grid:has(.picked) .media-pick {
+  opacity: 1;
+}
+.media-cell.picked .media-tile {
+  border-color: var(--cobalt);
+  box-shadow: 0 0 0 2px rgba(43, 89, 195, 0.25);
+}
+.bulk-bar {
+  background: var(--surface);
+  border: 1px solid var(--cobalt);
+  border-radius: 8px;
+  padding: 0.4rem 0.75rem;
 }

@@ -10,6 +10,11 @@ const patch = z.object({
   filename: z.string().min(1).max(255).optional(),
   folder: z.string().max(191).optional(),
 });
+const bulkBody = z.object({
+  ids: z.array(z.number().int().positive()).min(1).max(200),
+  folder: z.string().max(191).optional(),
+  force: z.boolean().optional(),
+});
 const folderBody = z.object({ path: z.string().min(1).max(191) });
 const renameBody = z.object({ from: z.string().min(1).max(191), to: z.string().min(1).max(191) });
 const compressBody = z.object({ mode: z.enum(['copy', 'replace']) });
@@ -88,6 +93,24 @@ export default function mediaRoutes(ctx) {
   r.get('/media/analytics', requirePermission('media.read'), async (_req, res) => {
     res.json(await media.analytics());
   });
+
+  // Several files at once. These sit before '/media/:id' so "bulk" is never read as an id.
+  for (const [action, perm] of [
+    ['move', 'media.upload'],
+    ['copy', 'media.upload'],
+    ['delete', 'media.delete'],
+  ])
+    r.post(
+      `/media/bulk/${action}`,
+      requirePermission(perm),
+      docs({ body: bulkBody }),
+      async (req, res) => {
+        const b = parse(bulkBody, req.body);
+        if (action !== 'delete' && b.folder === undefined)
+          throw new HttpError(422, 'invalid_input', 'Choose a folder first.');
+        res.json(await media.bulk(action, b.ids, b, actorOf(req)));
+      },
+    );
 
   r.get('/media/:id', requirePermission('media.read'), async (req, res) => {
     const item = await media.get(req.params.id);

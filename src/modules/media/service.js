@@ -719,7 +719,11 @@ export function createMediaService({
       return row(r);
     },
 
-    async update(id, { alt, filename, folder }, actor = null) {
+    async update(
+      id,
+      /** @type {{ alt?: string, filename?: string, folder?: string }} */ { alt, filename, folder },
+      actor = null,
+    ) {
       const m = await svc.get(id);
       const patch = { updated_at: now() };
       if (folder !== undefined) patch.folder = cleanFolder(folder);
@@ -797,6 +801,51 @@ export function createMediaService({
         },
         { tags: ['media-analytics'], ttl: 300 },
       );
+    },
+
+    /** A duplicate in `folder` (the same folder when omitted), byte-for-byte: an upload stored as-is stays as-is. */
+    async copy(id, /** @type {{ folder?: string }} */ { folder } = {}, actor = null) {
+      const m = await svc.get(id);
+      const buffer = await readAll(`m/${m.id}/${m.originalFile}`).catch(() => {
+        throw new HttpError(
+          404,
+          'file_missing',
+          'The stored file could not be read, so it can’t be copied.',
+        );
+      });
+      return svc.upload(
+        {
+          buffer,
+          name: m.filename,
+          alt: m.alt,
+          folder: folder === undefined ? m.folder : folder,
+          compress: !m.canCompress,
+        },
+        actor,
+      );
+    },
+
+    /**
+     * Move, copy or delete several files. One bad file never stops the rest: the result says what happened to each.
+     * A delete skips files that are in use unless `force` is set, and reports them as `in_use`.
+     * @param {'move'|'copy'|'delete'} action
+     * @param {number[]} ids
+     * @param {{ folder?: string, force?: boolean }} [opts]
+     */
+    async bulk(action, ids, { folder, force = false } = {}, actor = null) {
+      const done = [];
+      const failed = [];
+      for (const id of [...new Set(ids.map(Number))]) {
+        try {
+          if (action === 'move') await svc.update(id, { folder }, actor);
+          else if (action === 'copy') await svc.copy(id, { folder }, actor);
+          else await svc.remove(id, { force }, actor);
+          done.push(id);
+        } catch (e) {
+          failed.push({ id, code: e.code ?? 'failed', message: e.message });
+        }
+      }
+      return { done, failed };
     },
 
     async remove(id, { force = false } = {}, actor = null) {

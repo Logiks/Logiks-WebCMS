@@ -90,7 +90,7 @@ export function createAiComponentWriter(ctx, { client: injectedClient } = {}) {
 
       let lastProblem = '';
       for (let attempt = 0; attempt < MAX_TRIES; attempt++) {
-        const raw = await ai.ask({ system, messages });
+        const raw = await ai.ask({ system, messages, feature: 'components' });
         const parsed = split(raw);
         const chosen = freeName(name ? slugName(name) : parsed.name);
         const path = `components/${chosen}.html`;

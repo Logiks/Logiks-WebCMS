@@ -20,10 +20,11 @@ const tokens = (s) =>
 
 /**
  * Translates site strings with Claude. Only the strings go out, never a secret or a page.
- * @param {{ settings: any }} deps
+ * @param {{ settings: any, aiUsage?: any }} ctx
  * @param {{ client?: any }} [opts] `client` is injectable so tests never call the paid API (as in the Page Designer).
  */
-export function createAiTranslator({ settings }, { client: injectedClient } = {}) {
+export function createAiTranslator(ctx, { client: injectedClient } = {}) {
+  const { settings } = ctx;
   return {
     /**
      * @param {{ from: string, to: string, entries: {key: string, text: string}[] }} job
@@ -37,7 +38,8 @@ export function createAiTranslator({ settings }, { client: injectedClient } = {}
           'ai_not_configured',
           'Set an Anthropic API key under Settings → AI first.',
         );
-      const client = injectedClient ?? new Anthropic({ apiKey: anthropic_api_key });
+      const rawClient = injectedClient ?? new Anthropic({ apiKey: anthropic_api_key });
+      const client = ctx.aiUsage?.wrap(rawClient, { feature: 'translations' }) ?? rawClient;
       const translated = {};
       const skipped = [];
       for (let i = 0; i < entries.length; i += BATCH) {

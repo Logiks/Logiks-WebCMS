@@ -7,7 +7,7 @@ const MODEL_DEFAULT = 'claude-sonnet-5-5';
  * One question, one answer, with the key and model from Settings → AI. The "write it for me" buttons (components,
  * pages, services, SEO) use this instead of a chat session: nothing is saved here and no tools are involved, so a
  * caller validates the answer itself before anything reaches the site.
- * @param {{ settings: any, prompts?: any }} ctx
+ * @param {{ settings: any, prompts?: any, aiUsage?: any }} ctx
  * @param {{ client?: any }} [opts] `client` is injectable so tests never call the paid API.
  */
 export function createAiOnce(ctx, { client: injected } = {}) {
@@ -20,10 +20,10 @@ export function createAiOnce(ctx, { client: injected } = {}) {
         .catch(() => '');
     },
     /**
-     * @param {{ system: string, messages: {role: 'user'|'assistant', content: string}[], maxTokens?: number }} q
+     * @param {{ system: string, messages: {role: 'user'|'assistant', content: string}[], maxTokens?: number, feature?: string }} q
      * @returns {Promise<string>} the text of the reply
      */
-    async ask({ system, messages, maxTokens = 16000 }) {
+    async ask({ system, messages, maxTokens = 16000, feature = 'ai-builder' }) {
       const { anthropic_api_key, model } = ctx.settings.ns('ai');
       if (!injected && !anthropic_api_key)
         throw new HttpError(
@@ -31,7 +31,8 @@ export function createAiOnce(ctx, { client: injected } = {}) {
           'ai_not_configured',
           'Set an Anthropic API key under Settings → AI first.',
         );
-      const client = injected ?? new Anthropic({ apiKey: anthropic_api_key });
+      const raw = injected ?? new Anthropic({ apiKey: anthropic_api_key });
+      const client = ctx.aiUsage?.wrap(raw, { feature }) ?? raw;
       try {
         const res = await client.messages.create({
           model: model || MODEL_DEFAULT,

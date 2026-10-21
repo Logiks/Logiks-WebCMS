@@ -1135,6 +1135,13 @@ document.addEventListener('alpine:init', () => {
             { id: 'audit', label: 'Audit log', perm: 'audit.read' },
             { id: 'content-activity', label: 'Activity', perm: 'content.activity' },
             { id: 'events', label: 'Events', module: 'events', perm: 'events.read' },
+            { id: 'ai-usage-text', label: 'Text usage', module: 'ai-usage', perm: 'aiusage.read' },
+            {
+              id: 'ai-usage-media',
+              label: 'Media usage',
+              module: 'ai-usage',
+              perm: 'aiusage.read',
+            },
           ],
         },
         {
@@ -2195,6 +2202,8 @@ document.addEventListener('alpine:init', () => {
     q: '',
     kind: '',
     folder: '', // the folder being browsed ('' = top level)
+    picked: [], // ids ticked for a move, copy or delete
+    bulkFolder: '', // where Move / Copy put them
     folders: [], // every folder: [{ path, files }]
     compress: true, // upload images compressed (the default) or exactly as they are
     current: null,
@@ -2231,6 +2240,7 @@ document.addEventListener('alpine:init', () => {
     async goto(path) {
       this.folder = path;
       this.current = null;
+      this.picked = [];
       await this.load();
     },
     crumbs() {
@@ -2270,6 +2280,65 @@ document.addEventListener('alpine:init', () => {
         await api('PUT', '/admin/media/folders', { from: this.folder, to });
         await this.loadFolders();
         await this.goto(to);
+      } catch (e) {
+        this.error = e.message;
+      }
+    },
+    /** A folder can only go when nothing is inside it (subfolders count), and the top level never can. */
+    folderEmpty() {
+      if (!this.folder) return false;
+      return !this.folders
+        .filter((f) => f.path === this.folder || f.path.startsWith(this.folder + '/'))
+        .some((f) => f.files > 0);
+    },
+    isPicked(id) {
+      return this.picked.includes(id);
+    },
+    pick(id) {
+      this.picked = this.isPicked(id) ? this.picked.filter((x) => x !== id) : [...this.picked, id];
+    },
+    pickAll() {
+      this.picked = this.picked.length === this.items.length ? [] : this.items.map((m) => m.id);
+    },
+    /** Move, copy or delete the ticked files. Per-file failures are listed; the rest still go through. */
+    async bulk(action) {
+      const ids = [...this.picked];
+      const n = ids.length;
+      const noun = n === 1 ? 'file' : 'files';
+      const where = this.bulkFolder || 'the top level';
+      if (action === 'delete' && !confirm(`Delete ${n} ${noun}? This can't be undone.`)) return;
+      this.error = '';
+      try {
+        const body = { ids, ...(action === 'delete' ? {} : { folder: this.bulkFolder }) };
+        let r = await api('POST', `/admin/media/bulk/${action}`, body);
+        const inUse = r.failed.filter((f) => f.code === 'in_use');
+        if (
+          action === 'delete' &&
+          inUse.length &&
+          confirm(
+            `${inUse.length} of them ${inUse.length === 1 ? 'is' : 'are'} used in entries. Delete anyway? Those spots will be empty.`,
+          )
+        ) {
+          const again = await api('POST', '/admin/media/bulk/delete', {
+            ids: inUse.map((f) => f.id),
+            force: true,
+          });
+          r = {
+            done: [...r.done, ...again.done],
+            failed: [...r.failed.filter((f) => f.code !== 'in_use'), ...again.failed],
+          };
+        }
+        const verb = { move: 'Moved', copy: 'Copied', delete: 'Deleted' }[action];
+        if (r.done.length)
+          toast(
+            `${verb} ${r.done.length} ${r.done.length === 1 ? 'file' : 'files'}${action === 'delete' ? '' : ` to ${where}`}.`,
+          );
+        if (r.failed.length)
+          this.error = `${r.failed.length} could not be ${verb.toLowerCase()}: ${r.failed[0].message}`;
+        this.picked = r.failed.map((f) => f.id);
+        if (this.current && r.done.includes(this.current.id) && action !== 'copy')
+          this.current = null;
+        await Promise.all([this.load(), this.loadFolders()]);
       } catch (e) {
         this.error = e.message;
       }
@@ -2549,6 +2618,65 @@ document.addEventListener('alpine:init', () => {
         if (r.failed?.length)
           this.error = r.failed.map((f) => `${f.path}: ${f.reason}`).join(' · ');
       });
+    },
+  }));
+
+  // ───────── System → AI Usage ─────────
+  Alpine.data('aiUsagePage', (kind = 'text') => ({
+    ...H,
+    kind,
+    s: null,
+    calls: [],
+    from: '',
+    to: '',
+    provider: '',
+    more: false,
+    error: '',
+    async init() {
+      if (!(await this.mountFragment('ai-usage', 'page'))) return;
+      await this.load();
+    },
+    params() {
+      const q = { kind: this.kind };
+      if (this.from) q.from = String(new Date(this.from).getTime());
+      if (this.to) q.to = String(new Date(this.to).getTime() + 86_400_000 - 1);
+      return q;
+    },
+    async load() {
+      this.error = '';
+      try {
+        const q = this.params();
+        const recent = { limit: '50', ...q, ...(this.provider ? { provider: this.provider } : {}) };
+        const [s, r] = await Promise.all([
+          api('GET', '/admin/ai-usage/summary?' + new URLSearchParams(q)),
+          api('GET', '/admin/ai-usage/recent?' + new URLSearchParams(recent)),
+        ]);
+        this.s = s;
+        this.calls = r.calls;
+        this.more = r.calls.length === 50;
+      } catch (e) {
+        this.error = e.message;
+      }
+    },
+    async loadMore() {
+      const q = {
+        limit: '50',
+        ...this.params(),
+        before: String(this.calls[this.calls.length - 1].id),
+        ...(this.provider ? { provider: this.provider } : {}),
+      };
+      const r = await api('GET', '/admin/ai-usage/recent?' + new URLSearchParams(q));
+      this.calls = [...this.calls, ...r.calls];
+      this.more = r.calls.length === 50;
+    },
+    n(v) {
+      return Number(v || 0).toLocaleString();
+    },
+    /** Text models report tokens; image providers report how many images were made. */
+    amount(c) {
+      return c.units
+        ? this.n(c.units) + (c.units === 1 ? ' image' : ' images')
+        : this.n(c.input + c.output) + ' tokens';
     },
   }));
 
@@ -8264,6 +8392,9 @@ document.addEventListener('alpine:init', () => {
     media: 'images files upload library pictures photos',
     'media-generator': 'ai image generate picture dall-e imagen stability',
     'media-analytics': 'media usage unused files',
+    'ai-usage-text': 'ai cost tokens anthropic models calls log',
+    'ai-usage-media': 'ai images generated openai google stability log',
+    _x: 'ai cost tokens anthropic openai google stability models calls log',
     plugins: 'plugin extensions add-ons install',
     'analytics-overview': 'traffic visitors page views statistics stats',
     'analytics-active': 'live now online users right now',

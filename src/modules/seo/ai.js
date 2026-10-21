@@ -71,6 +71,7 @@ export function createAiSeoWriter(ctx, { client } = {}) {
         system: guidance ? `${SYSTEM}\n\n${guidance}` : SYSTEM,
         messages: [{ role: 'user', content: user }],
         maxTokens: 3000,
+        feature: 'seo',
       });
       try {
         const out = shape.parse(jsonIn(raw));

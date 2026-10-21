@@ -26,6 +26,7 @@ import mediaGenerator from './media-generator/module.js';
 import pageDesigner from './page-designer/module.js';
 import research from './research/module.js';
 import assistant from './assistant/module.js';
+import aiUsage from './ai-usage/module.js';
 import prompts from './prompts/module.js';
 import visual from './visual/module.js';
 import testing from './testing/module.js';
@@ -68,6 +69,7 @@ export const builtinModules = [
   testing,
   research,
   pageDesigner,
+  aiUsage,
   assistant,
   api,
   features,

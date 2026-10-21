@@ -144,6 +144,9 @@ export function defineCorePermissions(permissions) {
   permissions.define('Analytics', {
     'analytics.read': 'View site and admin activity: page views, sessions and user activity',
   });
+  permissions.define('AI Usage', {
+    'aiusage.read': 'View the log of AI calls: providers, models, tokens and who made them',
+  });
   permissions.define('Database', {
     'dbms.read': 'Browse database tables, their data and structure',
     'dbms.write': 'Add, edit and delete records; create and drop tables',

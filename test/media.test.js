@@ -573,3 +573,33 @@ test('more formats: other images, videos and documents are identified by their b
   assert.equal(b.body.item.kind, 'image');
   assert.equal(b.body.item.canCompress, false);
 });
+
+test('bulk: move, copy and delete several files; one bad id does not stop the rest', async () => {
+  const a = (await upload(admin, await photo(), 'a.jpg', '&compress=false')).body.item;
+  const b = (await upload(admin, await photo(), 'b.jpg')).body.item;
+  const post = (act, body) =>
+    admin.post(`/api/admin/media/bulk/${act}`).set('content-type', 'application/json').send(body);
+
+  const moved = await post('move', { ids: [a.id, b.id, 999999], folder: 'Sorted' });
+  assert.equal(moved.status, 200);
+  assert.deepEqual(moved.body.done, [a.id, b.id]);
+  assert.equal(moved.body.failed.length, 1, 'the missing file is reported, not fatal');
+  assert.equal((await admin.get(`/api/admin/media/${a.id}`)).body.item.folder, 'Sorted');
+
+  const copied = await post('copy', { ids: [a.id, b.id], folder: 'Backup' });
+  assert.equal(copied.body.done.length, 2);
+  const inBackup = (await admin.get('/api/admin/media?folder=Backup')).body.items;
+  assert.deepEqual(inBackup.map((m) => m.filename).sort(), ['a.jpg', 'b.jpg']);
+  assert.ok(
+    inBackup.every((m) => m.id !== a.id && m.id !== b.id),
+    'copies are new files',
+  );
+  const copyOfA = inBackup.find((m) => m.filename === 'a.jpg');
+  assert.equal(copyOfA.canCompress, true, 'a copy of an as-uploaded image stays as uploaded');
+
+  const del = await post('delete', { ids: inBackup.map((m) => m.id) });
+  assert.equal(del.body.done.length, 2);
+  assert.equal((await admin.get('/api/admin/media?folder=Backup')).body.items.length, 0);
+
+  assert.equal((await post('copy', { ids: [a.id] })).status, 422, 'a destination is required');
+});

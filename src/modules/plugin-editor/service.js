@@ -557,7 +557,9 @@ export function createPluginEditor(ctx, { pluginsDir, client: injectedClient }) 
       const newRows = [{ role: 'user', content: trimmed }];
       messages.push(newRows[0]);
 
-      const client = injectedClient ?? new Anthropic({ apiKey: anthropic_api_key });
+      const rawClient = injectedClient ?? new Anthropic({ apiKey: anthropic_api_key });
+      const client =
+        ctx.aiUsage?.wrap(rawClient, { feature: 'plugin-editor', userId: actor?.id }) ?? rawClient;
       const tools = toolsFor(session);
 
       for (let i = 0; i < MAX_ITERATIONS; i++) {

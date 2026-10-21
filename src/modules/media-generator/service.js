@@ -187,8 +187,20 @@ export function createMediaGenerator(ctx, { fetch: fetchImpl = fetch } = {}) {
         );
       try {
         const { base64, mime } = await gen(key, text, fetchImpl);
+        await ctx.aiUsage?.record({
+          provider,
+          model: DEFAULTS[provider].model,
+          feature: 'media-generator',
+          units: 1,
+        });
         return { dataUrl: `data:${mime};base64,${base64}`, mime };
       } catch (e) {
+        await ctx.aiUsage?.record({
+          provider,
+          model: DEFAULTS[provider].model,
+          feature: 'media-generator',
+          ok: false,
+        });
         throw new HttpError(502, 'generation_failed', `${LABELS[provider]}: ${e.message}`, {
           cause: e,
         });
