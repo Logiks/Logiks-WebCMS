@@ -1,0 +1,27 @@
+{
+  "slug": "file-manager",
+  "name": "File Manager",
+  "version": "1.0.0",
+  "author": "SmartinfoLogiks",
+  "description": "Browse, create, edit, rename and delete the source files under public (the site tree), site (shipped themes and wording) and plugins, with file-wide search. Deleting asks you to type the name first and refuses protected paths.",
+  "menu": { "label": "File Manager", "icon": "bi-folder2-open" },
+  "permissions": [
+    { "key": "file_manager.view", "label": "Browse and search files in the File Manager" },
+    { "key": "file_manager.edit", "label": "Create, edit and rename files in the File Manager" },
+    { "key": "file_manager.delete", "label": "Delete files and folders in the File Manager" }
+  ],
+  "config": {
+    "max_edit_kb": {
+      "type": "number",
+      "label": "Largest editable file (KB)",
+      "default": 512,
+      "help": "Bigger text files can be searched but not opened in the editor."
+    },
+    "max_search_results": {
+      "type": "number",
+      "label": "Most search results shown",
+      "default": 500,
+      "help": "A search stops here and says so, so a very common word can't flood the screen."
+    }
+  }
+}

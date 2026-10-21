@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>IP Viewer</title>
+</head>
+<body>
+  <div
+    x-data="{
+      loading: true,
+      error: null,
+      data: {},
+      showHeaders: false,
+      async load() {
+        this.loading = true;
+        this.error = null;
+        try {
+          const res = await fetch('/api/admin/apps/ip-viewer/ip', { credentials: 'same-origin' });
+          if (!res.ok) { throw new Error('Request failed: ' + res.status); }
+          this.data = await res.json();
+        } catch (e) {
+          this.error = (e && e.message) ? e.message : 'Failed to load IP info';
+        } finally {
+          this.loading = false;
+        }
+      }
+    }"
+    x-init="load()"
+    style="max-width:640px;margin:2rem auto;font-family:system-ui,sans-serif;"
+  >
+    <h1 style="font-size:1.4rem;margin-bottom:1rem;">Your Current IP</h1>
+
+    <template x-if="loading">
+      <p>Loading…</p>
+    </template>
+
+    <template x-if="error">
+      <p style="color:#b91c1c;" x-text="error"></p>
+    </template>
+
+    <template x-if="!loading && !error">
+      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:1rem;">
+        <div style="font-size:2rem;font-weight:700;margin-bottom:0.5rem;" x-text="data.ip || 'Unknown'"></div>
+        <table style="width:100%;border-collapse:collapse;font-size:0.9rem;">
+          <tbody>
+            <tr>
+              <td style="padding:4px 8px;color:#64748b;">Raw remote address</td>
+              <td style="padding:4px 8px;" x-text="data.remoteAddress || '—'"></td>
+            </tr>
+            <tr>
+              <td style="padding:4px 8px;color:#64748b;">X-Forwarded-For</td>
+              <td style="padding:4px 8px;" x-text="data.forwardedFor || '—'"></td>
+            </tr>
+            <tr>
+              <td style="padding:4px 8px;color:#64748b;">X-Real-IP</td>
+              <td style="padding:4px 8px;" x-text="data.realIp || '—'"></td>
+            </tr>
+            <tr>
+              <td style="padding:4px 8px;color:#64748b;">CF-Connecting-IP</td>
+              <td style="padding:4px 8px;" x-text="data.cfConnectingIp || '—'"></td>
+            </tr>
+            <tr>
+              <td style="padding:4px 8px;color:#64748b;">True-Client-IP</td>
+              <td style="padding:4px 8px;" x-text="data.trueClientIp || '—'"></td>
+            </tr>
+            <tr>
+              <td style="padding:4px 8px;color:#64748b;">User agent</td>
+              <td style="padding:4px 8px;" x-text="data.userAgent || '—'"></td>
+            </tr>
+            <tr x-show="data.user">
+              <td style="padding:4px 8px;color:#64748b;">Logged in as</td>
+              <td style="padding:4px 8px;" x-text="data.user ? (data.user.email + ' (#' + data.user.id + ')') : ''"></td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div style="margin-top:1rem;display:flex;gap:0.5rem;">
+          <button
+            @click="load()"
+            style="padding:0.4rem 0.9rem;border:1px solid #cbd5e1;border-radius:6px;background:#fff;cursor:pointer;">
+            Refresh
+          </button>
+          <button
+            @click="showHeaders = !showHeaders"
+            style="padding:0.4rem 0.9rem;border:1px solid #cbd5e1;border-radius:6px;background:#fff;cursor:pointer;">
+            <span x-text="showHeaders ? 'Hide raw headers' : 'Show raw headers'"></span>
+          </button>
+        </div>
+
+        <pre
+          x-show="showHeaders"
+          style="margin-top:0.75rem;background:#0f172a;color:#e2e8f0;padding:0.75rem;border-radius:6px;font-size:0.75rem;overflow:auto;max-height:260px;"
+          x-text="JSON.stringify(data.headers || {}, null, 2)"
+        ></pre>
+      </div>
+    </template>
+  </div>
+</body>
+</html>

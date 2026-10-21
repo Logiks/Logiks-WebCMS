@@ -1,0 +1,11 @@
+{
+  "slug": "ip-viewer",
+  "name": "IP Viewer",
+  "version": "1.1.0",
+  "author": "Admin",
+  "description": "Shows the current visitor's/admin's IP address.",
+  "menu": {
+    "label": "IP Viewer",
+    "icon": "globe"
+  }
+}

@@ -1,0 +1,199 @@
+<link rel="stylesheet" href="/admin/modules/plugin-file-manager/file-manager.css">
+
+<div class="fm" x-data="fileManager" data-testid="file-manager">
+  <header class="fm-head">
+    <h1>File Manager</h1>
+    <p>Source files under <b>public</b>, <b>site</b> and <b>plugins</b></p>
+    <div class="fm-seg" role="tablist" aria-label="View">
+      <button type="button" role="tab" :class="{ on: tab === 'files' }" :aria-selected="tab === 'files'" @click="tab = 'files'"><i class="bi bi-folder2-open"></i> Files</button>
+      <button type="button" role="tab" :class="{ on: tab === 'search' }" :aria-selected="tab === 'search'" @click="tab = 'search'"><i class="bi bi-search"></i> Search</button>
+    </div>
+  </header>
+
+  <div class="alert alert-danger mb-0" role="alert" x-show="error" x-text="error"></div>
+  <div class="alert alert-success mb-0" role="status" x-show="notice" x-text="notice"></div>
+
+  <!-- ───────── Files ───────── -->
+  <div class="fm-body" x-show="tab === 'files'">
+    <aside class="fm-side fm-card">
+      <div class="fm-side-top">
+        <div class="fm-seg roots" role="group" aria-label="Folder">
+          <template x-for="r in roots" :key="r.id">
+            <button type="button" :class="{ on: root === r.id }" x-text="r.label" @click="switchRoot(r.id)"></button>
+          </template>
+        </div>
+        <p class="fm-note" x-text="rootNote"></p>
+        <nav class="fm-crumbs" aria-label="Path">
+          <a href="#" @click.prevent="goDir('')" x-text="root"></a>
+          <template x-for="(seg, i) in crumbs" :key="i">
+            <span>/ <a href="#" @click.prevent="goDir(crumbs.slice(0, i + 1).join('/'))" x-text="seg"></a></span>
+          </template>
+        </nav>
+        <div class="fm-tools" x-show="can.edit">
+          <button type="button" class="btn btn-outline-secondary" @click="startCreate('file')"><i class="bi bi-file-earmark-plus"></i> File</button>
+          <button type="button" class="btn btn-outline-secondary" @click="startCreate('dir')"><i class="bi bi-folder-plus"></i> Folder</button>
+          <button type="button" class="btn btn-outline-secondary ms-auto" @click="loadDir()" aria-label="Refresh"><i class="bi bi-arrow-clockwise"></i></button>
+        </div>
+      </div>
+
+      <form class="fm-create" x-show="creating" style="display:none" @submit.prevent="create()">
+        <label class="form-label small fw-semibold mb-0" for="fm-new" x-text="creating === 'dir' ? 'New folder name' : 'New file name'"></label>
+        <div class="row-in">
+          <input id="fm-new" class="form-control form-control-sm" x-model="newName" :placeholder="creating === 'dir' ? 'my-folder' : 'notes.md'" autocomplete="off">
+          <button type="submit" class="btn btn-primary btn-sm" :disabled="busy || !newName.trim()">Create</button>
+          <button type="button" class="btn btn-outline-secondary btn-sm" @click="creating = ''" aria-label="Cancel"><i class="bi bi-x-lg"></i></button>
+        </div>
+        <div class="form-text">In <span class="mono" x-text="root + '/' + path"></span></div>
+      </form>
+
+      <div class="fm-empty" x-show="loaded && !entries.length && !path">This folder is empty.</div>
+      <ul class="fm-list" x-show="entries.length || path">
+        <li x-show="path">
+          <a href="#" class="fm-name" @click.prevent="goDir(crumbs.slice(0, -1).join('/'))"><i class="bi bi-arrow-90deg-up"></i><span class="t">Up</span></a>
+        </li>
+        <template x-for="e in entries" :key="e.type + e.name">
+          <li :class="{ on: e.type === 'file' && file && file.path === join(path, e.name) }">
+            <template x-if="e.type === 'dir'">
+              <a href="#" class="fm-name" @click.prevent="goDir(join(path, e.name))"><i class="bi bi-folder-fill dir"></i><span class="t" x-text="e.name"></span></a>
+            </template>
+            <template x-if="e.type === 'file'">
+              <a href="#" class="fm-name" @click.prevent="openFile(join(path, e.name))"><i :class="'bi ' + iconOf(e.name) + ' code'"></i><span class="t" x-text="e.name"></span></a>
+            </template>
+            <template x-if="e.type === 'link'">
+              <span class="fm-name" title="A link — not shown or editable" style="opacity:.6"><i class="bi bi-link-45deg"></i><span class="t" x-text="e.name"></span></span>
+            </template>
+            <span class="fm-meta" x-text="e.type === 'dir' ? (e.size == null ? '' : e.size + ' files') : size(e.size)"></span>
+            <span class="fm-acts" x-show="e.type !== 'link'">
+              <button type="button" class="fm-icon-btn" x-show="can.edit" @click="startRename(e)" :aria-label="'Rename ' + e.name" title="Rename or move"><i class="bi bi-pencil"></i></button>
+              <button type="button" class="fm-icon-btn danger" x-show="can.delete" @click="askDelete(join(path, e.name))" :aria-label="'Delete ' + e.name" title="Delete"><i class="bi bi-trash"></i></button>
+            </span>
+          </li>
+        </template>
+      </ul>
+    </aside>
+
+    <section class="fm-main fm-card" @keydown.ctrl.s.prevent="save()" @keydown.meta.s.prevent="save()">
+      <div class="fm-main-empty" x-show="!file">
+        <div><i class="bi bi-code-square"></i>Choose a file to open it here.</div>
+      </div>
+      <template x-for="f in (file ? [file.path] : [])" :key="f">
+        <div class="fm-main-wrap">
+          <div class="fm-ed-head">
+            <div class="fm-ed-path"><span class="root" x-text="root + '/' + dirOf(file.path)"></span><b x-text="baseOf(file.path)"></b><span class="fm-dirty" x-show="dirty" title="Unsaved changes"></span></div>
+            <div class="fm-ed-actions">
+              <button type="button" class="btn btn-sm fm-ai" x-show="canAsk" @click="askAI()" title="Open the assistant about this file (your selection is included)"><i class="bi bi-stars"></i> Ask AI</button>
+              <button type="button" class="btn btn-sm btn-outline-secondary" @click="closeFile()">Close</button>
+              <button type="button" class="btn btn-sm btn-primary" x-show="can.edit" :disabled="busy || !dirty" @click="save()" x-text="busy ? 'Saving…' : 'Save'"></button>
+            </div>
+          </div>
+          <div class="fm-editor">
+            <textarea spellcheck="false" aria-label="File content"
+              x-monaco="{ language: langOf(file.path), liquid: root === 'public' && /\.html$/.test(file.path), get: content, set: (v) => (content = v), readOnly: !can.edit, name: file.path, label: 'File content' }"></textarea>
+          </div>
+          <div class="fm-status">
+            <span x-text="langOf(file.path)"></span>
+            <span x-text="size(file.size)"></span>
+            <span class="sp" x-text="can.edit ? 'Ctrl/Cmd+S to save' : 'Read-only'"></span>
+          </div>
+        </div>
+      </template>
+    </section>
+  </div>
+
+  <!-- ───────── Search ───────── -->
+  <div class="fm-searchview" x-show="tab === 'search'" style="display:none">
+    <form class="fm-card fm-find" @submit.prevent="runSearch()">
+      <div class="row g-3">
+        <div class="col-lg-5">
+          <label class="form-label" for="fm-q">Find</label>
+          <input id="fm-q" class="form-control" x-model="q" placeholder="Text to look for" autocomplete="off">
+        </div>
+        <div class="col-sm-4 col-lg-2">
+          <label class="form-label" for="fm-scope">In</label>
+          <select id="fm-scope" class="form-select" x-model="scope">
+            <option value="all">Everywhere</option>
+            <template x-for="r in roots" :key="r.id"><option :value="r.id" x-text="r.label"></option></template>
+          </select>
+        </div>
+        <div class="col-sm-4 col-lg-3">
+          <label class="form-label" for="fm-glob">Only files named</label>
+          <input id="fm-glob" class="form-control" x-model="glob" placeholder="*.js, *.html" autocomplete="off">
+        </div>
+        <div class="col-sm-4 col-lg-2">
+          <label class="form-label" for="fm-mode">Look in</label>
+          <select id="fm-mode" class="form-select" x-model="mode"><option value="content">File contents</option><option value="name">File names</option></select>
+        </div>
+      </div>
+      <div class="fm-find-opts">
+        <label class="form-check"><input type="checkbox" class="form-check-input" x-model="optCase"> <span class="form-check-label">Match case</span></label>
+        <label class="form-check"><input type="checkbox" class="form-check-input" x-model="optWord"> <span class="form-check-label">Whole word</span></label>
+        <label class="form-check"><input type="checkbox" class="form-check-input" x-model="optRegex"> <span class="form-check-label">Regular expression</span></label>
+        <button type="submit" class="btn btn-primary ms-auto px-4" :disabled="busy || !q.trim()" x-text="busy ? 'Searching…' : 'Search'"></button>
+      </div>
+    </form>
+
+    <div class="alert alert-warning mt-3 mb-0" role="status" x-show="truncated" x-text="truncated"></div>
+    <div class="fm-sum mt-3" x-show="searched" x-text="resultSummary"></div>
+    <div class="fm-card mt-2" x-show="results.length">
+      <ul class="fm-results">
+        <template x-for="(hit, i) in results" :key="i">
+          <li class="fm-hit">
+            <a href="#" @click.prevent="openHit(hit)" x-text="hit.root + '/' + hit.path"></a>
+            <span class="ln" x-text="hit.line ? 'L' + hit.line : ''"></span>
+            <span class="tx" x-text="hit.text"></span>
+          </li>
+        </template>
+      </ul>
+    </div>
+    <div class="fm-card fm-empty mt-2" x-show="searched && !results.length && !busy">Nothing matched. Try fewer words, or turn off “Match case” and “Whole word”.</div>
+  </div>
+
+  <!-- ───────── Rename ───────── -->
+  <div class="fm-backdrop" x-show="renaming" style="display:none" @keydown.escape.window="renaming = null">
+    <form class="fm-dialog" @submit.prevent="rename()" role="dialog" aria-modal="true" aria-label="Rename">
+      <h2>Rename or move</h2>
+      <label class="form-label small mb-1" for="fm-rename">New path, relative to <span class="mono" x-text="root"></span></label>
+      <input id="fm-rename" class="form-control mono" x-model="renameTo" autocomplete="off">
+      <div class="foot">
+        <button type="button" class="btn btn-outline-secondary" @click="renaming = null">Cancel</button>
+        <button type="submit" class="btn btn-primary" :disabled="busy || !renameTo.trim()">Rename</button>
+      </div>
+    </form>
+  </div>
+
+  <!-- ───────── Delete (typed confirmation) ───────── -->
+  <div class="fm-backdrop" x-show="del" style="display:none" @keydown.escape.window="del = null">
+    <form class="fm-dialog" @submit.prevent="confirmDelete()" role="dialog" aria-modal="true" aria-label="Delete">
+      <template x-if="del">
+        <div>
+          <h2 class="text-danger"><i class="bi bi-exclamation-triangle"></i> Delete <span x-text="del.kind === 'dir' ? 'folder' : 'file'"></span></h2>
+          <div class="path" x-text="del.root + '/' + del.path"></div>
+          <div class="alert alert-danger" role="alert" x-show="del.blockedReason" x-text="del.blockedReason"></div>
+          <template x-if="!del.blockedReason">
+            <div>
+              <p class="mb-2" x-show="del.kind === 'dir'">
+                This folder holds <b x-text="del.files"></b> file<span x-show="del.files !== 1">s</span> (<span x-text="size(del.bytes)"></span>). Everything inside is removed.
+              </p>
+              <p class="mb-2" x-show="del.kind !== 'dir'">This file (<span x-text="size(del.bytes)"></span>) is removed.</p>
+              <p class="small text-secondary" x-show="del.root === 'public'">It is removed from the site tree for every server. The site’s change history keeps the previous version.</p>
+              <p class="small text-secondary" x-show="del.root !== 'public'">There is no undo — it is removed from this server’s disk. Restore it from git or a backup if you need it back.</p>
+              <label class="form-check mb-3" x-show="del.needsRecursive">
+                <input type="checkbox" class="form-check-input" x-model="delRecursive"> <span class="form-check-label">Delete everything inside</span>
+              </label>
+              <label class="form-label small mb-1" for="fm-del-confirm">Type <b class="mono" x-text="del.name"></b> to confirm</label>
+              <input id="fm-del-confirm" class="form-control mono" x-model="delConfirm" autocomplete="off" spellcheck="false">
+            </div>
+          </template>
+          <div class="alert alert-danger mt-3 mb-0" role="alert" x-show="delError" x-text="delError"></div>
+          <div class="foot">
+            <button type="button" class="btn btn-outline-secondary" @click="del = null">Cancel</button>
+            <button type="submit" class="btn btn-danger" x-show="!del.blockedReason" :disabled="busy || delConfirm !== del.name || (del.needsRecursive && !delRecursive)">Delete permanently</button>
+          </div>
+        </div>
+      </template>
+    </form>
+  </div>
+</div>
+
+<!-- Not inline: the admin's Content-Security-Policy only runs scripts served from this site. -->
+<script src="/admin/modules/plugin-file-manager/app.js"></script>

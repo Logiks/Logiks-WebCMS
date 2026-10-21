@@ -25,9 +25,9 @@ test.json
 test1.json
 
 usermedia/
-logs/
-data/
-temp/
+./logs/
+./data/
+./temp/
 zold/
 ./cache/
 plugins/*
