@@ -2,6 +2,7 @@
 section: support
 title: Maintenance checklist and command line
 summary: What to check daily, weekly and monthly, and the command-line tools for when the admin is not enough.
+icon: bi-tools
 order: 40
 ---
 

@@ -2,6 +2,7 @@
 section: support
 title: Reporting a problem
 summary: What to collect so a problem can be fixed in one round trip, for support staff and for you.
+icon: bi-flag
 order: 30
 ---
 

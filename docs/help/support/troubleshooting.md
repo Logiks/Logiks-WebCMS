@@ -2,6 +2,8 @@
 section: support
 title: Troubleshooting
 summary: Symptoms, likely causes and the fix, for the problems people hit most often.
+layout: lookup
+icon: bi-wrench-adjustable
 order: 10
 ---
 

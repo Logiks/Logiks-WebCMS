@@ -2,6 +2,8 @@
 section: support
 title: Frequently asked questions
 summary: Quick answers to the questions asked most often.
+layout: accordion
+icon: bi-question-circle
 order: 20
 ---
 

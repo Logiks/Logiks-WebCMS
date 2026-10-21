@@ -1078,3 +1078,81 @@ a {
 .help-doc table {
   font-size: 0.9rem;
 }
+
+/* Help → Support (D-115): landing search, icon cards, filters, FAQ accordion, phone-friendly tables. */
+.help-hero {
+  border-left: 4px solid var(--bs-primary);
+}
+.help-card-icon {
+  color: var(--bs-primary);
+  font-size: 1.15rem;
+}
+.help-cta {
+  padding: 0.75rem 1rem;
+  background: var(--soft, #f4f7f6);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.help-doc details.help-qa {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  margin: 0.5rem 0;
+  background: var(--bs-body-bg);
+}
+.help-doc details.help-qa[hidden],
+.help-doc tr[hidden] {
+  display: none;
+}
+.help-doc details.help-qa > summary {
+  cursor: pointer;
+  padding: 0.65rem 1rem;
+  font-weight: 600;
+  list-style-position: inside;
+}
+.help-doc details.help-qa > summary:focus-visible {
+  outline: 2px solid var(--bs-primary);
+  outline-offset: -2px;
+}
+.help-doc details.help-qa[open] > summary {
+  border-bottom: 1px solid var(--line);
+}
+.help-doc details.help-qa > p {
+  margin: 0;
+  padding: 0.75rem 1rem;
+}
+.help-doc td:first-child {
+  font-weight: 600;
+}
+@media (max-width: 767.98px) {
+  /* Each row becomes a card; the column name sits above its value. */
+  .help-doc .table-responsive table,
+  .help-doc .table-responsive tbody,
+  .help-doc .table-responsive tr,
+  .help-doc .table-responsive td {
+    display: block;
+    width: 100%;
+  }
+  .help-doc .table-responsive thead {
+    display: none;
+  }
+  .help-doc .table-responsive tr {
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    margin: 0 0 0.75rem;
+    padding: 0.25rem 0.75rem;
+    background: var(--bs-body-bg);
+  }
+  .help-doc .table-responsive td {
+    border: 0;
+    padding: 0.4rem 0;
+  }
+  .help-doc .table-responsive td::before {
+    content: attr(data-label);
+    display: block;
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: var(--muted);
+  }
+}

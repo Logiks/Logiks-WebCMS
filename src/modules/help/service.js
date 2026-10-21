@@ -143,13 +143,14 @@ export function createHelp(ctx) {
           return `<pre><code${cls}>${esc(text)}</code></pre>\n`;
         },
         table(token) {
-          const head = token.header
-            .map((c) => `<th>${this.parser.parseInline(c.tokens)}</th>`)
-            .join('');
+          const heads = token.header.map((c) => this.parser.parseInline(c.tokens));
+          const head = heads.map((h) => `<th>${h}</th>`).join('');
+          // data-label lets a phone show each row as a card with the column name beside each value.
+          const label = (i) => esc(heads[i].replace(/<[^>]*>/g, ''));
           const rows = token.rows
             .map(
               (r) =>
-                `<tr>${r.map((c) => `<td>${this.parser.parseInline(c.tokens)}</td>`).join('')}</tr>`,
+                `<tr>${r.map((c, i) => `<td data-label="${label(i)}">${this.parser.parseInline(c.tokens)}</td>`).join('')}</tr>`,
             )
             .join('');
           return `<div class="table-responsive"><table class="table table-sm"><thead><tr>${head}</tr></thead><tbody>${rows}</tbody></table></div>\n`;
@@ -232,7 +233,18 @@ export function createHelp(ctx) {
     section: e.section,
     title: e.d.front.title ?? e.slug,
     summary: e.d.front.summary ?? '',
+    icon: /^bi-[a-z0-9-]+$/.test(e.d.front.icon ?? '') ? e.d.front.icon : '',
   });
+
+  /**
+   * `layout: accordion` guides: a paragraph that starts with a bold question ("**Why…?**" then the answer on the next line)
+   * becomes a collapsible item, so a long FAQ can be scanned by its questions.
+   */
+  const accordion = (html) =>
+    html.replace(
+      /<p><strong>([^<]*\?)<\/strong>\s*([\s\S]*?)<\/p>/g,
+      (_m, q, a) => `<details class="help-qa"><summary>${q}</summary><p>${a}</p></details>`,
+    );
 
   return {
     problems,
@@ -261,7 +273,9 @@ export function createHelp(ctx) {
       if (!e) throw notFound('Guide');
       const bySource = new Map(entries.map((x) => [x.rel, x]));
       const md = makeMarked(e.rel, bySource);
-      const html = /** @type {string} */ (md.parse(e.d.body));
+      const layout = ['lookup', 'accordion'].includes(e.d.front.layout) ? e.d.front.layout : '';
+      const parsedHtml = /** @type {string} */ (md.parse(e.d.body));
+      const html = layout === 'accordion' ? accordion(parsedHtml) : parsedHtml;
       const toc = [...html.matchAll(/<h([23]) id="([^"]+)">([\s\S]*?)<\/h[23]>/g)].map((m) => ({
         level: Number(m[1]),
         id: m[2],
@@ -274,6 +288,7 @@ export function createHelp(ctx) {
       const at = siblings.findIndex((x) => x.slug === slug);
       return {
         ...cardOf(e),
+        layout,
         html,
         toc,
         updatedAt: e.d.updatedAt,
@@ -349,7 +364,7 @@ export function createHelp(ctx) {
     },
 
     /** Words in titles, summaries and text of the guides and prompts, best matches first. */
-    search(q) {
+    search(q, section) {
       const words = String(q)
         .toLowerCase()
         .split(/\s+/)
@@ -358,6 +373,7 @@ export function createHelp(ctx) {
       if (!words.length) return [];
       const hits = [];
       for (const e of load()) {
+        if (section && e.section !== section) continue;
         const title = String(e.d.front.title ?? e.slug).toLowerCase();
         const summary = String(e.d.front.summary ?? '').toLowerCase();
         const text = plain(e.d.body);

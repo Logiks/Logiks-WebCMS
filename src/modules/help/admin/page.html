@@ -32,12 +32,29 @@
 </section>
 
 <div x-show="results === null">
+  <!-- Support landing: describe the problem, then the guides -->
+  <section class="panel p-3 p-md-4 mb-3 help-hero" x-show="section === 'support' && !slug" aria-labelledby="help-sup-h">
+    <h2 class="h5 mb-1" id="help-sup-h">What is going wrong?</h2>
+    <p class="muted small mb-2">Type a few words, such as “can’t sign in”, “old page”, “email not arriving”.</p>
+    <label class="visually-hidden" for="help-sup-q">Describe the problem</label>
+    <input id="help-sup-q" type="search" class="form-control form-control-lg" placeholder="Describe the problem" x-model="supportQ" @input.debounce.250ms="searchSupport()" autocomplete="off" />
+    <div class="list-group list-group-flush mt-2" x-show="supportResults !== null">
+      <template x-for="r in (supportResults || [])" :key="r.slug">
+        <a class="list-group-item list-group-item-action" :href="'#/help/support/' + r.slug">
+          <div class="fw-semibold" x-text="r.title"></div>
+          <div class="small muted" x-text="r.snippet || r.summary"></div>
+        </a>
+      </template>
+      <p class="muted small mt-2 mb-0" x-show="supportResults !== null && !supportResults.length">No guide matches. <a href="#/help/support/reporting-a-problem">Report a problem</a> with the details listed there.</p>
+    </div>
+  </section>
+
   <!-- A section with no guide chosen: the list of its guides -->
   <div class="row g-3" x-show="section !== 'prompts' && !slug && current">
     <template x-for="d in (current ? current.docs : [])" :key="d.slug">
       <div class="col-md-6 col-xl-4">
         <a class="panel p-3 h-100 d-block text-decoration-none help-card" :href="'#/help/' + section + '/' + d.slug">
-          <h2 class="h6" x-text="d.title"></h2>
+          <h2 class="h6 d-flex align-items-center gap-2"><i class="bi help-card-icon" :class="d.icon || 'bi-journal-text'" aria-hidden="true"></i><span x-text="d.title"></span></h2>
           <p class="small muted mb-0" x-text="d.summary"></p>
         </a>
       </div>
@@ -66,8 +83,20 @@
             </template>
           </ul>
         </nav>
+        <div class="help-filter d-flex gap-2 align-items-center flex-wrap mb-3" x-show="doc && doc.layout">
+          <label class="visually-hidden" for="help-df">Filter this guide</label>
+          <input id="help-df" type="search" class="form-control" :placeholder="doc && doc.layout === 'accordion' ? 'Filter the questions' : 'Filter by a word, such as “email” or “cache”'" x-model="docFilter" @input="applyDocFilter($event.target.value)" autocomplete="off" />
+          <span class="small muted" role="status" x-show="docMatches !== null" x-text="docMatches + (docMatches === 1 ? ' match' : ' matches')"></span>
+          <span class="btn-group btn-group-sm" x-show="doc && doc.layout === 'accordion'">
+            <button type="button" class="btn btn-outline-secondary" @click="setAllOpen(true)">Expand all</button>
+            <button type="button" class="btn btn-outline-secondary" @click="setAllOpen(false)">Collapse all</button>
+          </span>
+        </div>
         <!-- The server renders the guide from markdown with raw HTML turned into text, so this is the only html that reaches the page. -->
         <div class="help-doc" x-html="doc ? doc.html : ''"></div>
+        <aside class="help-cta mt-4" x-show="section === 'support' && slug !== 'reporting-a-problem'">
+          <strong>Still stuck?</strong> <a href="#/help/support/reporting-a-problem">Report a problem</a> with the details listed there, or ask the assistant (the round button at the bottom right).
+        </aside>
         <div class="d-flex justify-content-between gap-2 mt-4 pt-3 border-top flex-wrap">
           <a class="btn btn-outline-secondary" x-show="doc && doc.previous" :href="doc && doc.previous ? '#/help/' + section + '/' + doc.previous.slug : '#'">← <span x-text="doc && doc.previous ? doc.previous.title : ''"></span></a>
           <span x-show="!(doc && doc.previous)"></span>

@@ -91,6 +91,40 @@ describe('the shipped docs drive Help', () => {
   });
 });
 
+describe('support guides', () => {
+  test('the FAQ is an accordion of its questions; symptom tables carry column labels for phones', async () => {
+    const faq = (await admin.get('/api/admin/help/support/faq')).body.doc;
+    assert.equal(faq.layout, 'accordion');
+    const qa = [...faq.html.matchAll(/<details class="help-qa"><summary>([^<]+\?)<\/summary><p>/g)];
+    assert.ok(qa.length >= 15, `questions: ${qa.length}`);
+    assert.doesNotMatch(
+      faq.html,
+      /<p><strong>[^<]*\?<\/strong>/,
+      'no question left as a plain paragraph',
+    );
+    const tr = (await admin.get('/api/admin/help/support/troubleshooting')).body.doc;
+    assert.equal(tr.layout, 'lookup');
+    assert.match(tr.html, /<td data-label="Symptom">/);
+    assert.ok(tr.icon.startsWith('bi-'));
+  });
+
+  test('search can be limited to the Support guides', async () => {
+    const all = (await admin.get('/api/admin/help/search?q=webhook')).body.items;
+    const sup = (await admin.get('/api/admin/help/search?q=email&section=support')).body.items;
+    assert.ok(all.some((i) => i.section !== 'support'));
+    assert.ok(sup.length >= 1 && sup.every((i) => i.section === 'support'));
+  });
+
+  test('an unknown layout or icon in front matter is ignored, not trusted', () => {
+    const { help } = helpFor({
+      'a.md': doc('section: support\ntitle: A\nsummary: S\nlayout: weird\nicon: "><script>"', 'x'),
+    });
+    const d = help.get('support', 'a');
+    assert.equal(d.layout, '');
+    assert.equal(d.icon, '');
+  });
+});
+
 describe('access and bad input', () => {
   test('Help needs a signed-in admin', async () => {
     const r = await fetch(`${node.url}/api/admin/help`);
@@ -122,7 +156,7 @@ describe('how a doc becomes a page of Help', () => {
     });
     const idx = help.index();
     assert.deepEqual(idx.sections.find((s) => s.id === 'coding').docs, [
-      { slug: 'a', section: 'coding', title: 'Alpha: first', summary: 'S' },
+      { slug: 'a', section: 'coding', title: 'Alpha: first', summary: 'S', icon: '' },
     ]);
     assert.equal(
       idx.sections.reduce((n, s) => n + s.docs.length, 0),

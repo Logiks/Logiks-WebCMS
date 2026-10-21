@@ -9,6 +9,7 @@ const card = z.object({
   section: z.string(),
   title: z.string(),
   summary: z.string(),
+  icon: z.string(),
 });
 const prompt = z.object({
   id: z.string(),
@@ -57,12 +58,15 @@ export default function helpRoutes(ctx) {
     '/help/search',
     can,
     docs({
-      query: z.object({ q: z.string().max(100).optional() }),
+      query: z.object({ q: z.string().max(100).optional(), section: z.string().optional() }),
       response: z.object({ items: z.array(card.extend({ snippet: z.string() })) }),
     }),
     (req, res) => {
-      const { q } = parse(z.object({ q: z.string().max(100).default('') }), req.query);
-      res.json({ items: help.search(q) });
+      const { q, section } = parse(
+        z.object({ q: z.string().max(100).default(''), section: z.string().max(20).optional() }),
+        req.query,
+      );
+      res.json({ items: help.search(q, section) });
     },
   );
 
@@ -72,6 +76,7 @@ export default function helpRoutes(ctx) {
     docs({
       response: z.object({
         doc: card.extend({
+          layout: z.string(),
           html: z.string(),
           toc: z.array(z.object({ level: z.number(), id: z.string(), text: z.string() })),
           updatedAt: z.number(),

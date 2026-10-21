@@ -89,3 +89,36 @@ test('the prompt library filters, fills the blanks and shows the finished prompt
   assert.ok(b.button('Copy prompt'));
   assert.deepEqual(b.errors, []);
 });
+
+test('Support: describe the problem, filter the symptom table, and open an FAQ answer', async () => {
+  b.go('#/help/support');
+  await wait(() => shown(sec()?.querySelector('.help-hero')));
+  assert.ok(shown(sec().querySelector('.help-hero')), 'landing search is shown');
+  assert.ok(
+    sec().querySelectorAll('.help-card-icon.bi-wrench-adjustable').length,
+    'cards have icons',
+  );
+  b.type(sec().querySelector('#help-sup-q'), 'lockout');
+  await wait(() => sec().querySelectorAll('.help-hero .list-group a').length >= 1);
+  assert.match(
+    sec().querySelector('.help-hero .list-group a').getAttribute('href'),
+    /^#\/help\/support\//,
+  );
+  b.go('#/help/support/troubleshooting');
+  await wait(() => sec().querySelectorAll('.help-doc tbody tr').length > 10);
+  const rows = () => [...sec().querySelectorAll('.help-doc tbody tr')];
+  const total = rows().length;
+  assert.ok(total > 10);
+  b.type(sec().querySelector('#help-df'), 'cookies');
+  await wait(() => rows().filter((r) => !r.hidden).length < total);
+  assert.ok(rows().filter((r) => !r.hidden).length >= 1);
+  assert.ok(sec().querySelector('.help-cta'), 'a way out when the guide does not help');
+
+  b.go('#/help/support/faq');
+  await wait(() => sec().querySelectorAll('.help-doc details.help-qa').length >= 15);
+  b.type(sec().querySelector('#help-df'), 'redis');
+  await wait(() => sec().querySelectorAll('.help-doc details.help-qa:not([hidden])').length >= 1);
+  const open = sec().querySelector('.help-doc details.help-qa:not([hidden])');
+  assert.ok(open.open, 'a matching question opens by itself');
+  assert.match(open.textContent, /Redis/i);
+});

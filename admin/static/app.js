@@ -6394,6 +6394,10 @@ document.addEventListener('alpine:init', () => {
     openPrompt: '',
     blanks: {}, // prompt id → { blank text → what was typed }
     copied: '',
+    docFilter: '',
+    docMatches: null,
+    supportQ: '',
+    supportResults: null,
     q: '',
     results: null,
     loaded: false,
@@ -6421,6 +6425,10 @@ document.addEventListener('alpine:init', () => {
       this.section = section || 'administration';
       this.slug = slug || '';
       this.results = null;
+      this.docFilter = '';
+      this.docMatches = null;
+      this.supportQ = '';
+      this.supportResults = null;
       this.error = '';
       try {
         if (this.section === 'prompts') {
@@ -6435,7 +6443,7 @@ document.addEventListener('alpine:init', () => {
           ).doc;
           this.$nextTick(() => {
             this.addCopyButtons();
-            this.$el.querySelector('.help-doc')?.scrollIntoView?.({ block: 'start' });
+            this.$root.querySelector('.help-doc')?.scrollIntoView?.({ block: 'start' });
           });
         } else this.doc = null;
       } catch (e) {
@@ -6464,16 +6472,54 @@ document.addEventListener('alpine:init', () => {
         this.error = e.message;
       }
     },
+    /** The big box on the Support landing: search only the Support guides. */
+    async searchSupport() {
+      const q = this.supportQ.trim();
+      if (q.length < 2) {
+        this.supportResults = null;
+        return;
+      }
+      try {
+        this.supportResults = (
+          await api('GET', `/admin/help/search?section=support&q=${encodeURIComponent(q)}`)
+        ).items;
+      } catch (e) {
+        this.error = e.message;
+      }
+    },
+    /** In a lookup guide (symptom tables) or an FAQ: show only the rows or questions that contain the typed words. */
+    applyDocFilter(value) {
+      // Takes the typed text directly: an @input handler can run before x-model has copied it.
+      this.docFilter = value;
+      const root = this.$root.querySelector('.help-doc');
+      if (!root || !this.doc) return;
+      const words = this.docFilter.toLowerCase().split(/\s+/).filter(Boolean);
+      const items = root.querySelectorAll(
+        this.doc.layout === 'accordion' ? 'details.help-qa' : 'tbody tr',
+      );
+      let shown = 0;
+      items.forEach((el) => {
+        const text = el.textContent.toLowerCase();
+        const hit = words.every((w) => text.includes(w));
+        el.hidden = !hit;
+        if (hit) shown++;
+        if (el.tagName === 'DETAILS') el.open = words.length > 0 && hit;
+      });
+      this.docMatches = words.length ? shown : null;
+    },
+    setAllOpen(open) {
+      this.$root.querySelectorAll('.help-doc details.help-qa').forEach((d) => (d.open = open));
+    },
     clearSearch() {
       this.q = '';
       this.results = null;
     },
     scrollToHeading(id) {
-      this.$el.querySelector(`.help-doc [id="${id}"]`)?.scrollIntoView?.({ behavior: 'smooth' });
+      this.$root.querySelector(`.help-doc [id="${id}"]`)?.scrollIntoView?.({ behavior: 'smooth' });
     },
     /** A copy button on each code sample in a guide. */
     addCopyButtons() {
-      for (const pre of this.$el.querySelectorAll('.help-doc pre')) {
+      for (const pre of this.$root.querySelectorAll('.help-doc pre')) {
         if (pre.querySelector('.help-copy')) continue;
         const b = document.createElement('button');
         b.type = 'button';

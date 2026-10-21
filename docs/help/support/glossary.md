@@ -2,6 +2,8 @@
 section: support
 title: Glossary
 summary: Short definitions of the words used across the admin and these guides.
+layout: lookup
+icon: bi-book
 order: 50
 ---
 
