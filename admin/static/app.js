@@ -5916,7 +5916,7 @@ document.addEventListener('alpine:init', () => {
     [/^menus\//, 'Menu', '#/menus'],
     [/^seo\//, 'SEO rule', '#/seo'],
     [/^services\//, 'Service', '#/services'],
-    [/^requirements\.md$/, 'Requirements', '#/requirements'],
+    [/^requirements\.md$/, 'Project Requirement', '#/requirements'],
   ];
   const docKind = (path) => {
     const hit = DOC_KINDS.find(([re]) => re.test(path || ''));
@@ -6550,6 +6550,8 @@ document.addEventListener('alpine:init', () => {
     busy: false,
     loaded: false,
     error: '',
+    versions: [],
+    viewing: '', // id of the older version on screen, '' = the current one
     async init() {
       if (!(await this.mountFragment('assistant', 'requirements'))) return;
       // The assistant edits this document from the side panel: reload when it finishes a turn.
@@ -6564,8 +6566,34 @@ document.addEventListener('alpine:init', () => {
         this.html = mdToHtml(d.markdown);
         this.updatedAt = d.updatedAt;
         this.loaded = true;
+        this.versions = (await api('GET', '/admin/assistant/requirements/versions')).versions;
       } catch (e) {
         this.error = e.message;
+      }
+    },
+    async pickVersion() {
+      this.error = '';
+      if (!this.viewing) return this.load();
+      try {
+        const v = await api('GET', `/admin/assistant/requirements/versions/${this.viewing}`);
+        this.html = mdToHtml(v.markdown);
+      } catch (e) {
+        this.error = e.message;
+      }
+    },
+    async restore() {
+      if (!window.confirm('Make this version the current one? The present text stays in the list.'))
+        return;
+      this.busy = true;
+      try {
+        await api('POST', `/admin/assistant/requirements/versions/${this.viewing}/restore`);
+        this.viewing = '';
+        await this.load();
+        toast('Version restored.');
+      } catch (e) {
+        this.error = e.message;
+      } finally {
+        this.busy = false;
       }
     },
     startEdit() {
@@ -6579,7 +6607,26 @@ document.addEventListener('alpine:init', () => {
         await api('PUT', '/admin/assistant/requirements', { markdown: this.draft });
         this.editing = false;
         await this.load();
-        toast('Requirements saved.');
+        toast('Project Requirement saved.');
+      } catch (e) {
+        this.error = e.message;
+      } finally {
+        this.busy = false;
+      }
+    },
+    async rebuild() {
+      if (
+        !window.confirm(
+          'Write a new version from the site and your chats? Your current text is kept in Change history, where you can revert it.',
+        )
+      )
+        return;
+      this.busy = true;
+      this.error = '';
+      try {
+        await api('POST', '/admin/assistant/requirements/rebuild');
+        await this.load();
+        toast('Rebuilt. Read it through and edit what is wrong.');
       } catch (e) {
         this.error = e.message;
       } finally {
@@ -6590,7 +6637,7 @@ document.addEventListener('alpine:init', () => {
       const url = URL.createObjectURL(new window.Blob([this.markdown], { type: 'text/markdown' }));
       const a = Object.assign(document.createElement('a'), {
         href: url,
-        download: 'requirements.md',
+        download: 'project-requirement.md',
       });
       a.click();
       URL.revokeObjectURL(url);

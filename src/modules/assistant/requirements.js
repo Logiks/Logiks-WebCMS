@@ -3,9 +3,9 @@ import { HttpError } from '../../core/http/errors.js';
 
 const DOC = 'requirements';
 const MAX_CHARS = 200_000;
-const STARTER = `# Requirements
+const STARTER = `# Project Requirement
 
-_Nothing is written here yet. Describe the site in the chat panel (who it is for, what it must do, what it should look like) and the assistant records it here as you go._
+_Nothing is written here yet. This is the project's memory: the objective, the owner's intent, decisions and a summary of each session. Describe the site in the chat panel and the assistant records it here as you go, or press Rebuild to have it drafted._
 `;
 
 /** Pull `title: "…"` out of a page's front matter without a full parse; the inventory only needs a label. */

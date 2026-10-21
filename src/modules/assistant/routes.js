@@ -147,7 +147,45 @@ export default function assistantRoutes(ctx) {
     docs({ body: requirementsBody }),
     async (req, res) => {
       const { markdown } = parse(requirementsBody, req.body);
-      await assistant.requirements.setAuthored(markdown, actorOf(req));
+      await assistant.saveRequirements(markdown, actorOf(req));
+      res.json(await assistant.requirements.get());
+    },
+  );
+
+  r.get(
+    '/assistant/requirements/versions',
+    requirePermission('requirements.read'),
+    async (_req, res) => {
+      res.json({ versions: await assistant.requirementVersions() });
+    },
+  );
+  r.get(
+    '/assistant/requirements/versions/:id',
+    requirePermission('requirements.read'),
+    async (req, res) => {
+      res.json(await assistant.requirementVersion(Number(req.params.id)));
+    },
+  );
+  r.post(
+    '/assistant/requirements/versions/:id/restore',
+    requirePermission('requirements.write'),
+    docs({ noBody: true }),
+    async (req, res) => {
+      const v = await assistant.requirementVersion(Number(req.params.id));
+      await assistant.saveRequirements(
+        v.markdown,
+        actorOf(req),
+        `Restored Project Requirement version ${v.id}`,
+      );
+      res.json(await assistant.requirements.get());
+    },
+  );
+  r.post(
+    '/assistant/requirements/rebuild',
+    requirePermission('requirements.write'),
+    docs({ noBody: true }),
+    async (req, res) => {
+      await assistant.rebuildRequirements(actorOf(req));
       res.json(await assistant.requirements.get());
     },
   );

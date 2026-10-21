@@ -45,6 +45,13 @@ export function defineAssistantSettings(registry) {
         ],
         help: 'How much the assistant thinks before and while it works. High costs more tokens and gives noticeably more complete results on big requests.',
       },
+      requirement_rebuild_hours: {
+        type: 'number',
+        label: 'Hours between Project Requirement rebuilds',
+        default: 3,
+        min: 0,
+        help: 'Rebuild on the Project Requirement page can run once in this many hours, for everyone (each one costs AI tokens). 0 means no limit.',
+      },
       chat_token_limit: {
         type: 'number',
         label: 'Token limit per chat',

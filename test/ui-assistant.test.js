@@ -52,6 +52,9 @@ test('System → Requirements shows the document with the generated inventory, a
   b.go('#/requirements');
   const page = () => b.$('section[x-data="requirementsPage"]');
   await wait(() => page() && /Site inventory/.test(page().textContent));
+  assert.match(page().querySelector('h1').textContent, /Project Requirement/);
+  assert.ok([...page().querySelectorAll('button')].some((x) => x.textContent === 'Rebuild'));
+  assert.ok(page().querySelector('select[aria-label="Version"]'));
   b.click([...page().querySelectorAll('button')].find((x) => x.textContent === 'Edit'));
   const ta = () => page().querySelector('textarea');
   await wait(() => ta() && ta().offsetParent !== undefined);

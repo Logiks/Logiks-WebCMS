@@ -1,13 +1,27 @@
 <div class="page-head d-flex justify-content-between align-items-end flex-wrap gap-2">
-  <div><h1>Requirements</h1><p>What this site is for and how it should work. The assistant keeps this up to date as you decide things in the chat; you can also edit it yourself.</p></div>
-  <div class="d-flex gap-2">
+  <div><h1>Project Requirement</h1><p>What this site is for and how it should work. The project's memory: the objective, your intent, decisions and a summary of each session, in the assistant's own words. The assistant builds it as you chat and reads it in every new session. Rebuild writes a fresh version; earlier ones stay in the version list. Edit it any time.</p></div>
+  <div class="d-flex gap-2 flex-wrap align-items-center">
     <button type="button" class="btn btn-outline-secondary" @click="download()" :disabled="!loaded">Download .md</button>
-    <button type="button" class="btn btn-outline-secondary" x-show="can('requirements.write') && !editing" @click="startEdit()">Edit</button>
+    <button type="button" class="btn btn-outline-primary" x-show="can('requirements.write') && !editing && !viewing" :disabled="busy" @click="rebuild()" x-text="busy ? 'Rebuilding…' : 'Rebuild'"></button>
+    <button type="button" class="btn btn-outline-secondary" x-show="can('requirements.write') && !editing && !viewing" @click="startEdit()">Edit</button>
+    <select class="form-select form-select-sm w-auto" aria-label="Version" x-show="versions.length" x-model="viewing" @change="pickVersion()">
+      <option value="">Latest</option>
+      <template x-for="v in versions" :key="v.id">
+        <option :value="String(v.id)" x-text="'v' + (v.number || 1) + ' · ' + new Date(v.createdAt).toISOString().slice(0, 10)" :title="v.message + ' · ' + v.author"></option>
+      </template>
+    </select>
   </div>
 </div>
 <div class="alert alert-danger" role="alert" x-show="error" x-text="error"></div>
+<div class="alert alert-warning d-flex justify-content-between align-items-center flex-wrap gap-2" x-show="viewing">
+  <span>You are looking at an older version. Nothing has changed yet.</span>
+  <span class="d-flex gap-2">
+    <button type="button" class="btn btn-sm btn-primary" x-show="can('requirements.write')" :disabled="busy" @click="restore()">Restore this version</button>
+    <button type="button" class="btn btn-sm btn-outline-secondary" @click="viewing = ''; pickVersion()">Back to current</button>
+  </span>
+</div>
 <div class="panel p-3" x-show="editing">
-  <label class="form-label" for="req-text">Requirements (markdown). The site inventory below the line is generated and not editable.</label>
+  <label class="form-label" for="req-text">Project Requirement (markdown). The site inventory below the line is generated and not editable.</label>
   <textarea id="req-text" class="form-control mono" rows="22" x-model="draft"></textarea>
   <div class="d-flex gap-2 mt-2">
     <button type="button" class="btn btn-primary" :disabled="busy" @click="save()" x-text="busy ? 'Saving…' : 'Save changes'"></button>
