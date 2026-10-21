@@ -246,10 +246,13 @@ const hashParts = () => location.hash.replace(/^#\/?/, '').split('/');
 const meta = { passwordMinLength: 10, passwordReset: false, contentTypes: [], pluginNav: [] };
 const thumb = (m) => {
   if (!m) return '';
-  if (m.kind !== 'image') return '';
+  if (m.kind === 'file') return '';
   const small = (m.variants || [])
-    .filter((v) => v.format === 'webp')
+    .filter((v) => v.format === 'webp' && v.role !== 'icon')
     .sort((a, b) => a.width - b.width)[0];
+  if (m.kind === 'video') return small ? `/media/${m.id}/${small.file}` : ''; // no still without ffmpeg
+  // TIFF, HEIC and the like have no browser-friendly preview unless sharp could make one
+  if (!small && /\.(tiff|heic|jxl)$/.test(m.originalFile)) return '';
   return `/media/${m.id}/${small ? small.file : m.originalFile}`;
 };
 const bytes = (n) =>
@@ -2190,21 +2193,28 @@ document.addEventListener('alpine:init', () => {
     total: 0,
     q: '',
     kind: '',
+    folder: '', // the folder being browsed ('' = top level)
+    folders: [], // every folder: [{ path, files }]
+    compress: true, // upload images compressed (the default) or exactly as they are
     current: null,
     usage: 0,
+    thumbAt: 1,
     busy: false,
     error: '',
     available: true,
+    videoThumbnails: true,
     dragging: false,
+    progress: { total: 0, done: 0, failed: [], running: false },
     thumb,
     bytes,
     async init() {
       if (!(await this.mountFragment('media', 'page'))) return;
-      await this.load();
+      await Promise.all([this.load(), this.loadFolders()]);
     },
     async load() {
       const qs = new URLSearchParams({
         limit: '60',
+        folder: this.folder,
         ...(this.q ? { q: this.q } : {}),
         ...(this.kind ? { kind: this.kind } : {}),
       });
@@ -2212,35 +2222,148 @@ document.addEventListener('alpine:init', () => {
       this.items = r.items;
       this.total = r.total;
       this.available = r.available;
+      this.videoThumbnails = r.videoThumbnails !== false;
     },
-    async upload(files) {
-      this.busy = true;
-      this.error = '';
-      let done = 0;
+    async loadFolders() {
+      this.folders = (await api('GET', '/admin/media/folders')).folders;
+    },
+    async goto(path) {
+      this.folder = path;
+      this.current = null;
+      await this.load();
+    },
+    crumbs() {
+      const parts = this.folder ? this.folder.split('/') : [];
+      return parts.map((name, i) => ({ name, path: parts.slice(0, i + 1).join('/') }));
+    },
+    /** Folders directly inside the one being browsed, with how many files each holds (subfolders included). */
+    subfolders() {
+      const base = this.folder ? this.folder + '/' : '';
+      return this.folders
+        .filter((f) => f.path.startsWith(base) && !f.path.slice(base.length).includes('/'))
+        .map((f) => ({
+          path: f.path,
+          name: f.path.slice(base.length),
+          files: this.folders
+            .filter((g) => g.path === f.path || g.path.startsWith(f.path + '/'))
+            .reduce((n, g) => n + g.files, 0),
+        }));
+    },
+    async newFolder() {
+      const name = window.prompt('Folder name' + (this.folder ? ` (inside ${this.folder})` : ''));
+      if (!name?.trim()) return;
       try {
-        for (const f of files) {
-          await api('POST', `/admin/media?name=${encodeURIComponent(f.name)}`, f);
-          done++;
-        }
+        const path = (this.folder ? this.folder + '/' : '') + name.trim();
+        await api('POST', '/admin/media/folders', { path });
+        await this.loadFolders();
+        await this.goto(path);
       } catch (e) {
         this.error = e.message;
-      } finally {
-        this.busy = false;
-        if (done) toast(`Uploaded ${done} file${done === 1 ? '' : 's'}.`);
-        await this.load();
       }
+    },
+    async renameFolder() {
+      const name = window.prompt('New folder name', this.folder.split('/').pop());
+      if (!name?.trim()) return;
+      const to = [...this.folder.split('/').slice(0, -1), name.trim()].join('/');
+      try {
+        await api('PUT', '/admin/media/folders', { from: this.folder, to });
+        await this.loadFolders();
+        await this.goto(to);
+      } catch (e) {
+        this.error = e.message;
+      }
+    },
+    async removeFolder() {
+      if (!confirm(`Delete the folder ${this.folder}? It is empty, so no files are lost.`)) return;
+      try {
+        await api('DELETE', `/admin/media/folders?path=${encodeURIComponent(this.folder)}`);
+        const up = this.folder.split('/').slice(0, -1).join('/');
+        await this.loadFolders();
+        await this.goto(up);
+      } catch (e) {
+        this.error = e.message;
+      }
+    },
+    /**
+     * Bulk upload: any number of files, three at a time, each landing in the folder being browsed. A file picked through
+     * "Upload a folder" keeps its own sub-folders. One bad file is reported and the rest carry on.
+     */
+    async upload(fileList) {
+      const files = [...fileList];
+      if (!files.length) return;
+      this.error = '';
+      this.busy = true;
+      this.progress = { total: files.length, done: 0, failed: [], running: true };
+      const queue = [...files];
+      const worker = async () => {
+        for (let f = queue.shift(); f; f = queue.shift()) {
+          const rel = f.webkitRelativePath
+            ? f.webkitRelativePath.split('/').slice(0, -1).join('/')
+            : '';
+          const dir = [this.folder, rel].filter(Boolean).join('/');
+          const qs = new URLSearchParams({ name: f.name, folder: dir });
+          if (!this.compress) qs.set('compress', 'false');
+          try {
+            await api('POST', `/admin/media?${qs}`, f);
+            this.progress.done++;
+          } catch (e) {
+            this.progress.failed.push({ name: f.name, message: e.message });
+          }
+        }
+      };
+      await Promise.all([worker(), worker(), worker()]);
+      this.progress.running = false;
+      this.busy = false;
+      const failed = this.progress.failed;
+      if (failed.length)
+        this.error =
+          failed.length === 1
+            ? failed[0].message
+            : `${failed.length} files could not be uploaded. The reasons are listed below.`;
+      if (this.progress.done)
+        toast(`Uploaded ${this.progress.done} file${this.progress.done === 1 ? '' : 's'}.`);
+      await Promise.all([this.load(), this.loadFolders()]);
     },
     async open(item) {
       this.current = { ...item };
       this.usage = (await api('GET', `/admin/media/${item.id}`)).usage;
     },
-    async saveAlt() {
+    async saveDetails() {
       try {
         const { item } = await api('PUT', `/admin/media/${this.current.id}`, {
           alt: this.current.alt,
+          folder: this.current.folder,
         });
-        this.items = this.items.map((i) => (i.id === item.id ? item : i));
         toast('Saved.');
+        await Promise.all([this.load(), this.loadFolders()]);
+        this.current = item.folder === this.folder || !this.folder ? { ...item } : null;
+      } catch (e) {
+        this.error = e.message;
+      }
+    },
+    async compressCurrent(mode) {
+      const msg =
+        mode === 'replace'
+          ? 'Compress this image in place? The uncompressed original is replaced and can’t be recovered.'
+          : 'Save a compressed copy? The original stays as it is.';
+      if (!confirm(msg)) return;
+      try {
+        const { item } = await api('POST', `/admin/media/${this.current.id}/compress`, { mode });
+        toast(mode === 'replace' ? 'Compressed.' : 'Compressed copy saved.');
+        await Promise.all([this.load(), this.loadFolders()]);
+        this.current = { ...item };
+      } catch (e) {
+        this.error = e.message;
+      }
+    },
+    async retake() {
+      try {
+        const { item } = await api('POST', `/admin/media/${this.current.id}/thumbnail`, {
+          at: Number(this.thumbAt) || 0,
+        });
+        this.current = { ...item };
+        toast('Thumbnail updated.');
+        await this.load();
       } catch (e) {
         this.error = e.message;
       }
@@ -2255,7 +2378,7 @@ document.addEventListener('alpine:init', () => {
         await api('DELETE', `/admin/media/${this.current.id}${used ? '?force=true' : ''}`);
         this.current = null;
         toast('Deleted.');
-        await this.load();
+        await Promise.all([this.load(), this.loadFolders()]);
       } catch (e) {
         this.error = e.message;
       }

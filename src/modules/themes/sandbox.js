@@ -57,6 +57,7 @@ export const ALLOWED_TAGS = [
 ];
 export const ALLOWED_FILTERS = [
   'library_url', // ours: a file of an installed library (System → Libraries)
+  'versioned', // ours: adds ?v=<site version> so a publish refreshes caches (Publish & Git)
   'escape',
   'xml_escape',
   'escape_once',

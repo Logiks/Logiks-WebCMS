@@ -29,14 +29,14 @@
   <div class="modal-card">
     <div class="d-flex gap-2 mb-2 flex-wrap">
       <input class="form-control" style="max-width:16rem" placeholder="Search files" aria-label="Search files" x-model="picker.q" @input.debounce.300ms="loadPicker()">
-      <label class="btn btn-outline-secondary mb-0">Upload <input type="file" hidden multiple accept="image/jpeg,image/png,image/gif,image/webp,image/avif,application/pdf" @change="pickerUpload($event.target.files); $event.target.value = ''"></label>
+      <label class="btn btn-outline-secondary mb-0">Upload <input type="file" hidden multiple @change="pickerUpload($event.target.files); $event.target.value = ''"></label>
       <button type="button" class="btn btn-outline-secondary ms-auto" @click="closePicker()">Close</button>
     </div>
     <div class="text-danger small mb-2" role="alert" x-show="picker.error" x-text="picker.error"></div>
     <div class="empty" x-show="!picker.items.length">No files yet. Upload one to get started.</div>
     <div class="media-grid">
       <template x-for="m in picker.items" :key="m.id">
-        <button type="button" class="media-tile" @click="choose(m)"><span class="ph"><img x-show="m.kind === 'image'" :src="thumb(m)" :alt="m.alt" loading="lazy"><i class="bi bi-file-earmark-pdf" x-show="m.kind !== 'image'"></i></span><span class="nm" x-text="m.filename"></span></button>
+        <button type="button" class="media-tile" @click="choose(m)"><span class="ph"><img x-show="thumb(m)" :src="thumb(m)" :alt="m.alt" loading="lazy"><i class="bi" :class="m.kind === 'video' ? 'bi-camera-video' : 'bi-file-earmark-pdf'" x-show="!thumb(m)"></i></span><span class="nm" x-text="m.filename"></span></button>
       </template>
     </div>
   </div>

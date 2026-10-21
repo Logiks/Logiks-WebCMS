@@ -134,6 +134,7 @@ export function createSiteFiles({
       filters: {
         asset_url: (x) => x,
         library_url: (x) => x,
+        versioned: (x) => x,
         t: (x) => x,
         absolute_url: (x) => x,
         handle: (x) => x,

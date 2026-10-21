@@ -207,6 +207,7 @@ export function createThemesService({ env, db, settings, bus, audit, cache, log,
     const probeFilters = {
       asset_url: (p) => String(p),
       library_url: (p) => String(p),
+      versioned: (p) => String(p),
       t: (k) => String(k),
       absolute_url: (p) => String(p),
       handle: (s) => slug(s),

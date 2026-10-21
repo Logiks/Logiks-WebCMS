@@ -110,6 +110,12 @@ export function defineCorePermissions(permissions) {
       'Commit the site as it is now to the change history (including edits made by hand)',
     'history.push': 'Push the change history to the git remote',
   });
+  permissions.define('Publish', {
+    'publish.read': 'See the publish status, branches and releases',
+    'publish.commit': 'Commit the site to its git history',
+    'publish.manage':
+      'Publish a release, push, pull, switch branches, restore a release and refresh caches',
+  });
   permissions.define('SEO', {
     'seo.read': 'View SEO Manager rules',
     'seo.write': 'Create, edit and delete SEO Manager rules',

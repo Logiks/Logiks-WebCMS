@@ -227,7 +227,7 @@ test('media: upload files, describe an image, use it in a page through the picke
   setValue(sec('mediaPage').querySelector('#m-alt'), 'A red rectangle');
   b.click(
     [...sec('mediaPage').querySelectorAll('button')].find((x) =>
-      /Save description/.test(x.textContent),
+      /Save changes/.test(x.textContent),
     ),
   );
   await wait(async () => (await node.ctx.db('media').first()).alt === 'A red rectangle');
@@ -533,4 +533,41 @@ test('an author sees only what they can use, and can only save drafts', async ()
 
 test('no script errors anywhere in that tour', () => {
   assert.deepEqual(b.errors, []);
+});
+
+test('media: folders, bulk upload with progress, and compressing an image stored as uploaded', async () => {
+  await node.ctx.db('media').del();
+  b.go('#/media');
+  await wait(() => sec('mediaPage'));
+  const page = () => sec('mediaPage');
+  // a new folder (window.prompt answers with a name), then two files at once land inside it
+  const real = b.win.prompt;
+  b.win.prompt = () => 'Trips';
+  b.click([...page().querySelectorAll('button')].find((x) => /New folder/.test(x.textContent)));
+  await wait(async () => (await node.ctx.media.folders()).some((f) => f.path === 'Trips'));
+  b.win.prompt = real;
+  await wait(() => page().querySelector('nav[aria-label="Folders"]').textContent.includes('Trips'));
+
+  // uncompressed: untick "Compress images"
+  const box = page().querySelector('#m-compress');
+  box.checked = false;
+  box.dispatchEvent(new b.win.Event('change', { bubbles: true }));
+  chooseFiles(page().querySelector('input[data-upload-files]'), [
+    file(await png(900, 600), 'one.png', 'image/png'),
+    file(await png(700, 500), 'two.png', 'image/png'),
+  ]);
+  await wait(async () => (await node.ctx.db('media').count({ n: '*' }).first()).n === 2);
+  const rows = await node.ctx.db('media').select('folder', 'compressed');
+  assert.deepEqual(
+    rows.map((r) => r.folder),
+    ['Trips', 'Trips'],
+  );
+  assert.ok(rows.every((r) => !r.compressed));
+  await wait(() => page().querySelectorAll('.media-tile').length === 2);
+
+  b.click(page().querySelector('.media-tile'));
+  await wait(() => b.visible(page().querySelector('[data-compress-replace]')));
+  assert.ok(b.visible(page().querySelector('[data-compress-copy]')));
+  b.click(page().querySelector('[data-compress-copy]'));
+  await wait(async () => (await node.ctx.db('media').count({ n: '*' }).first()).n === 3);
 });

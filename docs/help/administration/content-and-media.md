@@ -48,7 +48,10 @@ Published content appears on the site only if a page shows it. If you add a new 
 
 **Media Manager → Media Library** holds images and files.
 
-- **Upload** by dragging files into the page or by the Upload button. Files are checked on upload; SVG images are cleaned of anything that could run code.
+- **Upload** by dragging files into the page, with **Upload files**, or with **Upload a folder** (its sub-folders are kept). Any number at once; a file that can't be uploaded is listed and the rest carry on. Files are checked by their contents, not their name. Images (JPEG, PNG, GIF, WebP, AVIF, SVG, TIFF, HEIC, BMP, ICO), videos (MP4, MOV, WebM, MKV, AVI and more) and documents (PDF, Word, Excel, PowerPoint, OpenDocument, RTF, text, CSV, zip) are accepted; web pages, scripts, programs and audio are not. SVG images are cleaned of anything that could run code.
+- **Compression.** By default photos are re-saved without camera data (including location) and smaller sizes are made. Untick **Compress images** to keep a photo exactly as uploaded. Open such an image later and choose **Compress in place** (replaces the file) or **Save a compressed copy** (keeps both).
+- **Folders.** Use **New folder**, click a folder to open it, and use **Rename** or **Delete folder** (only when empty). Pick a file's folder in its details. Moving a file never changes its address. Pictures attached in the assistant are filed in the **assistant** folder.
+- **Videos** are stored as uploaded. A thumbnail and icon are made when the server has ffmpeg; open a video and use **Use this moment** to choose which frame.
 - Give every image **alt text** when you insert it. Screen readers and search engines use it, and the AI Testing report flags missing ones.
 - Each item shows **where it is used**. Before deleting, check that nothing still shows it.
 - **Media Generator** makes an image with an AI image provider. It needs a key under Settings and nothing is saved until you choose to save it.

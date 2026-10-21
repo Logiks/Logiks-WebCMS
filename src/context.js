@@ -38,6 +38,7 @@ import { defineSitemapSettings } from './modules/sitemap/service.js';
 import { createAiModels } from './modules/ai-models/service.js';
 import { defineAiSettings } from './modules/plugin-editor/service.js';
 import { defineAssistantSettings } from './modules/assistant/settings.js';
+import { definePublishSettings } from './modules/publish/settings.js';
 import { definePromptSettings } from './modules/prompts/settings.js';
 import { defineVisualSettings } from './modules/visual/settings.js';
 import { defineTestingSettings } from './modules/testing/settings.js';
@@ -83,6 +84,7 @@ export async function createContext({ env, bus: busOverride, log: logOverride, a
   defineLibrariesSettings(registry);
   defineAiSettings(registry);
   defineAssistantSettings(registry);
+  definePublishSettings(registry);
   definePromptSettings(registry);
   defineVisualSettings(registry);
   defineTestingSettings(registry);

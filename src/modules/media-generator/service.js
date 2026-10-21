@@ -185,11 +185,14 @@ export function createMediaGenerator(ctx, { fetch: fetchImpl = fetch } = {}) {
     },
 
     /** Decodes an already-generated image and saves it through the real upload pipeline. */
-    async save({ dataUrl, filename, alt }, actor = null) {
+    async save({ dataUrl, filename, alt, folder = '' }, actor = null) {
       const m = /^data:([\w/+.-]+);base64,([\s\S]+)$/.exec(String(dataUrl ?? ''));
       if (!m) throw new HttpError(422, 'invalid_input', "That isn't a generated image.");
       const buffer = Buffer.from(m[2], 'base64');
-      return media.upload({ buffer, name: filename || 'generated.png', alt: alt || '' }, actor);
+      return media.upload(
+        { buffer, name: filename || 'generated.png', alt: alt || '', folder },
+        actor,
+      );
     },
   };
 }

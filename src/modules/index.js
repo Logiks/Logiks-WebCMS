@@ -16,6 +16,7 @@ import seo from './seo/module.js';
 import events from './events/module.js';
 import webhooks from './webhooks/module.js';
 import scheduler from './scheduler/module.js';
+import publish from './publish/module.js';
 import sitemap from './sitemap/module.js';
 import libraries from './libraries/module.js';
 import analytics from './analytics/module.js';
@@ -55,6 +56,7 @@ export const builtinModules = [
   events,
   webhooks,
   scheduler,
+  publish,
   sitemap,
   libraries,
   analytics,

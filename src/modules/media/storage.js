@@ -6,7 +6,7 @@ const KEY = /^[a-z0-9][a-z0-9/_.-]{0,200}$/;
 
 /**
  * Where uploaded files live. The interface is what a cluster-wide store (S3 and friends) would implement:
- *   put(key, buffer) · stream(key) → Readable · delete(prefix) · exists(key)
+ *   put(key, buffer) · stream(key, {start?, end?}) → Readable · size(key) · delete(prefix) · exists(key)
  * The local adapter writes under MEDIA_DIR. In a cluster that folder must be a shared volume (EFS, NFS) so every
  * server can read what any server wrote; a single server can leave it alone. Keys are validated so a caller can never
  * reach outside the folder.
@@ -29,7 +29,10 @@ export function createLocalStorage(root) {
       await fs.writeFile(tmp, buffer);
       await fs.rename(tmp, f); // readers never see a half-written file
     },
-    stream: (key) => createReadStream(file(key)),
+    stream: (key, range) => createReadStream(file(key), range),
+    async size(key) {
+      return (await fs.stat(file(key))).size;
+    },
     async exists(key) {
       try {
         await fs.access(file(key));

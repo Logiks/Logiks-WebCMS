@@ -173,7 +173,7 @@ export function createResearch(ctx, { fetch: fetchImpl, lookup } = {}) {
      * Download a picture from another site into the media library. The address it came from goes in the audit log
      * and, when given, the credit line is kept in the picture's description so it travels with the file.
      */
-    async downloadImage({ url, name, alt = '', credit = '' }, actor = null) {
+    async downloadImage({ url, name, alt = '', credit = '', folder = '' }, actor = null) {
       if (!media) throw new HttpError(503, 'media_off', 'The media library is switched off.');
       const { buffer, finalUrl } = await web.image(url);
       const base =
@@ -185,7 +185,7 @@ export function createResearch(ctx, { fetch: fetchImpl, lookup } = {}) {
         .filter(Boolean)
         .join(' — ')
         .slice(0, 500);
-      const item = await media.upload({ buffer, name: base, alt: description }, actor);
+      const item = await media.upload({ buffer, name: base, alt: description, folder }, actor);
       await audit.log({
         actor,
         action: 'research.download_image',

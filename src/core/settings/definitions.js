@@ -696,6 +696,14 @@ export function defineCoreSettings(registry) {
     order: 26,
     fields: {
       max_upload_mb: { type: 'number', label: 'Largest upload (MB)', default: 10, min: 1, max: 50 },
+      max_video_mb: {
+        type: 'number',
+        label: 'Largest video upload (MB)',
+        default: 100,
+        min: 1,
+        max: 200,
+        help: 'Videos are kept exactly as uploaded. Thumbnails need ffmpeg installed on the server.',
+      },
       variant_widths: {
         type: 'list',
         label: 'Image widths to generate (pixels)',

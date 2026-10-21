@@ -730,7 +730,11 @@ describe('pictures', () => {
     assert.ok(px < 30_000, 'it was shrunk');
     const stored = (await svc.get(s.id, adm)).messages[0].content;
     assert.equal(stored[1].type, 'image_ref');
-    assert.ok((await node.ctx.media.get(stored[1].mediaId)).id);
+    assert.equal(
+      (await node.ctx.media.get(stored[1].mediaId)).folder,
+      'assistant',
+      'attachments are filed under Media → assistant, not the top level',
+    );
     await svc.sendMessage(s.id, 'and now?', adm);
     const later = JSON.stringify(client.calls[1].messages);
     assert.ok(!later.includes('"type":"image"'), 'later turns do not resend the pixels');
@@ -756,8 +760,12 @@ describe('pictures', () => {
     node.ctx.mediaGenerator = {
       providers: () => [{ id: 'openai', configured: true }],
       generate: async ({ prompt }) => ({ dataUrl: `data:image/png;base64,${prompt}` }),
-      save: async ({ filename, alt }) => ({ id: 42, url: `/media/42/${filename}`, alt }),
+      save: async ({ filename, alt, folder }) => {
+        savedFolder = folder;
+        return { id: 42, url: `/media/42/${filename}`, alt };
+      },
     };
+    let savedFolder;
     try {
       const { svc, client } = withClient([
         callTools({
@@ -769,6 +777,7 @@ describe('pictures', () => {
       const s = await svc.create(adm);
       await svc.sendMessage(s.id, 'a hero image', adm);
       assert.equal(JSON.parse(lastResults(client)[0].content).src, '/media/42/hero.png');
+      assert.equal(savedFolder, 'assistant');
     } finally {
       node.ctx.mediaGenerator = real;
     }

@@ -251,6 +251,7 @@ export default function publicSite(ctx) {
     res.set({
       'Content-Type': 'text/html; charset=utf-8',
       'Cache-Control': cacheControl,
+      'X-Site-Version': String(settings.get('publish.version') ?? 1),
       ...(etag ? { ETag: etag } : {}),
       'X-Cache': result,
       ...(settings.get('site.noindex') ? { 'X-Robots-Tag': 'noindex, nofollow' } : {}),

@@ -55,10 +55,20 @@ export function createHistory(ctx, { docstore, git }) {
 
   const svc = {
     /**
-     * @param {{changes: Map<string, {before: string|null, after: string|null}>, message: string, actor: any, sessionId?: number|null, kind?: string, revertsId?: number|null}} input
+     * @param {{changes: Map<string, {before: string|null, after: string|null}>, message: string, actor: any, sessionId?: number|null, kind?: string, revertsId?: number|null, sha?: string|null, mirror?: boolean}} input
+     *   `sha` + `mirror: false` = git already holds this entry (a pull or branch switch made the commit itself), so don't replay it
      * @returns {Promise<any|null>} the new entry, or null when nothing actually changed
      */
-    async record({ changes, message, actor, sessionId = null, kind = 'change', revertsId = null }) {
+    async record({
+      changes,
+      message,
+      actor,
+      sessionId = null,
+      kind = 'change',
+      revertsId = null,
+      sha = null,
+      mirror = true,
+    }) {
       const files = [...changes]
         .filter(([, c]) => c.before !== c.after)
         .map(([path, c]) => ({ path, before: c.before, after: c.after }));
@@ -99,6 +109,7 @@ export function createHistory(ctx, { docstore, git }) {
           author_name: String(author).slice(0, 120),
           session_id: sessionId,
           reverts_id: revertsId,
+          sha,
           file_count: files.length,
           created_at: t,
         });
@@ -111,7 +122,7 @@ export function createHistory(ctx, { docstore, git }) {
         entityId: id,
         meta: { files: files.length },
       });
-      await afterCommit();
+      if (mirror) await afterCommit();
       return svc.summary(id);
     },
 
@@ -245,7 +256,7 @@ export function createHistory(ctx, { docstore, git }) {
      * only starts tracking (the baseline), because there is nothing to compare with yet.
      * @returns {Promise<{commit: any|null, started?: boolean}>}
      */
-    async commitNow({ message, actor }) {
+    async commitNow({ message, actor, kind = 'manual' }) {
       const snap = await docstore.snapshot();
       if (!(await db('site_commits').first('id'))) {
         await db.transaction(async (trx) => {
@@ -277,7 +288,7 @@ export function createHistory(ctx, { docstore, git }) {
         changes,
         message: String(message || '').trim() || 'Manual commit',
         actor,
-        kind: 'manual',
+        kind,
       });
       return { commit };
     },

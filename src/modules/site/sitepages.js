@@ -420,6 +420,17 @@ export function createSitePages(ctx) {
       ...rt.filters,
       // {{ '@fortawesome/fontawesome-free/css/all.min.css' | library_url }} → that file of the installed version
       library_url: (spec) => ctx.libraries?.url(String(spec ?? '')) ?? '',
+      // {{ '/files/app.css' | versioned }} → /files/app.css?v=7. The number changes on every publish, pull and branch
+      // switch (Publish & Git, D-117), so browsers and CDNs fetch the new file. Pages rendered before it changes are
+      // dropped from the page cache at the same moment.
+      versioned: (url) => {
+        const u = String(url ?? '');
+        if (!u || /^(data|blob|javascript):/i.test(u)) return u;
+        const hash = u.indexOf('#');
+        const base = hash === -1 ? u : u.slice(0, hash);
+        const rest = hash === -1 ? '' : u.slice(hash);
+        return `${base}${base.includes('?') ? '&' : '?'}v=${settings.get('publish.version') ?? 1}${rest}`;
+      },
       t: /** @this {any} */ function (key, fallback) {
         return translate(this.context.getSync(['site', 'locale']), key, fallback);
       },

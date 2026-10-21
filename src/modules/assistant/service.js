@@ -33,6 +33,8 @@ const TOOL_RESULT_CHARS = 8_000; // a result is cut here, with a hint to ask for
 const OLD_RESULT_CHARS = 200; // a tool result from an earlier turn keeps only this much
 const MAX_MESSAGE_CHARS = 20_000;
 const MAX_IMAGES = 4;
+/** Everything the assistant puts in the media library (attachments, generated and downloaded pictures) is filed here. */
+const ASSISTANT_FOLDER = 'assistant';
 const MAX_IMAGE_BYTES = 6 * 1024 * 1024; // as uploaded
 const IMAGE_EDGE = 1024; // longest side sent to the model: more pixels cost more tokens and add nothing for layout work
 const IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif']);
@@ -286,6 +288,7 @@ export function createAssistant(ctx, { client: injectedClient } = {}) {
               .slice(0, 60) || 'chat'
           }.webp`,
           alt: 'Attached in the assistant chat',
+          folder: ASSISTANT_FOLDER,
         },
         actor,
       );
@@ -608,7 +611,12 @@ export function createAssistant(ctx, { client: injectedClient } = {}) {
         const { dataUrl } = await gen.generate({ provider: chosen.id, prompt }).catch(asErr);
         const m = await gen
           .save(
-            { dataUrl, filename: `${String(name).replace(/[^A-Za-z0-9_-]/g, '-')}.png`, alt },
+            {
+              dataUrl,
+              filename: `${String(name).replace(/[^A-Za-z0-9_-]/g, '-')}.png`,
+              alt,
+              folder: ASSISTANT_FOLDER,
+            },
             actor,
           )
           .catch(asErr);
@@ -678,7 +686,7 @@ export function createAssistant(ctx, { client: injectedClient } = {}) {
             `That is ${MAX_DOWNLOADS_PER_TURN} pictures this turn. Ask the person before downloading more.`,
           );
         const { item, sourceUrl } = await r
-          .downloadImage({ url, name, alt, credit }, actor)
+          .downloadImage({ url, name, alt, credit, folder: ASSISTANT_FOLDER }, actor)
           .catch(asErr);
         return { mediaId: Number(item.id), src: item.url, alt: item.alt, sourceUrl };
       },
