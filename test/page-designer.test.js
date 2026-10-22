@@ -224,7 +224,10 @@ describe('table + Service proposal: propose -> approve -> create', () => {
             table: {
               name: 'pd_pricing_tiers',
               columns: [
-                { name: 'id', type: 'integer', primaryKey: true, autoIncrement: true },
+                { name: 'id', type: 'bigInteger', primaryKey: true, autoIncrement: true },
+                { name: 'created_at', type: 'bigInteger', nullable: true },
+                { name: 'updated_at', type: 'bigInteger', nullable: true },
+                { name: 'created_by', type: 'bigInteger', nullable: true },
                 { name: 'label', type: 'string' },
               ],
             },
