@@ -444,6 +444,14 @@
       <section x-data="aiUsagePage('media')"></section>
     </template>
 
+    <template x-if="route === 'ai-users-text'">
+      <section x-data="aiUsageUsersPage('text')"></section>
+    </template>
+
+    <template x-if="route === 'ai-users-media'">
+      <section x-data="aiUsageUsersPage('media')"></section>
+    </template>
+
     <template x-if="route === 'media-analytics'">
       <section x-data="mediaAnalyticsPage"></section>
     </template>

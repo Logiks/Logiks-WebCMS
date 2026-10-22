@@ -338,7 +338,7 @@ How a page is built here:
           throw new Error(
             'No image generation provider is configured — set one under Settings → Media Generator.',
           );
-        const { dataUrl } = await mediaGenerator.generate({ provider: chosen, prompt });
+        const { dataUrl } = await mediaGenerator.generate({ provider: chosen, prompt }, actor);
         const m = await mediaGenerator.save({ dataUrl, filename: `${name}.png`, alt }, actor);
         return { mediaId: m.id, src: m.url, alt: m.alt };
       },

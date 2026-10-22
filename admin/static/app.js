@@ -1148,8 +1148,20 @@ document.addEventListener('alpine:init', () => {
             { id: 'events', label: 'Events', module: 'events', perm: 'events.read' },
             { id: 'ai-usage-text', label: 'Text usage', module: 'ai-usage', perm: 'aiusage.read' },
             {
+              id: 'ai-users-text',
+              label: 'Text usage by user',
+              module: 'ai-usage',
+              perm: 'aiusage.read',
+            },
+            {
               id: 'ai-usage-media',
               label: 'Media usage',
+              module: 'ai-usage',
+              perm: 'aiusage.read',
+            },
+            {
+              id: 'ai-users-media',
+              label: 'Media usage by user',
               module: 'ai-usage',
               perm: 'aiusage.read',
             },
@@ -2055,6 +2067,14 @@ document.addEventListener('alpine:init', () => {
     syncRich(el, b) {
       b.data.text = el.innerHTML;
     },
+    /** Pasting brings other pages' divs, spans and inline styles into the block and breaks its layout: keep the words only. */
+    pastePlain(e, el, b) {
+      const text = (e.clipboardData || window.clipboardData)?.getData('text/plain') ?? '';
+      if (typeof document.execCommand === 'function')
+        document.execCommand('insertText', false, text);
+      else el.textContent += text;
+      this.syncRich(el, b);
+    },
     format(cmd) {
       if (typeof document.execCommand === 'function') document.execCommand(cmd);
     },
@@ -2740,9 +2760,6 @@ document.addEventListener('alpine:init', () => {
     kind,
     s: null,
     calls: [],
-    messages: [],
-    moreMessages: false,
-    period: 'day',
     from: '',
     to: '',
     provider: '',
@@ -2793,6 +2810,56 @@ document.addEventListener('alpine:init', () => {
       this.calls = [...this.calls, ...r.calls];
       this.more = r.calls.length === 50;
     },
+    n(v) {
+      return Number(v || 0).toLocaleString();
+    },
+    /** Text models report tokens; image providers report how many images were made. */
+    amount(c) {
+      return c.units
+        ? this.n(c.units) + (c.units === 1 ? ' image' : ' images')
+        : this.n(c.input + c.output) + ' tokens';
+    },
+  }));
+
+  // ───────── AI Usage → by user (text and media are separate reports) ─────────
+  Alpine.data('aiUsageUsersPage', (kind = 'text') => ({
+    ...H,
+    kind,
+    s: null,
+    messages: [],
+    moreMessages: false,
+    period: 'day',
+    from: '',
+    to: '',
+    error: '',
+    async init() {
+      if (!(await this.mountFragment('ai-usage', 'users'))) return;
+      await this.load();
+    },
+    params() {
+      const q = { kind: this.kind };
+      if (this.from) q.from = String(new Date(this.from).getTime());
+      if (this.to) q.to = String(new Date(this.to).getTime() + 86_400_000 - 1);
+      return q;
+    },
+    async load() {
+      this.error = '';
+      try {
+        const q = this.params();
+        const [s, m] = await Promise.all([
+          api(
+            'GET',
+            '/admin/ai-usage/summary?' + new URLSearchParams({ ...q, period: this.period }),
+          ),
+          api('GET', '/admin/ai-usage/messages?' + new URLSearchParams({ ...q, limit: '50' })),
+        ]);
+        this.s = s;
+        this.messages = m.messages;
+        this.moreMessages = m.messages.length === 50;
+      } catch (e) {
+        this.error = e.message;
+      }
+    },
     async loadMoreMessages() {
       const q = {
         ...this.params(),
@@ -2805,12 +2872,6 @@ document.addEventListener('alpine:init', () => {
     },
     n(v) {
       return Number(v || 0).toLocaleString();
-    },
-    /** Text models report tokens; image providers report how many images were made. */
-    amount(c) {
-      return c.units
-        ? this.n(c.units) + (c.units === 1 ? ' image' : ' images')
-        : this.n(c.input + c.output) + ' tokens';
     },
   }));
 
@@ -8576,6 +8637,8 @@ document.addEventListener('alpine:init', () => {
     'log-manager': 'logs prune retention delete old audit events keep days',
     'ai-usage-text': 'ai cost tokens anthropic models calls log',
     'ai-usage-media': 'ai images generated openai google stability log',
+    'ai-users-text': 'ai tokens per user messages prompts cost day week month report',
+    'ai-users-media': 'ai images per user prompts generated day week month report',
     _x: 'ai cost tokens anthropic openai google stability models calls log',
     plugins: 'plugin extensions add-ons install',
     'analytics-overview': 'traffic visitors page views statistics stats',

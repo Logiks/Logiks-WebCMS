@@ -137,7 +137,11 @@ export function createLogManager({ db, settings, audit }) {
     async prune(id, days, actor = null) {
       const s = find(id);
       if (!Number.isInteger(days) || days < 0)
-        throw new HttpError(422, 'invalid_input', 'Enter a whole number of days (0 empties the log).');
+        throw new HttpError(
+          422,
+          'invalid_input',
+          'Enter a whole number of days (0 empties the log).',
+        );
       const q = db(s.table);
       if (days > 0) q.where('created_at', '<', now() - days * DAY);
       const deleted = await q.del();

@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { HttpError } from '../../core/http/errors.js';
 
 // One documented default model per provider — not exposed as a setting in v1 (keeps the settings/UI surface
@@ -173,7 +174,7 @@ export function createMediaGenerator(ctx, { fetch: fetchImpl = fetch } = {}) {
     },
 
     /** Generates only — does not touch the media library. @returns {Promise<{dataUrl: string, mime: string}>} */
-    async generate({ provider, prompt }) {
+    async generate({ provider, prompt }, actor = null) {
       const text = String(prompt ?? '').trim();
       if (!text) throw new HttpError(422, 'invalid_input', 'Enter a prompt first.');
       const gen = GENERATORS[provider];
@@ -192,6 +193,9 @@ export function createMediaGenerator(ctx, { fetch: fetchImpl = fetch } = {}) {
           model: DEFAULTS[provider].model,
           feature: 'media-generator',
           units: 1,
+          userId: actor?.id,
+          prompt: text,
+          turnKey: randomUUID(), // one image = one "message"
         });
         return { dataUrl: `data:${mime};base64,${base64}`, mime };
       } catch (e) {
@@ -200,6 +204,9 @@ export function createMediaGenerator(ctx, { fetch: fetchImpl = fetch } = {}) {
           model: DEFAULTS[provider].model,
           feature: 'media-generator',
           ok: false,
+          userId: actor?.id,
+          prompt: text,
+          turnKey: randomUUID(),
         });
         throw new HttpError(502, 'generation_failed', `${LABELS[provider]}: ${e.message}`, {
           cause: e,

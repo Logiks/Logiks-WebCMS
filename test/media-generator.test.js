@@ -84,6 +84,18 @@ describe('generate()', () => {
     assert.equal(mime, 'image/png');
     assert.equal(dataUrl, `data:image/png;base64,${TINY_PNG_B64}`);
 
+    // the media report lists the prompt per user, separately from text usage
+    const uid = (await node.ctx.db('users').first()).id;
+    await createMediaGenerator(node.ctx, {
+      fetch: fakeFetch([{ body: { data: [{ b64_json: TINY_PNG_B64 }] } }]),
+    }).generate({ provider: 'openai', prompt: 'a yellow cone' }, { id: uid });
+    const rep = await admin.get('/api/admin/ai-usage/messages?kind=media');
+    const row = rep.body.messages.find((m) => m.prompt === 'a yellow cone');
+    assert.equal(row.units, 1);
+    assert.equal(row.userId, uid);
+    const text = await admin.get('/api/admin/ai-usage/messages?kind=text');
+    assert.ok(!text.body.messages.some((m) => m.prompt === 'a yellow cone'));
+
     const failing = createMediaGenerator(node.ctx, {
       fetch: fakeFetch([{ ok: false, status: 400, body: { error: { message: 'bad prompt' } } }]),
     });

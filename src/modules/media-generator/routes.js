@@ -31,7 +31,7 @@ export default function mediaGeneratorRoutes(ctx) {
     docs({ body: media_generatorBody1 }),
     async (req, res) => {
       const body = parse(media_generatorBody1, req.body);
-      res.json(await mediaGenerator.generate(body));
+      res.json(await mediaGenerator.generate(body, actorOf(req)));
     },
   );
 

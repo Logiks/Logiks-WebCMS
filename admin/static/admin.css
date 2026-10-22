@@ -791,9 +791,15 @@ body {
 .block-bar .btn-link {
   padding: 0 0.3rem;
 }
+.blocks,
+.blocks .block {
+  min-width: 0;
+}
 .rich {
   min-height: 4.5rem;
   line-height: 1.55;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
 }
 .rich:focus {
   outline: 2px solid var(--cobalt);

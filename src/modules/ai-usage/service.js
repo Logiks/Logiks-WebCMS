@@ -241,14 +241,15 @@ export function createAiUsage({ db, log }) {
      * however many model calls (tool loop, continuations) it took. Only calls made since messages were recorded.
      */
     async messages(
-      /** @type {{ from?: string, to?: string, limit?: any, before?: any }} */ {
+      /** @type {{ from?: string, to?: string, kind?: string, limit?: any, before?: any }} */ {
         from,
         to,
+        kind = 'text',
         limit = 50,
         before,
       } = {},
     ) {
-      const q = range(db('ai_usage_log'), { from, to, kind: 'text' })
+      const q = range(db('ai_usage_log'), { from, to, kind: kind === 'media' ? 'media' : 'text' })
         .leftJoin('users', 'users.id', 'ai_usage_log.user_id')
         .whereNotNull('ai_usage_log.turn_key')
         .select(
@@ -265,6 +266,8 @@ export function createAiUsage({ db, log }) {
           db.raw('sum(ai_usage_log.input_tokens) as input'),
           db.raw('sum(ai_usage_log.output_tokens) as output'),
           db.raw('sum(ai_usage_log.cache_read_tokens) as cache_read'),
+          db.raw('sum(ai_usage_log.units) as units'),
+          db.raw('max(ai_usage_log.provider) as provider'),
         )
         .groupBy('ai_usage_log.turn_key')
         .orderBy('last_id', 'desc')
@@ -284,6 +287,8 @@ export function createAiUsage({ db, log }) {
         input: Number(r.input) || 0,
         output: Number(r.output) || 0,
         cacheRead: Number(r.cache_read) || 0,
+        units: Number(r.units) || 0,
+        provider: r.provider,
       }));
     },
 

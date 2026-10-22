@@ -614,7 +614,7 @@ export function createAssistant(ctx, { client: injectedClient } = {}) {
           );
         if ((rec.images = (rec.images ?? 0) + 1) > 3)
           throw new Error('That is 3 pictures this turn. Ask the person before generating more.');
-        const { dataUrl } = await gen.generate({ provider: chosen.id, prompt }).catch(asErr);
+        const { dataUrl } = await gen.generate({ provider: chosen.id, prompt }, actor).catch(asErr);
         const m = await gen
           .save(
             {
