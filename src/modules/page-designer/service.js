@@ -287,6 +287,11 @@ How a page is built here:
         requirePerm('services.write');
         if (!NAME.test(table.name))
           throw new Error('table.name must be lowercase letters, numbers and underscores.');
+        const problems = ctx.prompts?.check('tables', table) ?? [];
+        if (problems.length)
+          throw new Error(
+            `The table breaks the house rules. Fix and propose again: ${problems.join(' ')}`,
+          );
         const t = now();
         const id = await ctx.dialect.insertGetId(db('page_designer_proposals'), {
           session_id: session.id,
@@ -314,6 +319,12 @@ How a page is built here:
               : `That proposal is "${p.status}", not approved yet. Ask the owner to approve it first.`,
           );
         const { table, service } = p.payload;
+        // Rules can change between proposing and approving; the approved table is checked against today's.
+        const problems = ctx.prompts?.check('tables', table) ?? [];
+        if (problems.length)
+          throw new Error(
+            `The approved table no longer meets the house rules: ${problems.join(' ')}`,
+          );
         await dbms.createTable({ name: table.name, columns: table.columns }, actor);
         await services.create(
           {
@@ -622,7 +633,7 @@ How a page is built here:
       const tools = toolsFor(session, actor, () => messages, { n: 0 });
       // The site's project type, quality standard and working method (D-082); the Designer works without them if unreadable.
       const guidance = await ctx.prompts
-        ?.compose()
+        ?.compose({ topics: ['tables', 'pages', 'components', 'services'] })
         .then((c) => c.text)
         .catch(() => '');
       const system = guidance

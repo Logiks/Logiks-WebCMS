@@ -5989,6 +5989,13 @@ document.addEventListener('alpine:init', () => {
     screenshot_page: 'Looked at a page in a browser',
     capture_reference: 'Studied a reference site',
     propose_plan: 'Proposed a plan',
+    db_tables: 'Looked at the database',
+    db_rows: 'Read table rows',
+    db_create_table: 'Created a table',
+    db_alter_table: 'Changed a table',
+    db_write_row: 'Saved a row',
+    db_request_delete: 'Asked to delete something',
+    db_delete: 'Deleted from the database',
   };
 
   /** What kind of thing a document path is, and the admin screen where it lives. */
@@ -6023,6 +6030,7 @@ document.addEventListener('alpine:init', () => {
     commits: [],
     warnings: [],
     plans: [],
+    confirmations: [], // staged deletions the person must confirm twice (D-119)
     focus: null,
     attachments: [],
     showChanges: false, // collapsed until there is something new to look at
@@ -6115,6 +6123,18 @@ document.addEventListener('alpine:init', () => {
                 ? { kind: 'plan', planId, plan: b.input, text: '', askChanges: false, note: '' }
                 : { kind: 'tool', text: TOOL_LABELS.propose_plan },
             );
+          } else if (b.type === 'tool_use' && b.name === 'db_request_delete') {
+            let confirmId = null;
+            try {
+              confirmId = JSON.parse(results.get(b.id) || '{}').confirmationId ?? null;
+            } catch {
+              /* refused (unknown table, partial key): the label alone is shown */
+            }
+            out.push(
+              confirmId
+                ? { kind: 'confirm', confirmId, text: '', typed: '' }
+                : { kind: 'tool', text: TOOL_LABELS.db_request_delete },
+            );
           } else if (b.type === 'tool_use') {
             const path = typeof b.input?.path === 'string' ? b.input.path : '';
             out.push({
@@ -6145,6 +6165,7 @@ document.addEventListener('alpine:init', () => {
       this.usage = data.session.usage;
       this.commits = data.commits || [];
       this.plans = data.plans || [];
+      this.confirmations = data.confirmations || [];
       this.focus = data.session.focus || null;
       this.showChanges = false;
       this.details = {};
@@ -6343,6 +6364,44 @@ document.addEventListener('alpine:init', () => {
               ? `Changes to the plan: ${note}`
               : `I do not approve this plan.${note ? ` ${note}` : ' Ask me what I want instead.'}`;
         await this.send();
+      } catch (e) {
+        this.error = e.message;
+      }
+    },
+    confirmation(id) {
+      return (
+        this.confirmations.find((c) => c.id === id) || { status: 'pending', summary: '', kind: '' }
+      );
+    },
+    confirmStatusText(id) {
+      return (
+        {
+          pending: 'Waiting for you',
+          first: 'Confirm once more',
+          confirmed: 'Confirmed',
+          used: 'Deleted',
+          cancelled: 'Cancelled',
+        }[this.confirmation(id).status] || ''
+      );
+    },
+    /** One click on a deletion card. Two separate clicks (first, second) are needed; the assistant is told the outcome. */
+    async decideConfirm(it, step) {
+      this.error = '';
+      try {
+        await api(
+          'POST',
+          `/admin/assistant/sessions/${this.session.id}/confirmations/${it.confirmId}`,
+          { step, typed: it.typed },
+        );
+        this.confirmations =
+          (await api('GET', `/admin/assistant/sessions/${this.session.id}`)).confirmations || [];
+        if (step === 'second') {
+          this.draft = 'I confirmed the deletion twice. Carry it out now.';
+          await this.send();
+        } else if (step === 'cancel') {
+          this.draft = 'I cancelled that deletion. Do not delete it.';
+          await this.send();
+        }
       } catch (e) {
         this.error = e.message;
       }
@@ -7256,48 +7315,99 @@ document.addEventListener('alpine:init', () => {
     ...H,
     items: [],
     projectType: '',
-    current: null, // the prompt being edited: { key, kind, label, description, body, enabled, builtin, edited, isNew, id }
+    ruleAreas: [], // [{ id, label, hint }] the areas a builder can ask rules for
+    tab: 'master',
+    tabs: [
+      { id: 'master', label: 'Master prompt' },
+      { id: 'workflow', label: 'Working method' },
+      { id: 'types', label: 'Project types' },
+      { id: 'rules', label: 'Rules' },
+      { id: 'preview', label: 'Preview' },
+    ],
+    current: null, // the prompt being edited: { key, kind, label, description, body, enabled, builtin, edited, isNew, id, area }
     preview: null, // { text, projectType, planning, parts }
     previewType: '',
+    previewTopics: [],
     loaded: false,
     busy: false,
     error: '',
     async init() {
       if (!(await this.mountFragment('prompts', 'page'))) return;
       await this.load();
+      this.setTab('master');
     },
     async load() {
       try {
         const d = await api('GET', '/admin/prompts');
         this.items = d.items;
         this.projectType = d.projectType;
+        this.planning = d.planning || this.planning;
+        this.ruleAreas = d.ruleAreas || [];
         this.previewType ||= d.projectType;
         this.loaded = true;
       } catch (e) {
         this.error = e.message;
       }
     },
-    get masterItems() {
-      return this.items.filter((i) => i.kind !== 'project_type');
+    get tabInfo() {
+      return (
+        {
+          master:
+            'The quality standard every AI builder follows for every site, whatever its type. Keep it about principles, not about one kind of site.',
+          workflow:
+            'How a request is handled: when to ask questions, when to show a plan, when to just build. Which one applies is chosen under Settings → AI behaviour.',
+          types:
+            'What “good” means for one kind of site (shop, school, restaurant…). The type for this site is chosen under Settings → General; add your own for kinds of site you build often.',
+          rules:
+            'Conventions for one area, such as database tables or pages. They are sent only when the AI works in that area, so each stays short and is followed more reliably.',
+          preview:
+            'The exact text the AI receives for a project type and the areas you tick, so you can check how your edits read together.',
+        }[this.tab] || ''
+      );
+    },
+    planning: 'ask_when_unclear',
+    get planningLabel() {
+      return (
+        {
+          ask_when_unclear: 'Ask when unclear',
+          always_confirm: 'Always confirm first',
+          never_ask: 'Never ask',
+        }[this.planning] || this.planning
+      );
+    },
+    setTab(id) {
+      this.tab = id;
+      this.error = '';
+      this.current = null;
+      if (id === 'master') {
+        const m = this.items.find((i) => i.kind === 'master');
+        if (m) this.edit(m);
+      }
+    },
+    get tabItems() {
+      const kind = { workflow: 'workflow', types: 'project_type', rules: 'rules' }[this.tab];
+      return this.items.filter((i) => i.kind === kind);
     },
     get typeItems() {
       return this.items.filter((i) => i.kind === 'project_type');
     },
-    kindLabel(k) {
-      return { master: 'Master', workflow: 'Working method', project_type: 'Project type' }[k] ?? k;
+    get freeAreas() {
+      const used = new Set(this.items.filter((i) => i.kind === 'rules').map((i) => i.key.slice(6)));
+      return this.ruleAreas.filter((a) => !used.has(a.id));
     },
     isSelected(i) {
       return i.kind === 'project_type' && i.key === 'project.' + this.projectType;
     },
     edit(i) {
       this.error = '';
-      this.current = { ...i, isNew: false, id: '' };
+      this.current = { ...i, isNew: false, id: '', area: '' };
     },
     startNew() {
       this.error = '';
+      const rules = this.tab === 'rules';
       this.current = {
         key: '',
-        kind: 'project_type',
+        kind: rules ? 'rules' : 'project_type',
         label: '',
         description: '',
         body: '',
@@ -7306,6 +7416,7 @@ document.addEventListener('alpine:init', () => {
         edited: false,
         isNew: true,
         id: '',
+        area: rules ? this.freeAreas[0]?.id || '' : '',
       };
     },
     async save() {
@@ -7319,10 +7430,16 @@ document.addEventListener('alpine:init', () => {
         enabled: c.enabled,
       };
       try {
-        if (c.isNew) await api('POST', '/admin/prompts', { ...body, id: c.id });
+        if (c.isNew)
+          await api(
+            'POST',
+            '/admin/prompts',
+            c.kind === 'rules' ? { ...body, area: c.area } : { ...body, id: c.id },
+          );
         else await api('PUT', '/admin/prompts/' + encodeURIComponent(c.key), body);
         this.current = null;
         await this.load();
+        this.setTab(this.tab);
         toast('Prompt saved.');
       } catch (e) {
         this.error = e.message;
@@ -7344,7 +7461,7 @@ document.addEventListener('alpine:init', () => {
           'POST',
           '/admin/prompts/' + encodeURIComponent(this.current.key) + '/reset',
         );
-        this.current = { ...d.item, isNew: false, id: '' };
+        this.current = { ...d.item, isNew: false, id: '', area: '' };
         await this.load();
         toast('Prompt reset.');
       } catch (e) {
@@ -7354,14 +7471,15 @@ document.addEventListener('alpine:init', () => {
       }
     },
     async remove() {
-      if (!window.confirm('Delete this project type?')) return;
+      const what = this.current.kind === 'rules' ? 'rule set' : 'project type';
+      if (!window.confirm(`Delete this ${what}?`)) return;
       this.busy = true;
       this.error = '';
       try {
         await api('DELETE', '/admin/prompts/' + encodeURIComponent(this.current.key));
         this.current = null;
         await this.load();
-        toast('Project type deleted.');
+        toast('Deleted.');
       } catch (e) {
         this.error = e.message;
       } finally {
@@ -7373,7 +7491,10 @@ document.addEventListener('alpine:init', () => {
       try {
         this.preview = await api(
           'GET',
-          '/admin/prompts/compose?projectType=' + encodeURIComponent(this.previewType),
+          '/admin/prompts/compose?projectType=' +
+            encodeURIComponent(this.previewType) +
+            '&topics=' +
+            encodeURIComponent(this.previewTopics.join(',')),
         );
       } catch (e) {
         this.error = e.message;

@@ -78,7 +78,31 @@
           </div>
         </div>
       </template>
-      <template x-if="it.kind !== 'tool' && it.kind !== 'plan'">
+      <template x-if="it.kind === 'confirm'">
+        <div class="ac-plan" role="group" aria-label="Confirm a deletion">
+          <div class="ac-plan-head">
+            <strong>Delete from the database</strong>
+            <span class="badge" :class="confirmation(it.confirmId).status === 'used' ? 'text-bg-success' : ['pending', 'first'].includes(confirmation(it.confirmId).status) ? 'text-bg-warning' : 'text-bg-secondary'" x-text="confirmStatusText(it.confirmId)"></span>
+          </div>
+          <p class="small mb-2" x-text="confirmation(it.confirmId).summary"></p>
+          <p class="small mb-2 text-danger" x-show="['pending', 'first'].includes(confirmation(it.confirmId).status)">This cannot be undone and is not in the change history.</p>
+          <div x-show="confirmation(it.confirmId).status === 'pending'" class="d-flex gap-2 flex-wrap">
+            <button type="button" class="btn btn-sm btn-outline-danger" :disabled="busy" @click="decideConfirm(it, 'first')">Delete…</button>
+            <button type="button" class="btn btn-sm btn-outline-secondary" :disabled="busy" @click="decideConfirm(it, 'cancel')">Cancel</button>
+          </div>
+          <div x-show="confirmation(it.confirmId).status === 'first'">
+            <div class="mb-2" x-show="confirmation(it.confirmId).kind === 'table'">
+              <label class="form-label small" :for="'confirm-typed-' + i">Type the table name to confirm</label>
+              <input :id="'confirm-typed-' + i" class="form-control form-control-sm mono" autocomplete="off" x-model="it.typed">
+            </div>
+            <div class="d-flex gap-2 flex-wrap">
+              <button type="button" class="btn btn-sm btn-danger" :disabled="busy" @click="decideConfirm(it, 'second')">Yes, delete permanently</button>
+              <button type="button" class="btn btn-sm btn-outline-secondary" :disabled="busy" @click="decideConfirm(it, 'cancel')">Cancel</button>
+            </div>
+          </div>
+        </div>
+      </template>
+      <template x-if="it.kind !== 'tool' && it.kind !== 'plan' && it.kind !== 'confirm'">
         <div class="ac-bubble">
           <div class="ac-text" x-html="linkify(it.text)" x-show="it.text"></div>
           <template x-for="u in (it.images || [])" :key="u"><img class="ac-img" :src="u" alt="Picture in the chat" loading="lazy"></template>

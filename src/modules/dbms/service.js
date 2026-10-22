@@ -222,6 +222,106 @@ export function createDbms(ctx) {
       await audit.log({ actor, action: 'dbms.table_dropped', entity: 'table', entityId: name });
     },
 
+    /** Add one column to an existing table (nullable unless it has a default: existing rows must stay valid). */
+    async addColumn(table, column, actor) {
+      checkEditable(table);
+      if (!actor?.can('dbms.write')) throw forbidden();
+      checkIdent(column?.name, 'column');
+      if (!BUILD[column.type])
+        throw new HttpError(422, 'invalid_input', `"${column.type}" isn't a column type.`, {
+          field: 'column',
+        });
+      const { columns } = await svc.tableInfo(table);
+      if (columns.some((c) => c.name === column.name))
+        throw new HttpError(422, 'invalid_input', `"${column.name}" already exists.`, {
+          field: 'column',
+        });
+      const hasDefault = column.default !== undefined && column.default !== '';
+      if (column.nullable === false && !hasDefault)
+        throw new HttpError(
+          422,
+          'invalid_input',
+          'A required column needs a default value, because the existing rows have none.',
+          { field: 'column' },
+        );
+      await db.schema.alterTable(table, (t) => {
+        const col = BUILD[column.type](t, column);
+        if (column.nullable === false) col.notNullable();
+        if (hasDefault) col.defaultTo(coerce(column.default, column.type));
+      });
+      await audit.log({
+        actor,
+        action: 'dbms.column_added',
+        entity: table,
+        entityId: column.name,
+      });
+    },
+
+    /** Remove a column and its data. The primary key cannot go: the row editor addresses rows by it. */
+    async dropColumn(table, name, actor) {
+      checkEditable(table);
+      if (!actor?.can('dbms.write')) throw forbidden();
+      checkIdent(name, 'column');
+      const { columns } = await svc.tableInfo(table);
+      const col = columns.find((c) => c.name === name);
+      if (!col) throw notFound('That column');
+      if (col.primaryKey)
+        throw new HttpError(
+          422,
+          'invalid_input',
+          `"${name}" is the primary key and cannot be removed.`,
+          {
+            field: 'column',
+          },
+        );
+      if (columns.length === 1)
+        throw new HttpError(422, 'invalid_input', 'A table needs at least one column.', {
+          field: 'column',
+        });
+      await db.schema.alterTable(table, (t) => t.dropColumn(name));
+      await audit.log({ actor, action: 'dbms.column_dropped', entity: table, entityId: name });
+    },
+
+    async createIndex(table, { name, columns: cols, unique }, actor) {
+      checkEditable(table);
+      if (!actor?.can('dbms.write')) throw forbidden();
+      checkIdent(name, 'name');
+      if (!Array.isArray(cols) || !cols.length)
+        throw new HttpError(422, 'invalid_input', 'Choose at least one column to index.', {
+          field: 'columns',
+        });
+      const info = await svc.tableInfo(table);
+      const have = new Set(info.columns.map((c) => c.name));
+      for (const c of cols)
+        if (!have.has(c))
+          throw new HttpError(422, 'invalid_input', `"${c}" isn't a column of ${table}.`, {
+            field: 'columns',
+          });
+      if (info.indexes.some((i) => i.name === name))
+        throw new HttpError(422, 'invalid_input', `An index named "${name}" already exists.`, {
+          field: 'name',
+        });
+      await db.schema.alterTable(table, (t) =>
+        unique ? t.unique(cols, { indexName: name }) : t.index(cols, name),
+      );
+      await audit.log({ actor, action: 'dbms.index_created', entity: table, entityId: name });
+    },
+
+    async dropIndex(table, name, actor) {
+      checkEditable(table);
+      if (!actor?.can('dbms.write')) throw forbidden();
+      checkIdent(name, 'name');
+      const info = await svc.tableInfo(table);
+      const idx = info.indexes.find((i) => i.name === name);
+      if (!idx) throw notFound('That index');
+      if (/^primary$|_pkey$|^sqlite_autoindex_/i.test(name))
+        throw new HttpError(422, 'invalid_input', 'The primary key index cannot be removed.', {
+          field: 'name',
+        });
+      await db.schema.alterTable(table, (t) => t.dropIndex([], name));
+      await audit.log({ actor, action: 'dbms.index_dropped', entity: table, entityId: name });
+    },
+
     /** The console: literally anything the engine allows. `dbms.query` is the top permission tier (D-047). */
     async runQuery(sql, actor) {
       if (!actor?.can('dbms.query')) throw forbidden();

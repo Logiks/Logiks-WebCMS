@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { HttpError, notFound, parse } from '../../core/http/errors.js';
 import { now } from '../../core/db/index.js';
 import { DEFAULT_PROJECT_TYPE, DEFAULT_PROMPTS, WORKFLOW_KEYS } from './defaults.js';
+import { RULE_AREAS, RULE_CHECKS, RULE_PREFIX, normaliseTableColumns } from './rules.js';
 
 const TYPE_PREFIX = 'project.';
 const MASTER_KEY = 'master';
@@ -26,6 +27,7 @@ const createSchema = editSchema.extend({
       'The id is lowercase letters, numbers and hyphens, starting with a letter (for example "real-estate").',
     ),
 });
+const createRuleSchema = editSchema.extend({ area: z.string().trim() });
 
 const toItem = (r) => ({
   key: r.key,
@@ -40,8 +42,8 @@ const toItem = (r) => ({
 });
 
 /**
- * System → Prompts (docs/DECISIONS.md D-082): the master prompt, the working method and one prompt per project type
- * that the AI builders (assistant, page designer) are given. Settings → General → Project type picks which project
+ * System → Prompts (docs/DECISIONS.md D-082, D-118): the master prompt, the working method, one prompt per project type
+ * and one set of rules per area (tables, pages, ...) that the AI builders (assistant, page designer) are given. Settings → General → Project type picks which project
  * type applies to this site; the picker's list is these rows, published through the hidden `prompts.project_types`
  * setting so every server rebuilds the same dropdown (the pattern ai-models uses for its model list).
  * @param {any} ctx
@@ -121,6 +123,11 @@ export function createPrompts(ctx) {
     });
   }
 
+  /** What the checks read, from Settings → AI behaviour; read at call time so an edit applies at once on every server. */
+  const ruleConfig = () => ({
+    tableColumns: normaliseTableColumns(settings.get('prompts.table_columns')),
+  });
+
   const inUse = (key) => key === `${TYPE_PREFIX}${settings.get('general.project_type')}`;
 
   const svc = {
@@ -140,9 +147,11 @@ export function createPrompts(ctx) {
       return toItem(r);
     },
 
-    /** Only project types can be added: the master prompt and the working methods are the platform's own. */
+    /** Only project types and rule sets can be added: the master prompt and the working methods are the platform's own. */
     async create(input, actor) {
       await ready();
+      if (input && typeof input === 'object' && 'area' in input)
+        return svc.createRules(input, actor);
       const { id, ...rest } = parse(createSchema, input);
       const key = `${TYPE_PREFIX}${id}`;
       if (await db('prompts').where({ key }).first())
@@ -164,6 +173,42 @@ export function createPrompts(ctx) {
       });
       await audit.log({ actor, action: 'prompt.created', entity: 'prompt', meta: { key } });
       await publishTypes();
+      return svc.get(key);
+    },
+
+    /** One rule set per area: `rules.<area>`. The areas are fixed because a builder has to ask for an area by name. */
+    async createRules(input, actor) {
+      const { area, ...rest } = parse(createRuleSchema, input);
+      if (!RULE_AREAS.some((a) => a.id === area))
+        throw new HttpError(
+          422,
+          'invalid_input',
+          `Choose one of: ${RULE_AREAS.map((a) => a.id).join(', ')}.`,
+          { field: 'area' },
+        );
+      const key = `${RULE_PREFIX}${area}`;
+      if (await db('prompts').where({ key }).first())
+        throw new HttpError(
+          409,
+          'conflict',
+          `There are already rules for "${area}". Edit those instead.`,
+        );
+      const t = now();
+      await db('prompts').insert({
+        key,
+        kind: 'rules',
+        label: rest.label,
+        description: rest.description,
+        body: rest.body,
+        enabled: rest.enabled,
+        builtin: false,
+        edited: false,
+        shipped_v: 0,
+        updated_by: actor?.id ?? null,
+        created_at: t,
+        updated_at: t,
+      });
+      await audit.log({ actor, action: 'prompt.created', entity: 'prompt', meta: { key } });
       return svc.get(key);
     },
 
@@ -237,7 +282,7 @@ export function createPrompts(ctx) {
           'conflict',
           'Prompts that ship with the platform cannot be deleted. Switch it off instead.',
         );
-      if (inUse(key))
+      if (have.kind !== 'rules' && inUse(key))
         throw new HttpError(
           409,
           'conflict',
@@ -252,7 +297,9 @@ export function createPrompts(ctx) {
      * The instructions an AI builder gets for this site: quality standard, working method, project type — in that
      * order, always the same text for the same settings, so it stays a cacheable prompt prefix. Per-person or
      * per-request facts do not belong here.
-     * @param {{ projectType?: string, planning?: string }} [opts] override the site's settings (the admin preview)
+     * @param {{ projectType?: string, planning?: string, topics?: string[] }} [opts] override the site's settings (the
+     *   admin preview). `topics` are the rule areas the caller works in (D-118): only those rules are added, after the
+     *   project type, so a builder that cannot create tables is not told how tables look.
      * @returns {Promise<{ text: string, projectType: string, planning: string, parts: string[] }>}
      */
     async compose(opts = {}) {
@@ -274,16 +321,46 @@ export function createPrompts(ctx) {
       const type =
         by.get(`${TYPE_PREFIX}${wanted}`) ?? by.get(`${TYPE_PREFIX}${DEFAULT_PROJECT_TYPE}`);
       const picked = [
-        ['Quality standard', by.get(keys[0])],
-        ['How to work', by.get(keys[1])],
-        ['This site', type],
-      ].filter(([, r]) => r);
+        ['Quality standard', by.get(keys[0])?.body, keys[0]],
+        ['How to work', by.get(keys[1])?.body, keys[1]],
+        ['This site', type?.body, type?.key],
+      ];
+      // Fixed area order (not the caller's), so the same topics always produce the same text and cached prefix.
+      const topics = RULE_AREAS.filter((a) => opts.topics?.includes(a.id));
+      if (topics.length) {
+        const ruleRows = await db('prompts')
+          .whereIn(
+            'key',
+            topics.map((a) => `${RULE_PREFIX}${a.id}`),
+          )
+          .where({ enabled: true });
+        const byRule = new Map(ruleRows.map((r) => [r.key, r]));
+        for (const a of topics) {
+          const key = `${RULE_PREFIX}${a.id}`;
+          // The checked part is stated even if the prompt is switched off: the check still runs, so the model must know.
+          const checked = RULE_CHECKS[a.id]?.describe(ruleConfig());
+          const body = [byRule.get(key)?.body, checked].filter(Boolean).join('\n\n');
+          picked.push([`Rules: ${a.label}`, body, key]);
+        }
+      }
+      const used = picked.filter(([, body]) => body);
       return {
-        text: picked.map(([h, r]) => `# ${h}\n\n${r.body}`).join('\n\n'),
+        text: used.map(([h, body]) => `# ${h}\n\n${body}`).join('\n\n'),
         projectType: type ? type.key.slice(TYPE_PREFIX.length) : DEFAULT_PROJECT_TYPE,
         planning,
-        parts: picked.map(([, r]) => r.key),
+        parts: used.map(([, , key]) => key),
       };
+    },
+
+    /**
+     * The problems with something an AI proposed, against the rules for its area (D-118). Empty means it complies.
+     * The caller turns a non-empty list into an error the model reads and fixes.
+     * @param {string} area
+     * @param {any} input
+     * @returns {string[]}
+     */
+    check(area, input) {
+      return RULE_CHECKS[area]?.check(input, ruleConfig()) ?? [];
     },
   };
 

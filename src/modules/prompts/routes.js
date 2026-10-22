@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { docs } from '../../core/http/docs.js';
 import { actorOf, requirePermission } from '../../core/http/middleware.js';
+import { RULE_AREAS } from './rules.js';
 
 const item = z.object({
   key: z.string(),
@@ -20,7 +21,7 @@ const editBody = z.object({
   body: z.string(),
   enabled: z.boolean().optional(),
 });
-const createBody = editBody.extend({ id: z.string() });
+const createBody = editBody.extend({ id: z.string().optional(), area: z.string().optional() });
 
 /** System → Prompts: the instructions the AI builders follow, and the project types the site can choose from. */
 export default function promptRoutes(ctx) {
@@ -30,11 +31,20 @@ export default function promptRoutes(ctx) {
   r.get(
     '/prompts',
     requirePermission('prompts.read'),
-    docs({ response: z.object({ items: z.array(item), projectType: z.string() }) }),
+    docs({
+      response: z.object({
+        items: z.array(item),
+        projectType: z.string(),
+        planning: z.string(),
+        ruleAreas: z.array(z.object({ id: z.string(), label: z.string(), hint: z.string() })),
+      }),
+    }),
     async (_req, res) => {
       res.json({
         items: await prompts.list(),
         projectType: ctx.settings.get('general.project_type'),
+        ruleAreas: RULE_AREAS,
+        planning: ctx.settings.get('prompts.planning'),
       });
     },
   );
@@ -44,7 +54,11 @@ export default function promptRoutes(ctx) {
     '/prompts/compose',
     requirePermission('prompts.read'),
     docs({
-      query: z.object({ projectType: z.string().optional(), planning: z.string().optional() }),
+      query: z.object({
+        projectType: z.string().optional(),
+        planning: z.string().optional(),
+        topics: z.string().optional(),
+      }),
       response: z.object({
         text: z.string(),
         projectType: z.string(),
@@ -57,6 +71,7 @@ export default function promptRoutes(ctx) {
         await prompts.compose({
           projectType: req.query.projectType ? String(req.query.projectType) : undefined,
           planning: req.query.planning ? String(req.query.planning) : undefined,
+          topics: req.query.topics ? String(req.query.topics).split(',') : undefined,
         }),
       );
     },

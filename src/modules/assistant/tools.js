@@ -99,6 +99,142 @@ export const TOOLS = [
     },
   },
   {
+    name: 'db_tables',
+    description:
+      'Database tables. With no table: the list. With a table: its columns and indexes. Internal tables are not listed.',
+    input_schema: {
+      type: 'object',
+      properties: { table: { type: 'string' } },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'db_rows',
+    description:
+      'Read rows of a table, one page at a time (default 10, max 50). Internal tables are refused.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        table: { type: 'string' },
+        page: { type: 'integer' },
+        per_page: { type: 'integer' },
+      },
+      required: ['table'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'db_create_table',
+    description:
+      'Create a table. The house rules for tables (in your instructions) are checked: a table without the required columns is refused with what to add. Not covered by change history, so only do it when asked.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'lowercase, underscores, e.g. pricing_tiers' },
+        columns: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              name: { type: 'string' },
+              type: {
+                type: 'string',
+                enum: ['string', 'text', 'integer', 'bigInteger', 'boolean', 'float', 'json'],
+              },
+              primaryKey: { type: 'boolean' },
+              autoIncrement: { type: 'boolean' },
+              nullable: { type: 'boolean' },
+              default: { type: 'string' },
+            },
+            required: ['name', 'type'],
+          },
+        },
+      },
+      required: ['name', 'columns'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'db_alter_table',
+    description:
+      'Add a column or an index to an existing table. Nothing is removed. A required column needs a default.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        table: { type: 'string' },
+        add_column: {
+          type: 'object',
+          properties: {
+            name: { type: 'string' },
+            type: {
+              type: 'string',
+              enum: ['string', 'text', 'integer', 'bigInteger', 'boolean', 'float', 'json'],
+            },
+            primaryKey: { type: 'boolean' },
+            autoIncrement: { type: 'boolean' },
+            nullable: { type: 'boolean' },
+            default: { type: 'string' },
+          },
+          required: ['name', 'type'],
+        },
+        create_index: {
+          type: 'object',
+          properties: {
+            name: { type: 'string' },
+            columns: { type: 'array', items: { type: 'string' } },
+            unique: { type: 'boolean' },
+          },
+          required: ['name', 'columns'],
+        },
+      },
+      required: ['table'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'db_write_row',
+    description:
+      'Insert a row, or update one by its primary key. `data` maps column names to values. Not covered by change history.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        table: { type: 'string' },
+        op: { type: 'string', enum: ['insert', 'update'] },
+        pk: { type: 'object', description: 'update only: the primary key, e.g. {"id": 3}.' },
+        data: { type: 'object' },
+      },
+      required: ['table', 'op', 'data'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'db_request_delete',
+    description:
+      'Ask to delete a table, a column, an index or one row. NOTHING is deleted: the person is shown a card and must confirm twice. Then stop and wait. Deletions cannot be undone.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        kind: { type: 'string', enum: ['table', 'column', 'index', 'row'] },
+        table: { type: 'string' },
+        name: { type: 'string', description: 'column or index name' },
+        pk: { type: 'object', description: 'row only: the full primary key.' },
+      },
+      required: ['kind', 'table'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'db_delete',
+    description:
+      'Carry out a deletion the person has confirmed twice. Refused until then. Use the confirmation_id db_request_delete returned.',
+    input_schema: {
+      type: 'object',
+      properties: { confirmation_id: { type: 'integer' } },
+      required: ['confirmation_id'],
+      additionalProperties: false,
+    },
+  },
+  {
     name: 'validate_site',
     description:
       'Render the pages your changes could affect and report only failures. Call it after changing pages, components, locales, menus or theme files, and fix what it reports before you finish.',

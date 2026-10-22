@@ -1,4 +1,5 @@
 import { BUILTIN_PROJECT_TYPES } from './service.js';
+import { DEFAULT_TABLE_COLUMNS } from './rules.js';
 
 export { BUILTIN_PROJECT_TYPES };
 
@@ -23,6 +24,12 @@ export function definePromptSettings(registry) {
           { value: 'never_ask', label: 'Never ask: decide, record the assumptions and build' },
         ],
         help: 'Small changes are always made straight away unless you choose “Always show a plan”.',
+      },
+      table_columns: {
+        type: 'json',
+        label: 'Required columns for AI-created tables',
+        default: DEFAULT_TABLE_COLUMNS,
+        help: 'Every table the page designer proposes must include these columns, or the proposal is sent back to be fixed. A list of { name, type, primaryKey, autoIncrement, nullable }. Use [] to turn the check off. The wording the AI reads is under System → Prompts → Rules.',
       },
       project_types: { type: 'json', hidden: true, default: null },
     },

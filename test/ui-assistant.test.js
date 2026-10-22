@@ -214,3 +214,70 @@ test('the model picker offers the configured models, saves the choice on the cha
     async () => !(await node.ctx.db('assistant_sessions').where({ id: sessionId() }).first()).model,
   );
 });
+
+test('a deletion the assistant asks for shows a card that needs two clicks, and the table name typed', async () => {
+  const admin = await node.ctx.db('users').where({ email: ADMIN.email }).first();
+  const actor = { id: admin.id, email: admin.email, can: () => true };
+  await node.ctx.dbms.createTable(
+    {
+      name: 'cards',
+      columns: [{ name: 'id', type: 'integer', primaryKey: true, autoIncrement: true }],
+    },
+    actor,
+  );
+  const usage = { input_tokens: 1, output_tokens: 1 };
+  const queue = [
+    {
+      content: [
+        {
+          type: 'tool_use',
+          id: 'd1',
+          name: 'db_request_delete',
+          input: { kind: 'table', table: 'cards' },
+        },
+      ],
+      stop_reason: 'tool_use',
+      usage,
+    },
+    {
+      content: [{ type: 'text', text: 'Waiting for your confirmation.' }],
+      stop_reason: 'end_turn',
+      usage,
+    },
+  ];
+  const svc = createAssistant(node.ctx, {
+    client: { messages: { create: async () => queue.shift() } },
+  });
+  const s = await svc.create(actor);
+  await svc.sendMessage(s.id, 'drop the cards table', actor);
+
+  // The earlier tests left the panel open on another chat: close it, then reopen on this one.
+  if (dock()) {
+    b.click(dock().querySelector('[aria-label="Close the assistant"]'));
+    await wait(() => !dock());
+  }
+  b.win.localStorage.setItem('assistant.session', String(s.id));
+  b.click(b.$('.chat-fab'));
+  await wait(() => dock());
+  const card = () => dock().querySelector('[aria-label="Confirm a deletion"]');
+  await wait(() => card() && /Delete the table "cards"/.test(card().textContent));
+  const btn = (t) => [...card().querySelectorAll('button')].find((x) => x.textContent.trim() === t);
+  const stage = async () => (await node.ctx.db('assistant_confirmations').first()).status;
+  assert.equal(await stage(), 'pending');
+
+  b.click(btn('Delete…'));
+  await wait(async () => (await stage()) === 'first');
+  await wait(() => card().querySelector('input'));
+  setValue(card().querySelector('input'), 'wrong');
+  b.click(card().querySelector('.btn-danger'));
+  await wait(() => /Type the table name/.test(dock().textContent));
+  assert.equal(await stage(), 'first');
+  setValue(card().querySelector('input'), 'cards');
+  b.click(card().querySelector('.btn-danger'));
+  await wait(async () => (await stage()) === 'confirmed');
+  assert.equal(
+    await node.ctx.db.schema.hasTable('cards'),
+    true,
+    'the person confirmed; nothing is deleted until the assistant acts',
+  );
+});

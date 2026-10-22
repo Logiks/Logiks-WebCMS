@@ -7,6 +7,7 @@
  *   master        quality principles every AI builder follows, whatever the site is
  *   workflow      how a request is handled: ask, state assumptions, confirm, plan, build, verify
  *   project_type  what "good" means for one kind of site (the choice under Settings → General → Project type)
+ *   rules         conventions for one area (tables, pages, ...), added only when a builder works in that area (D-118)
  */
 
 export const DEFAULT_PROJECT_TYPE = 'general';
@@ -84,6 +85,14 @@ Ask about, when the person has not said: ${o.ask}
 
 Avoid: ${o.avoid}`;
 
+const RULES_TABLES = `Tables you create hold real data for a real site, so they follow one house structure.
+
+- Name tables in lowercase with underscores, plural, describing what a row is (pricing_tiers, team_members).
+- Give every column a name that says what it holds. No abbreviations the owner would not recognise.
+- Timestamps are epoch milliseconds in a bigInteger column, never a string.
+- Store a yes/no as a boolean, a list or object as json, long text as text, and keep short labels as string.
+- Only add columns the page or Service actually needs, beyond the required ones below.`;
+
 export const DEFAULT_PROMPTS = [
   {
     key: 'master',
@@ -119,6 +128,14 @@ export const DEFAULT_PROMPTS = [
       'No questions. The assistant decides, records its assumptions in the requirements, and builds.',
     body: WORKFLOW_AUTONOMOUS,
     v: 2,
+  },
+  {
+    key: 'rules.tables',
+    kind: 'rules',
+    label: 'Rules: database tables',
+    description: 'How every table the AI creates is named and which columns it must have.',
+    body: RULES_TABLES,
+    v: 1,
   },
   {
     key: 'project.general',

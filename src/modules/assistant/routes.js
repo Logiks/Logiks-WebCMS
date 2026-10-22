@@ -76,6 +76,30 @@ export default function assistantRoutes(ctx) {
       );
     },
   );
+  // Only a person can answer a deletion request: two separate clicks, then the assistant may carry it out (D-119).
+  r.post(
+    '/assistant/sessions/:id/confirmations/:cid',
+    chat,
+    docs({
+      body: z.object({ step: z.enum(['first', 'second', 'cancel']), typed: z.string().optional() }),
+      response: z.object({ status: z.string() }),
+    }),
+    async (req, res) => {
+      const { step, typed } = parse(
+        z.object({ step: z.enum(['first', 'second', 'cancel']), typed: z.string().optional() }),
+        req.body,
+      );
+      res.json(
+        await assistant.decideConfirmation(
+          Number(req.params.id),
+          Number(req.params.cid),
+          step,
+          typed,
+          actorOf(req),
+        ),
+      );
+    },
+  );
   r.get('/assistant/models', chat, (_req, res) => {
     res.json(assistant.models());
   });

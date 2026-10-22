@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { makeNode, signedIn, tmpDb, sharedBus, busFor, until } from './helpers.js';
 import { createAssistant } from '../src/modules/assistant/service.js';
 import { DEFAULT_PROMPTS } from '../src/modules/prompts/defaults.js';
+import { DEFAULT_TABLE_COLUMNS } from '../src/modules/prompts/rules.js';
 
 let node, admin;
 before(async () => {
@@ -205,5 +206,73 @@ describe('the assistant is given the site’s prompts', () => {
     assert.equal(sys.cache_control.type, 'ephemeral');
     assert.equal(calls[0].output_config.effort, 'high');
     await node.ctx.settings.update('general', { values: { project_type: 'general' } }, null);
+  });
+});
+
+describe('rules by area (D-118)', () => {
+  test('rules are added only for the topics a builder asks for, and state what is checked', async () => {
+    const none = await node.ctx.prompts.compose();
+    assert.doesNotMatch(none.text, /Rules: Database tables/);
+    const some = await node.ctx.prompts.compose({ topics: ['tables'] });
+    assert.match(some.text, /# Rules: Database tables/);
+    assert.match(some.text, /`created_at`/);
+    assert.ok(some.parts.includes('rules.tables'));
+    const other = await node.ctx.prompts.compose({ topics: ['pages'] });
+    assert.doesNotMatch(other.text, /Rules: Database tables/);
+  });
+
+  test('a table without the required columns is rejected with what to add; a compliant one passes', () => {
+    const p = node.ctx.prompts;
+    const bad = p.check('tables', { name: 't', columns: [{ name: 'label', type: 'string' }] });
+    assert.ok(bad.some((m) => /"id"/.test(m)));
+    assert.ok(bad.some((m) => /"created_at"/.test(m)));
+    const wrongType = p.check('tables', {
+      name: 't',
+      columns: [
+        { name: 'id', type: 'string' },
+        { name: 'created_at', type: 'bigInteger' },
+        { name: 'updated_at', type: 'bigInteger' },
+        { name: 'created_by', type: 'bigInteger' },
+      ],
+    });
+    assert.ok(wrongType.some((m) => /"id" must be type bigInteger/.test(m)));
+    assert.deepEqual(p.check('nope', {}), []);
+  });
+
+  test('the required columns come from the setting: edit them, or turn the check off with []', async () => {
+    await node.ctx.settings.update(
+      'prompts',
+      { values: { table_columns: [{ name: 'tenant', type: 'string' }] } },
+      null,
+    );
+    const p = node.ctx.prompts;
+    assert.deepEqual(p.check('tables', { columns: [{ name: 'tenant', type: 'string' }] }), []);
+    assert.match((await p.compose({ topics: ['tables'] })).text, /`tenant`/);
+    await node.ctx.settings.update('prompts', { values: { table_columns: [] } }, null);
+    assert.deepEqual(p.check('tables', { columns: [] }), []);
+    await node.ctx.settings.update(
+      'prompts',
+      { values: { table_columns: DEFAULT_TABLE_COLUMNS } },
+      null,
+    );
+  });
+
+  test('a rule set can be added for an area once, edited, and deleted; unknown areas are refused', async () => {
+    const mk = (area) =>
+      admin.post('/api/admin/prompts').send({
+        area,
+        label: 'Rules: pages',
+        body: 'Every page ends with a contact call to action.',
+      });
+    assert.equal((await mk('weather')).status, 422);
+    const made = await mk('pages');
+    assert.equal(made.status, 201, JSON.stringify(made.body));
+    assert.equal(made.body.item.kind, 'rules');
+    assert.equal((await mk('pages')).status, 409);
+    assert.match(
+      (await node.ctx.prompts.compose({ topics: ['pages'] })).text,
+      /contact call to action/,
+    );
+    assert.equal((await admin.delete('/api/admin/prompts/rules.pages')).status, 204);
   });
 });

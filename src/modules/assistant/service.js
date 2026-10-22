@@ -7,6 +7,7 @@ import { createGuide } from './guide.js';
 import { createHistory } from './history.js';
 import { createRequirements } from './requirements.js';
 import { createPlans } from './plans.js';
+import { createConfirmations } from './confirmations.js';
 import { problemsOf, referenceMarkdown } from '../visual/service.js';
 import { PLUGIN_CONVENTIONS } from '../plugin-editor/service.js';
 import { TOOLS } from './tools.js';
@@ -180,6 +181,7 @@ export function createAssistant(ctx, { client: injectedClient } = {}) {
   const { db, dialect, settings, audit, siteFiles, themes, content, log } = ctx;
   const requirements = createRequirements({ db, siteFiles, themes, content, audit });
   const plans = createPlans({ db, dialect, requirements, audit });
+  const confirmations = createConfirmations({ db, dialect, audit });
   const docstore = createDocStore(ctx, requirements);
   const git = createGitMirror({ env: ctx.env, db, settings, log });
   const history = createHistory(ctx, { docstore, git });
@@ -374,6 +376,18 @@ export function createAssistant(ctx, { client: injectedClient } = {}) {
       };
     };
 
+    /** The row's full primary key, as an object. An empty or partial key would match many rows, so it is refused. */
+    async function primaryKeyOf(table, pk) {
+      const { columns } = await ctx.dbms.tableInfo(table).catch(asErr);
+      const need = columns.filter((c) => c.primaryKey).map((c) => c.name);
+      const got = Object.keys(pk ?? {});
+      if (!need.length)
+        throw new Error(`"${table}" has no primary key, so single rows cannot be addressed.`);
+      if (need.length !== got.length || !need.every((n) => got.includes(n)))
+        throw new Error(`Give the full primary key: ${need.join(', ')}.`);
+      return Object.fromEntries(need.map((n) => [n, pk[n]]));
+    }
+
     /**
      * Big builds need the person's approved plan (D-083). Small changes never do. The decision lives in the
      * database and only the chat's buttons can set it, so the model cannot talk its way past this.
@@ -556,6 +570,112 @@ export function createAssistant(ctx, { client: injectedClient } = {}) {
           if (cur == null) throw new Error(`There is no document at "${path}".`);
           return null;
         });
+      },
+
+      // Database tools (D-119). They call the same service as System → Database, as the signed-in person, so the
+      // dbms.read / dbms.write tiers and the sensitive-table list apply unchanged. None of it is in the change history.
+      async db_tables({ table }) {
+        requirePerm('dbms.read');
+        if (!table) return { tables: (await ctx.dbms.listTables()).map((t) => t.name) };
+        const info = await ctx.dbms.tableInfo(table).catch(asErr);
+        return { table, columns: info.columns, indexes: info.indexes };
+      },
+
+      async db_rows({ table, page, per_page }) {
+        requirePerm('dbms.read');
+        const info = await ctx.dbms.tableInfo(table).catch(asErr);
+        if (info.sensitive)
+          throw new Error(`"${table}" is an internal table; its rows are not available to you.`);
+        const r = await ctx.dbms
+          .listRows(table, { page, perPage: Math.min(50, Number(per_page) || 10) })
+          .catch(asErr);
+        return { rows: r.rows, page: r.page, pages: r.pages, total: r.total };
+      },
+
+      async db_create_table({ name, columns }) {
+        requirePerm('dbms.write');
+        const problems = ctx.prompts?.check('tables', { name, columns }) ?? [];
+        if (problems.length)
+          throw new Error(
+            `The table breaks the house rules. Fix and try again: ${problems.join(' ')}`,
+          );
+        await ctx.dbms.createTable({ name, columns }, actor).catch(asErr);
+        return { created: name, columns: columns.length };
+      },
+
+      async db_alter_table({ table, add_column, create_index }) {
+        requirePerm('dbms.write');
+        if (!add_column && !create_index) throw new Error('Give add_column or create_index.');
+        if (add_column) await ctx.dbms.addColumn(table, add_column, actor).catch(asErr);
+        if (create_index) await ctx.dbms.createIndex(table, create_index, actor).catch(asErr);
+        return { ok: true, table };
+      },
+
+      async db_write_row({ table, op, pk, data }) {
+        requirePerm('dbms.write');
+        if (op === 'insert')
+          return { row: await ctx.dbms.createRecord(table, data ?? {}, actor).catch(asErr) };
+        const keys = await primaryKeyOf(table, pk);
+        await ctx.dbms.updateRecord(table, keys, data ?? {}, actor).catch(asErr);
+        return { ok: true };
+      },
+
+      async db_request_delete({ kind, table, name, pk }) {
+        requirePerm('dbms.write');
+        const info = await ctx.dbms.tableInfo(table).catch(asErr);
+        if (info.sensitive)
+          throw new Error(`"${table}" is an internal table and cannot be changed here.`);
+        let summary;
+        let target = { table };
+        if (kind === 'table') {
+          const n = (await ctx.dbms.listRows(table, { perPage: 1 }).catch(asErr)).total;
+          summary = `Delete the table "${table}" and all ${n} row${n === 1 ? '' : 's'} in it.`;
+        } else if (kind === 'column') {
+          if (!info.columns.some((c) => c.name === name))
+            throw new Error(`"${table}" has no column "${name}".`);
+          summary = `Delete the column "${name}" from "${table}", and its data in every row.`;
+          target.name = name;
+        } else if (kind === 'index') {
+          if (!info.indexes.some((i) => i.name === name))
+            throw new Error(`"${table}" has no index "${name}".`);
+          summary = `Delete the index "${name}" on "${table}". The data stays; lookups may get slower.`;
+          target.name = name;
+        } else if (kind === 'row') {
+          const keys = await primaryKeyOf(table, pk);
+          const row = await db(table).where(keys).first();
+          if (!row) throw new Error('No row has that primary key.');
+          summary = `Delete one row of "${table}" (${Object.entries(keys)
+            .map(([k, v]) => `${k} ${v}`)
+            .join(', ')}): ${JSON.stringify(row).slice(0, 160)}`;
+          target.pk = keys;
+        } else throw new Error('kind must be table, column, index or row.');
+        const confirmationId = await confirmations.propose(rec.sessionId, {
+          kind,
+          target,
+          summary,
+        });
+        return {
+          confirmationId,
+          shownToThePerson: true,
+          next: 'Nothing was deleted. Write one short line saying you are waiting for their two confirmations, then stop.',
+        };
+      },
+
+      async db_delete({ confirmation_id }) {
+        requirePerm('dbms.write');
+        const { kind, target } = await confirmations.consume(
+          rec.sessionId,
+          Number(confirmation_id),
+        );
+        const { table, name } = target;
+        if (kind === 'table') await ctx.dbms.dropTable(table, actor).catch(asErr);
+        else if (kind === 'column') await ctx.dbms.dropColumn(table, name, actor).catch(asErr);
+        else if (kind === 'index') await ctx.dbms.dropIndex(table, name, actor).catch(asErr);
+        else
+          await ctx.dbms
+            .deleteRecord(table, await primaryKeyOf(table, target.pk), actor)
+            .catch(asErr);
+        return { deleted: kind, table, ...(name ? { name } : {}) };
       },
 
       async validate_site() {
@@ -1029,6 +1149,7 @@ export function createAssistant(ctx, { client: injectedClient } = {}) {
         })),
         commits: await history.list({ sessionId: id, limit: 50 }),
         plans: await plans.list(id),
+        confirmations: await confirmations.list(id),
       };
     },
 
@@ -1044,6 +1165,12 @@ export function createAssistant(ctx, { client: injectedClient } = {}) {
     async decidePlan(id, planId, decision, note, actor) {
       await need(id, actor);
       return plans.decide(id, Number(planId), decision, note, actor);
+    },
+
+    /** The person's click on a staged deletion (first, second, cancel); see confirmations.js. */
+    async decideConfirmation(id, confirmationId, step, typed, actor) {
+      await need(id, actor);
+      return confirmations.decide(id, Number(confirmationId), step, typed, actor);
     },
 
     /** The models a chat may use (the ones offered under Settings → AI) and which one applies when a chat has no choice. */
@@ -1188,7 +1315,7 @@ export function createAssistant(ctx, { client: injectedClient } = {}) {
       // The site's project type, quality standard and working method (D-082). Fixed text for fixed settings, so it stays
       // part of the cached prefix. If prompts cannot be read the assistant still works, with its built-in rules.
       const guidance = await ctx.prompts
-        ?.compose()
+        ?.compose({ topics: ['tables', 'pages', 'components', 'services', 'content'] })
         .then((c) => c.text)
         .catch((e) => {
           log?.warn({ err: e.message }, 'assistant: prompts not available');
