@@ -26,6 +26,8 @@ export function createCrypto(env) {
   return {
     currentKeyId: currentId,
     isEncrypted: (v) => typeof v === 'string' && v.startsWith(PREFIX),
+    /** True when this server holds the key an envelope was written with (a backup restored elsewhere may not). */
+    canDecrypt: (envelope) => keys.has(envelope.slice(PREFIX.length).split(':')[0]),
     /** @param {string} plaintext @param {string} aad */
     encrypt(plaintext, aad) {
       const iv = randomBytes(12);

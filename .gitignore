@@ -32,6 +32,8 @@ usermedia/
 zold/
 ./cache/
 plugins/*
+# The site mirror: derived from the database on every server (CLAUDE.md), so it must never be a tracked file
+# public/
 
 # Runtime data
 pids

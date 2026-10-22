@@ -111,6 +111,10 @@ export function defineCorePermissions(permissions) {
     'history.push': 'Push the change history to the git remote',
   });
   permissions.define('Publish', {
+    'backup.read': 'See the backups kept on this server',
+    'backup.create': 'Create a backup and download it',
+    'backup.restore':
+      'Restore a backup, which replaces the database and uploaded files of this installation',
     'publish.read': 'See the publish status, branches and releases',
     'publish.commit': 'Commit the site to its git history',
     'publish.manage':

@@ -565,6 +565,9 @@
     </template>
 
     <!-- Database (System → Database, D-047) -->
+    <template x-if="route === 'backup'">
+      <section x-data="backupPage"></section>
+    </template>
     <template x-if="route === 'dbms'">
       <section x-data="dbmsPage"></section>
     </template>

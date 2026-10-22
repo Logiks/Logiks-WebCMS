@@ -1,0 +1,70 @@
+<div class="page-head d-flex justify-content-between align-items-end flex-wrap gap-2">
+  <div><h1>Backups</h1><p>Save the database and uploaded files in one file, then restore it here or on another server. Code, the <span class="mono">.env</span> file and the themes that ship with the software are not included, because the server already has them.</p></div>
+  <label class="btn btn-outline-secondary" x-show="can('backup.restore')">Upload a backup<input type="file" class="visually-hidden" accept=".zip,application/zip" @change="upload($event)"></label>
+</div>
+<div class="alert alert-danger" role="alert" x-show="error" x-text="error"></div>
+<div class="alert alert-success" role="status" x-show="notice" x-text="notice"></div>
+<div class="alert alert-info" role="status" x-show="running" aria-live="polite"><span class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span><strong x-text="status.op === 'restore' ? 'Restoring' : 'Making a backup'"></strong> <span x-text="status.step"></span></div>
+
+<section class="panel p-3 mb-3" x-show="can('backup.create')" aria-labelledby="bk-new-h">
+  <h2 class="h6" id="bk-new-h">Make a backup</h2>
+  <form class="row g-3 align-items-end" @submit.prevent="create()">
+    <div class="col-md-4">
+      <label class="form-label" for="bk-name">Name (optional)</label>
+      <input id="bk-name" class="form-control" maxlength="190" placeholder="Before the redesign" x-model="form.name">
+    </div>
+    <div class="col-md-5">
+      <label class="form-label" for="bk-secrets">Saved passwords and API keys</label>
+      <select id="bk-secrets" class="form-select" x-model="form.secrets">
+        <option value="keep">Keep them (readable only on a server with the same master key)</option>
+        <option value="remove">Leave them out (safe to share; enter them again after restoring)</option>
+      </select>
+    </div>
+    <div class="col-md-3">
+      <div class="form-check"><input id="bk-media" class="form-check-input" type="checkbox" x-model="form.includeMedia"><label class="form-check-label" for="bk-media">Include uploaded files</label></div>
+    </div>
+    <div class="col-12"><button class="btn btn-primary" :disabled="busy || running" x-text="busy ? 'Starting…' : 'Make a backup'"></button></div>
+  </form>
+</section>
+
+<section class="panel p-3 mb-3" aria-labelledby="bk-list-h">
+  <h2 class="h6" id="bk-list-h">Backups on this server</h2>
+  <div class="empty" x-show="loaded && !items.length">No backups yet.</div>
+  <div class="table-responsive" x-show="items.length">
+    <table class="table table-sm align-middle mb-0">
+      <thead><tr><th>Name</th><th>Made</th><th>Size</th><th>Contents</th><th></th></tr></thead>
+      <tbody>
+        <template x-for="b in items" :key="b.id">
+          <tr>
+            <td><span class="fw-semibold" x-text="b.name"></span> <span class="badge text-bg-secondary" x-show="b.source !== 'created'" x-text="b.source === 'safety' ? 'Safety copy' : 'Uploaded'"></span> <span class="badge text-bg-warning" x-show="b.status === 'running'">Running</span> <span class="badge text-bg-danger" x-show="b.status === 'failed'">Failed</span><div class="small text-danger" x-show="b.error" x-text="b.error"></div></td>
+            <td x-text="when(b.createdAt)"></td>
+            <td x-text="size(b.size)"></td>
+            <td class="small" x-text="contents(b)"></td>
+            <td class="text-end text-nowrap">
+              <a class="btn btn-sm btn-outline-secondary" x-show="b.status === 'ready' && can('backup.create')" :href="'/api/admin/backups/' + b.id + '/download'" :aria-label="'Download ' + b.name">Download</a>
+              <button type="button" class="btn btn-sm btn-outline-primary" x-show="b.status === 'ready' && can('backup.restore')" :disabled="busy || running" @click="startRestore(b)">Restore…</button>
+              <button type="button" class="btn btn-sm btn-outline-danger" x-show="b.status !== 'running' && can('backup.create')" :disabled="busy" @click="remove(b)">Delete</button>
+            </td>
+          </tr>
+        </template>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="panel p-3 border-danger" x-show="plan" aria-labelledby="bk-restore-h">
+  <h2 class="h5" id="bk-restore-h">Restore “<span x-text="plan && plan.backup.name"></span>”</h2>
+  <p class="mb-2">This replaces <strong x-text="plan && plan.replaces.rows"></strong> records in <strong x-text="plan && plan.replaces.tables"></strong> tables and the uploaded files with the ones in this backup. Everyone is signed out afterwards, including you.</p>
+  <ul class="small mb-2"><template x-for="w in (plan ? plan.warnings : [])" :key="w"><li x-text="w"></li></template></ul>
+  <div class="alert alert-danger py-2" x-show="plan && plan.blockers.length" x-text="plan && plan.blockers[0]"></div>
+  <div x-show="plan && !plan.blockers.length">
+    <div class="form-check mb-2"><input id="bk-safety" class="form-check-input" type="checkbox" x-model="safety"><label class="form-check-label" for="bk-safety">Make a safety backup of the current data first (recommended)</label></div>
+    <label class="form-label" for="bk-confirm">Type RESTORE to confirm</label>
+    <input id="bk-confirm" class="form-control w-auto mb-3 mono" autocomplete="off" x-model="confirmText">
+    <div class="d-flex gap-2">
+      <button type="button" class="btn btn-danger" :disabled="busy || confirmText !== 'RESTORE'" @click="restore()" x-text="busy ? 'Starting…' : 'Restore this backup'"></button>
+      <button type="button" class="btn btn-outline-secondary" :disabled="busy" @click="plan = null">Cancel</button>
+    </div>
+  </div>
+  <button type="button" class="btn btn-outline-secondary" x-show="plan && plan.blockers.length" @click="plan = null">Close</button>
+</section>

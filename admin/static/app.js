@@ -1239,6 +1239,7 @@ document.addEventListener('alpine:init', () => {
             { id: 'cluster', label: 'Cluster', perm: 'cluster.read' },
             { id: 'system', label: 'System', perm: 'cluster.read' },
             { id: 'updates', label: 'Updates', perm: 'system.update' },
+            { id: 'backup', label: 'Backups', module: 'backup', perm: 'backup.read' },
             { id: 'log-manager', label: 'Log Manager', module: 'logs', perm: 'logs.manage' },
           ],
         },
@@ -7498,6 +7499,141 @@ document.addEventListener('alpine:init', () => {
         );
       } catch (e) {
         this.error = e.message;
+      }
+    },
+  }));
+
+  // ───────── Operations → Backups (docs/DECISIONS.md D-120) ─────────
+  Alpine.data('backupPage', () => ({
+    ...H,
+    items: [],
+    status: { state: 'idle' },
+    loaded: false,
+    busy: false,
+    error: '',
+    notice: '',
+    form: { name: '', secrets: 'keep', includeMedia: true },
+    plan: null, // what restoring the chosen backup would do
+    safety: true,
+    confirmText: '',
+    timer: null,
+    get running() {
+      return this.status.state === 'running';
+    },
+    async init() {
+      if (!(await this.mountFragment('backup', 'page'))) return;
+      await this.load();
+      this.timer = setInterval(() => this.poll(), 2000);
+    },
+    destroy() {
+      clearInterval(this.timer);
+    },
+    async load() {
+      try {
+        const d = await api('GET', '/admin/backups');
+        this.items = d.items;
+        this.status = d.status;
+        this.loaded = true;
+      } catch (e) {
+        this.error = e.message;
+      }
+    },
+    /** While something runs the list is reread; when it stops, the result is reported once. */
+    async poll() {
+      if (!this.loaded) return;
+      const was = this.running;
+      try {
+        this.status = await api('GET', '/admin/backups/status');
+      } catch {
+        return; // a restore signs everyone out; the next sign-in shows the result
+      }
+      if (was && !this.running) {
+        await this.load();
+        if (this.status.error) this.error = this.status.error;
+        else this.notice = 'Finished.';
+      } else if (this.running !== was) await this.load();
+    },
+    when(t) {
+      return new Date(t).toLocaleString();
+    },
+    size(n) {
+      return n >= 1048576
+        ? (n / 1048576).toFixed(1) + ' MB'
+        : Math.max(1, Math.round(n / 1024)) + ' KB';
+    },
+    contents(b) {
+      const m = b.manifest;
+      if (!m) return '';
+      return `${m.rows} records, ${m.media.files} files, ${m.dialect}, passwords ${m.secrets === 'remove' ? 'left out' : 'kept'}`;
+    },
+    async create() {
+      this.busy = true;
+      this.error = this.notice = '';
+      try {
+        await api('POST', '/admin/backups', { ...this.form });
+        this.form.name = '';
+        await this.load();
+        this.status = await api('GET', '/admin/backups/status');
+      } catch (e) {
+        this.error = e.message;
+      } finally {
+        this.busy = false;
+      }
+    },
+    async upload(ev) {
+      const file = ev.target.files[0];
+      ev.target.value = '';
+      if (!file) return;
+      this.busy = true;
+      this.error = this.notice = '';
+      try {
+        await api('POST', '/admin/backups/upload?name=' + encodeURIComponent(file.name), file);
+        await this.load();
+        this.notice = 'Backup uploaded. Choose Restore to use it.';
+      } catch (e) {
+        this.error = e.message;
+      } finally {
+        this.busy = false;
+      }
+    },
+    async startRestore(b) {
+      this.error = this.notice = '';
+      this.confirmText = '';
+      try {
+        this.plan = await api('GET', `/admin/backups/${b.id}/inspect`);
+      } catch (e) {
+        this.error = e.message;
+      }
+    },
+    async restore() {
+      this.busy = true;
+      this.error = this.notice = '';
+      try {
+        await api('POST', `/admin/backups/${this.plan.backup.id}/restore`, {
+          confirm: this.confirmText,
+          safety: this.safety,
+        });
+        this.plan = null;
+        this.status = await api('GET', '/admin/backups/status');
+        this.notice = 'Restore started. You will be signed out when it finishes.';
+      } catch (e) {
+        this.error = e.message;
+      } finally {
+        this.busy = false;
+      }
+    },
+    async remove(b) {
+      if (!window.confirm(`Delete the backup “${b.name}”? The file cannot be brought back.`))
+        return;
+      this.busy = true;
+      this.error = this.notice = '';
+      try {
+        await api('DELETE', '/admin/backups/' + b.id);
+        await this.load();
+      } catch (e) {
+        this.error = e.message;
+      } finally {
+        this.busy = false;
       }
     },
   }));
