@@ -1,16 +1,56 @@
-import { now } from '../../core/db/index.js';
+import { createHash } from 'node:crypto';
+import { now, dialect } from '../../core/db/index.js';
 
 const MAX_ROWS = 500;
+const PROMPT_CHARS = 500;
+
+/**
+ * The message a person typed that this call is answering: the last user message with real text (tool results and
+ * the assistant's hidden "[auto] " continuations belong to the message before them). `count` makes the same words
+ * sent twice in one chat two different messages.
+ * @returns {{ prompt: string, count: number } | null}
+ */
+function lastPersonMessage(messages) {
+  if (!Array.isArray(messages)) return null;
+  let prompt = null;
+  let count = 0;
+  for (const m of messages) {
+    if (m?.role !== 'user') continue;
+    const t = (
+      typeof m.content === 'string'
+        ? m.content
+        : Array.isArray(m.content)
+          ? m.content
+              .filter((b) => b?.type === 'text')
+              .map((b) => b.text)
+              .join(' ')
+          : ''
+    ).trim();
+    if (!t || t.startsWith('[auto] ')) continue;
+    prompt = t;
+    count++;
+  }
+  return prompt === null ? null : { prompt, count };
+}
 
 /**
  * System → AI Usage: a log of every AI call across providers and models. Recording is best-effort and never
  * throws — a failed log write must not break the feature that made the call.
  * @param {{ db: import('knex').Knex, log?: any }} ctx
  */
+/** 'YYYY-MM-DD' → the label of its day, week (the Monday) or month. */
+function periodOf(day, period) {
+  if (period === 'month') return day.slice(0, 7);
+  if (period !== 'week') return day;
+  const d = new Date(`${day}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7));
+  return d.toISOString().slice(0, 10);
+}
+
 export function createAiUsage({ db, log }) {
   /**
    * @param {{ provider: string, model?: string, feature: string, userId?: number|null, inputTokens?: number,
-   *   outputTokens?: number, cacheReadTokens?: number, units?: number, ok?: boolean }} e
+   *   outputTokens?: number, cacheReadTokens?: number, units?: number, ok?: boolean, prompt?: string, turnKey?: string }} e
    */
   async function record(e) {
     try {
@@ -25,6 +65,8 @@ export function createAiUsage({ db, log }) {
         cache_read_tokens: Number(e.cacheReadTokens) || 0,
         units: Number(e.units) || 0,
         ok: e.ok !== false,
+        prompt: e.prompt ? String(e.prompt).slice(0, PROMPT_CHARS) : null,
+        turn_key: e.turnKey ?? null,
       });
     } catch (err) {
       log?.warn({ err: err.message }, 'ai usage: call not recorded');
@@ -34,7 +76,14 @@ export function createAiUsage({ db, log }) {
   /** Logs one finished Anthropic response (or failure) from a `messages` call. */
   function fromAnthropic(meta, params, res, ok) {
     const u = res?.usage ?? {};
+    const msg = lastPersonMessage(params?.messages);
     return record({
+      prompt: msg?.prompt,
+      turnKey: msg
+        ? createHash('sha1')
+            .update(`${meta.userId ?? ''}|${meta.feature}|${msg.count}|${msg.prompt}`)
+            .digest('hex')
+        : undefined,
       provider: 'anthropic',
       model: res?.model || params?.model,
       feature: meta.feature,
@@ -49,10 +98,11 @@ export function createAiUsage({ db, log }) {
 
   const range = (q, /** @type {{ from?: any, to?: any, kind?: string }} */ { from, to, kind }) => {
     // 'media' = image generation; 'text' = everything else (the text models).
-    if (kind === 'media') q.where('feature', 'media-generator');
-    if (kind === 'text') q.whereNot('feature', 'media-generator');
-    if (from) q.where('created_at', '>=', Number(from));
-    if (to) q.where('created_at', '<=', Number(to));
+    // Columns are table-qualified: `recent` and `summary` join `users`, which has its own created_at.
+    if (kind === 'media') q.where('ai_usage_log.feature', 'media-generator');
+    if (kind === 'text') q.whereNot('ai_usage_log.feature', 'media-generator');
+    if (from) q.where('ai_usage_log.created_at', '>=', Number(from));
+    if (to) q.where('ai_usage_log.created_at', '<=', Number(to));
     return q;
   };
 
@@ -143,12 +193,98 @@ export function createAiUsage({ db, log }) {
         .select('ai_usage_log.user_id as user_id', db.raw('max(users.email) as email'), ...sums)
         .groupBy('ai_usage_log.user_id')
         .orderBy('calls', 'desc');
+      // Per user per day in SQL, then folded into weeks/months here: the bucket maths stays the same on every engine.
+      const perDay = await base()
+        .leftJoin('users', 'users.id', 'ai_usage_log.user_id')
+        .select(
+          'ai_usage_log.user_id as user_id',
+          db.raw('max(users.email) as email'),
+          dialect(db).dayBucket('ai_usage_log.created_at', 'day'),
+          ...sums,
+        )
+        .groupBy('ai_usage_log.user_id', dialect(db).dayBucket('ai_usage_log.created_at'))
+        .orderBy('day', 'desc');
+      /** @type {Map<string, any>} */
+      const folded = new Map();
+      for (const r of perDay) {
+        const period = periodOf(r.day, q.period);
+        const key = `${period}|${r.user_id ?? ''}`;
+        const n = num(r);
+        const cur = folded.get(key) ?? {
+          period,
+          userId: r.user_id,
+          email: r.email || '',
+          calls: 0,
+          failed: 0,
+          input: 0,
+          output: 0,
+          cacheRead: 0,
+          units: 0,
+        };
+        for (const k of ['calls', 'failed', 'input', 'output', 'cacheRead', 'units'])
+          cur[k] += n[k];
+        folded.set(key, cur);
+      }
       return {
         total: num(total),
+        byUserPeriod: [...folded.values()].sort(
+          (a, b) => b.period.localeCompare(a.period) || b.input + b.output - (a.input + a.output),
+        ),
         byModel: byModel.map((r) => ({ provider: r.provider, model: r.model, ...num(r) })),
         byFeature: byFeature.map((r) => ({ feature: r.feature, ...num(r) })),
         byUser: byUser.map((r) => ({ userId: r.user_id, email: r.email || '', ...num(r) })),
       };
+    },
+
+    /**
+     * Each message a person sent to an AI feature, newest first, with everything it cost: one row per message
+     * however many model calls (tool loop, continuations) it took. Only calls made since messages were recorded.
+     */
+    async messages(
+      /** @type {{ from?: string, to?: string, limit?: any, before?: any }} */ {
+        from,
+        to,
+        limit = 50,
+        before,
+      } = {},
+    ) {
+      const q = range(db('ai_usage_log'), { from, to, kind: 'text' })
+        .leftJoin('users', 'users.id', 'ai_usage_log.user_id')
+        .whereNotNull('ai_usage_log.turn_key')
+        .select(
+          'ai_usage_log.turn_key as turn_key',
+          db.raw('max(ai_usage_log.id) as last_id'),
+          db.raw('min(ai_usage_log.created_at) as at'),
+          db.raw('max(ai_usage_log.prompt) as prompt'),
+          db.raw('max(ai_usage_log.feature) as feature'),
+          db.raw('max(ai_usage_log.model) as model'),
+          db.raw('max(ai_usage_log.user_id) as user_id'),
+          db.raw('max(users.email) as email'),
+          db.raw('count(*) as calls'),
+          db.raw('sum(case when ai_usage_log.ok then 0 else 1 end) as failed'),
+          db.raw('sum(ai_usage_log.input_tokens) as input'),
+          db.raw('sum(ai_usage_log.output_tokens) as output'),
+          db.raw('sum(ai_usage_log.cache_read_tokens) as cache_read'),
+        )
+        .groupBy('ai_usage_log.turn_key')
+        .orderBy('last_id', 'desc')
+        .limit(Math.min(Math.max(Number(limit) || 50, 1), MAX_ROWS));
+      if (before) q.havingRaw('max(ai_usage_log.id) < ?', [Number(before)]);
+      const rows = await q;
+      return rows.map((r) => ({
+        id: Number(r.last_id),
+        at: Number(r.at),
+        prompt: r.prompt || '',
+        feature: r.feature,
+        model: r.model,
+        userId: r.user_id,
+        email: r.email || '',
+        calls: Number(r.calls),
+        failed: Number(r.failed) || 0,
+        input: Number(r.input) || 0,
+        output: Number(r.output) || 0,
+        cacheRead: Number(r.cache_read) || 0,
+      }));
     },
 
     /** Newest first. */
@@ -167,7 +303,7 @@ export function createAiUsage({ db, log }) {
         .select('ai_usage_log.*', 'users.email as email')
         .orderBy('ai_usage_log.id', 'desc')
         .limit(Math.min(Math.max(Number(limit) || 100, 1), MAX_ROWS));
-      if (provider) q.where('provider', provider);
+      if (provider) q.where('ai_usage_log.provider', provider);
       if (before) q.where('ai_usage_log.id', '<', Number(before));
       const rows = await q;
       return rows.map((r) => ({

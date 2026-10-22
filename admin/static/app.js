@@ -2061,10 +2061,13 @@ document.addEventListener('alpine:init', () => {
     link() {
       const url = window.prompt('Link address (https://…, mailto:, tel:)');
       if (!url) return;
-      if (!/^(https?:\/\/|mailto:|tel:)/i.test(url))
-        return toast('Use an address that starts with https://, mailto: or tel:.', 'error');
+      if (!/^(https?:\/\/|mailto:|tel:|\/(?!\/)|#|\?)/i.test(url.trim()))
+        return toast(
+          'Use https://, mailto: or tel:, or a page on this site such as /about or #section.',
+          'error',
+        );
       if (typeof document.execCommand === 'function')
-        document.execCommand('createLink', false, url);
+        document.execCommand('createLink', false, url.trim());
     },
     async pickBlockImage(b) {
       const item = await new Promise((resolve) =>
@@ -2737,6 +2740,9 @@ document.addEventListener('alpine:init', () => {
     kind,
     s: null,
     calls: [],
+    messages: [],
+    moreMessages: false,
+    period: 'day',
     from: '',
     to: '',
     provider: '',
@@ -2757,11 +2763,19 @@ document.addEventListener('alpine:init', () => {
       try {
         const q = this.params();
         const recent = { limit: '50', ...q, ...(this.provider ? { provider: this.provider } : {}) };
-        const [s, r] = await Promise.all([
-          api('GET', '/admin/ai-usage/summary?' + new URLSearchParams(q)),
+        const [s, r, m] = await Promise.all([
+          api(
+            'GET',
+            '/admin/ai-usage/summary?' + new URLSearchParams({ ...q, period: this.period }),
+          ),
           api('GET', '/admin/ai-usage/recent?' + new URLSearchParams(recent)),
+          this.kind === 'text'
+            ? api('GET', '/admin/ai-usage/messages?' + new URLSearchParams({ ...q, limit: '50' }))
+            : { messages: [] },
         ]);
         this.s = s;
+        this.messages = m.messages;
+        this.moreMessages = m.messages.length === 50;
         this.calls = r.calls;
         this.more = r.calls.length === 50;
       } catch (e) {
@@ -2778,6 +2792,16 @@ document.addEventListener('alpine:init', () => {
       const r = await api('GET', '/admin/ai-usage/recent?' + new URLSearchParams(q));
       this.calls = [...this.calls, ...r.calls];
       this.more = r.calls.length === 50;
+    },
+    async loadMoreMessages() {
+      const q = {
+        ...this.params(),
+        limit: '50',
+        before: String(this.messages[this.messages.length - 1].id),
+      };
+      const r = await api('GET', '/admin/ai-usage/messages?' + new URLSearchParams(q));
+      this.messages = [...this.messages, ...r.messages];
+      this.moreMessages = r.messages.length === 50;
     },
     n(v) {
       return Number(v || 0).toLocaleString();

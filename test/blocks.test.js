@@ -208,3 +208,27 @@ test('plain text extraction (for search) skips code and markup', () => {
   assert.match(text, /one two 2/);
   assert.doesNotMatch(text, /secret_code|<b>/);
 });
+
+test('lines typed in a paragraph keep their breaks, and blank lines stay blank', () => {
+  const text = (t) =>
+    sanitizeBlocks({ blocks: [{ type: 'paragraph', data: { text: t } }] }).blocks[0].data.text;
+  assert.equal(text('one<div>two</div>'), 'one<br />two');
+  assert.equal(text('a<div><br></div><div>b</div>'), 'a<br /><br />b');
+  assert.equal(text('<p>first</p><p>second</p>'), 'first<br />second');
+});
+
+test('internal links survive without nofollow; external links keep it', () => {
+  const html = sanitizeBlocks({
+    blocks: [
+      {
+        type: 'paragraph',
+        data: {
+          text: '<a href="/about">a</a> <a href="#faq">b</a> <a href="https://x.example">c</a>',
+        },
+      },
+    ],
+  }).blocks[0].data.text;
+  assert.match(html, /<a href="\/about">a<\/a>/);
+  assert.match(html, /<a href="#faq">b<\/a>/);
+  assert.match(html, /<a href="https:\/\/x\.example" rel="noopener nofollow ugc">c<\/a>/);
+});

@@ -13,7 +13,15 @@ export default function aiUsageRoutes(ctx) {
   const { aiUsage } = ctx;
 
   r.get('/ai-usage/summary', requirePermission('aiusage.read'), async (req, res) => {
-    res.json(await aiUsage.summary(dates(req)));
+    const period = ['day', 'week', 'month'].includes(String(req.query.period))
+      ? String(req.query.period)
+      : 'day';
+    res.json(await aiUsage.summary({ ...dates(req), period }));
+  });
+
+  r.get('/ai-usage/messages', requirePermission('aiusage.read'), async (req, res) => {
+    const { limit, before } = req.query;
+    res.json({ messages: await aiUsage.messages({ ...dates(req), limit, before }) });
   });
 
   r.get('/ai-usage/recent', requirePermission('aiusage.read'), async (req, res) => {

@@ -3,6 +3,7 @@
         <div class="mb-3 d-flex flex-wrap gap-2 align-items-end">
           <div><label class="form-label small" for="ai-from">From</label><input id="ai-from" type="date" class="form-control form-control-sm" x-model="from" @change="load()"></div>
           <div><label class="form-label small" for="ai-to">To</label><input id="ai-to" type="date" class="form-control form-control-sm" x-model="to" @change="load()"></div>
+          <div><label class="form-label small" for="ai-period">Group users by</label><select id="ai-period" class="form-select form-select-sm" x-model="period" @change="load()"><option value="day">Day</option><option value="week">Week</option><option value="month">Month</option></select></div>
           <div x-show="kind === 'media'"><label class="form-label small" for="ai-prov">Provider</label><select id="ai-prov" class="form-select form-select-sm" x-model="provider" @change="load()"><option value="">All</option><option value="openai">OpenAI</option><option value="google">Google</option><option value="stability">Stability AI</option></select></div>
         </div>
         <div class="row g-2 mb-3" x-show="s">
@@ -26,6 +27,30 @@
               <template x-for="f in (s ? s.byFeature : [])" :key="f.feature"><tr><td x-text="f.feature"></td><td class="text-end" x-text="n(f.calls)"></td><td class="text-end" x-text="n(f.input + f.output)"></td></tr></template>
             </tbody></table>
           </div></div>
+        </div>
+        <div class="panel mb-3" x-show="s">
+          <div class="panel-h" x-text="(kind === 'media' ? 'Images' : 'Tokens') + ' by user, per ' + period"></div>
+          <div class="empty" x-show="s && !s.byUserPeriod.length">Nothing in this range yet.</div>
+          <table class="table table-sm mb-0" x-show="s && s.byUserPeriod.length"><thead><tr><th class="text-capitalize" x-text="period"></th><th>User</th><th class="text-end">Calls</th><th class="text-end" x-show="kind === 'text'">Input</th><th class="text-end" x-show="kind === 'text'">Output</th><th class="text-end" x-show="kind === 'text'">Total</th><th class="text-end" x-show="kind === 'media'">Images</th></tr></thead><tbody>
+            <template x-for="u in (s ? s.byUserPeriod : [])" :key="u.period + '/' + u.userId"><tr><td class="text-nowrap" x-text="u.period"></td><td class="small" x-text="u.email || '(not a person)'"></td><td class="text-end" x-text="n(u.calls)"></td><td class="text-end" x-show="kind === 'text'" x-text="n(u.input)"></td><td class="text-end" x-show="kind === 'text'" x-text="n(u.output)"></td><td class="text-end" x-show="kind === 'text'" x-text="n(u.input + u.output)"></td><td class="text-end" x-show="kind === 'media'" x-text="n(u.units)"></td></tr></template>
+          </tbody></table>
+        </div>
+        <div class="panel mb-3" x-show="kind === 'text'">
+          <div class="panel-h">Messages and what each one cost</div>
+          <p class="muted small px-3 pt-2 mb-0">The first 500 characters of each message people send to an AI feature, with every model call it caused added up. Messages from before this was recorded are not listed. Delete old rows under System → Log Manager.</p>
+          <div class="empty" x-show="!messages.length">No messages in this range yet.</div>
+          <table class="table table-sm mb-0" x-show="messages.length"><thead><tr><th>When</th><th>User</th><th>Feature</th><th>Message</th><th class="text-end">Calls</th><th class="text-end">Input</th><th class="text-end">Output</th></tr></thead><tbody>
+            <template x-for="m in messages" :key="m.id"><tr>
+              <td class="muted text-nowrap" x-text="ago(m.at)" :title="new Date(m.at).toLocaleString()"></td>
+              <td class="muted small" x-text="m.email || '–'"></td>
+              <td x-text="m.feature"></td>
+              <td class="small" style="max-width:28rem;white-space:pre-wrap;word-break:break-word" x-text="m.prompt"></td>
+              <td class="text-end" x-text="n(m.calls) + (m.failed ? ' (' + m.failed + ' failed)' : '')"></td>
+              <td class="text-end" x-text="n(m.input)"></td>
+              <td class="text-end" x-text="n(m.output)"></td>
+            </tr></template>
+          </tbody></table>
+          <div class="p-2" x-show="moreMessages"><button type="button" class="btn btn-outline-secondary btn-sm" @click="loadMoreMessages()">Load more</button></div>
         </div>
         <div class="panel">
           <div class="panel-h">Recent calls</div>

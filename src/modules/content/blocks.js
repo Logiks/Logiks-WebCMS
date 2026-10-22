@@ -24,13 +24,28 @@ const INLINE = {
   allowProtocolRelative: false,
   disallowedTagsMode: 'discard',
   transformTags: {
-    a: (_tag, attribs) => ({
-      tagName: 'a',
-      attribs: { href: attribs.href ?? '', rel: 'noopener nofollow ugc' },
-    }),
+    // External links get the SEO-safe rel; internal ones (/page, #anchor, ?q) are our own pages and stay plain.
+    a: (_tag, attribs) => {
+      const href = attribs.href ?? '';
+      const external = /^(https?:|mailto:|tel:)/i.test(href);
+      return {
+        tagName: 'a',
+        attribs: external ? { href, rel: 'noopener nofollow ugc' } : { href },
+      };
+    },
   },
 };
-const inline = (s) => sanitizeHtml(String(s ?? ''), INLINE).trim();
+/**
+ * A browser's contenteditable starts each new line as a <div> (or <p>). Those tags aren't allowed, and discarding them
+ * glued the lines together on save, so a reopened draft lost its line breaks. They become <br> first.
+ */
+const lineBreaks = (s) =>
+  s
+    .replace(/<(div|p)(\s[^>]*)?>\s*<br\s*\/?>\s*<\/\1>/gi, '<$1></$1>')
+    .replace(/^\s*<(div|p)(\s[^>]*)?>/i, '')
+    .replace(/<(div|p)(\s[^>]*)?>/gi, '<br>')
+    .replace(/<\/(div|p)>/gi, '');
+const inline = (s) => sanitizeHtml(lineBreaks(String(s ?? '')), INLINE).trim();
 const plain = (s) =>
   sanitizeHtml(String(s ?? ''), { allowedTags: [], allowedAttributes: {} })
     .replace(/&amp;/g, '&')
