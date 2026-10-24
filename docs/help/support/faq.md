@@ -84,4 +84,4 @@ Not in development. In production with more than one server, yes: sessions, the 
 SQLite is for development and small single-server sites. Use MySQL or PostgreSQL in production.
 
 **How do I move from SQLite to MySQL?**
-System → Database → Move database copies everything and switches the server over. Back up first.
+System → Database → Copy database copies everything and switches the server over. Back up first.

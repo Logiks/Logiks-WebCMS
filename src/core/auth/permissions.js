@@ -163,7 +163,11 @@ export function defineCorePermissions(permissions) {
     'dbms.query': 'Run raw SQL in the database console',
     // Copies the whole database (users, password hashes, encrypted secrets) to another server and can repoint this
     // one at it — the same trust tier as dbms.query. Never in a seed role other than the wildcard administrator.
-    'dbms.migrate': 'Move the whole database to another database server (e.g. SQLite to MySQL)',
+    'dbms.migrate': 'Copy the whole database to another database server (e.g. SQLite to MySQL) and switch this server to it',
+    // Erases records for good (a one-step-back copy is kept). Held back for administrators like dbms.migrate: never in a
+    // seed role other than the wildcard administrator (D-122).
+    'dbms.flush':
+      'Erase data from the database (everything, or chosen tables), with a one-step-back copy kept',
   });
   permissions.define('Applications', {
     'plugins.read': 'View installed plugins',

@@ -123,7 +123,7 @@ const approxBytes = (row) => {
 };
 
 /** Column types for a table that only exists in the source (made in the SQL console), mapped to portable ones. */
-function buildColumn(t, c) {
+export function buildColumn(t, c) {
   const type = String(c.type).toLowerCase();
   let col;
   if (c.autoIncrement) col = t.increments(c.name);
@@ -142,7 +142,7 @@ function buildColumn(t, c) {
 }
 
 /**
- * System → Database → Move database: copies everything from the database this server runs on into another, empty
+ * System → Database → Copy database (called "Move database" until D-123): copies everything from the database this server runs on into another, empty
  * one (SQLite → MySQL/PostgreSQL, or between those), checks the copy, and — only when asked — points this server at
  * the new database. It never changes the source, and nothing it does is half-way visible: the new database is only
  * used once someone presses Switch.

@@ -38,9 +38,9 @@ amber is behind and will catch up on its own (it also polls). A server marked **
 
 - Browse tables and views, see their structure and indexes, add, edit and delete rows, create or drop tables.
 - `dbms.read`, `dbms.write` and `dbms.query` are three levels. Only `query` (raw SQL) can touch a table holding credentials, sessions or settings.
-- **Move database** copies everything into a new empty MySQL, PostgreSQL or SQLite database table by table, can be resumed, then **Switch** repoints this server. Use it to leave SQLite
+- **Copy database** copies everything into a new empty MySQL, PostgreSQL or SQLite database table by table, can be resumed, then **Switch** repoints this server. Use it to leave SQLite
   for MySQL/PostgreSQL. In a cluster each server has its own `.env`, so switch every server.
-- **Always take a database backup first.** The console and Move database cannot protect you from a mistake.
+- **Always take a database backup first.** The console and Copy database cannot protect you from a mistake.
 
 ## The change history
 

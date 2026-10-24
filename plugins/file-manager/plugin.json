@@ -3,7 +3,7 @@
   "name": "File Manager",
   "version": "1.0.0",
   "author": "SmartinfoLogiks",
-  "description": "Browse, create, edit, rename and delete the source files under public (the site tree), site (shipped themes and wording) and plugins, with file-wide search. Deleting asks you to type the name first and refuses protected paths.",
+  "description": "Browse, create, edit, rename and delete the source files under public (the site tree) and plugins, with file-wide search. Deleting asks you to type the name first and refuses protected paths.",
   "menu": { "label": "File Manager", "icon": "bi-folder2-open" },
   "permissions": [
     { "key": "file_manager.view", "label": "Browse and search files in the File Manager" },

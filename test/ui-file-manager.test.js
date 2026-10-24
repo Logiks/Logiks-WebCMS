@@ -9,10 +9,12 @@ import { openAdmin } from './ui-harness.js';
 let node, b, appRoot;
 before(async () => {
   appRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'fm-ui-'));
-  fs.mkdirSync(path.join(appRoot, 'site/locales'), { recursive: true });
-  fs.writeFileSync(path.join(appRoot, 'site/locales/en.json'), '{"hello":"Hello world"}');
-  fs.writeFileSync(path.join(appRoot, 'site/locales/old.json'), '{}');
   node = await makeNode({ appRoot });
+  // The shipped site/ folder is not reachable from File Manager, so the disk fixtures live in the plugins folder.
+  const loc = path.join(node.ctx.env.PLUGINS_DIR, 'other/locales');
+  fs.mkdirSync(loc, { recursive: true });
+  fs.writeFileSync(path.join(loc, 'en.json'), '{"hello":"Hello world"}');
+  fs.writeFileSync(path.join(loc, 'old.json'), '{}');
   fs.cpSync(
     path.resolve('plugins/file-manager'),
     path.join(node.ctx.env.PLUGINS_DIR, 'file-manager'),
@@ -40,16 +42,22 @@ const link = (text) =>
 
 test('File Manager screen: browse, open a file, and delete only after typing its name', async () => {
   b.go('#/plugin-file-manager');
-  await wait(() => root() && state().roots.length === 3);
+  await wait(() => root() && state().roots.length === 2);
+  assert.deepEqual(
+    state().roots.map((r) => r.id),
+    ['public', 'plugins'],
+  );
 
   b.click(
-    [...root().querySelectorAll('.fm-seg.roots button')].find((x) => x.textContent === 'site'),
+    [...root().querySelectorAll('.fm-seg.roots button')].find((x) => x.textContent === 'plugins'),
   );
+  await wait(() => link('other'));
+  b.click(link('other'));
   await wait(() => link('locales'));
   b.click(link('locales'));
   await wait(() => link('en.json'));
   b.click(link('en.json'));
-  await wait(() => state().file?.path === 'locales/en.json');
+  await wait(() => state().file?.path === 'other/locales/en.json');
   assert.equal(state().content, '{"hello":"Hello world"}');
 
   // Delete: the button stays disabled until the exact name is typed.
@@ -69,8 +77,8 @@ test('File Manager screen: browse, open a file, and delete only after typing its
   await wait(() => confirmBtn().disabled === false);
   b.click(confirmBtn());
   await wait(() => !link('old.json'));
-  assert.equal(fs.existsSync(path.join(appRoot, 'site/locales/old.json')), false);
-  assert.equal(fs.existsSync(path.join(appRoot, 'site/locales/en.json')), true);
+  assert.equal(fs.existsSync(path.join(node.ctx.env.PLUGINS_DIR, 'other/locales/old.json')), false);
+  assert.equal(fs.existsSync(path.join(node.ctx.env.PLUGINS_DIR, 'other/locales/en.json')), true);
 });
 
 test('File Manager screen: search shows matches and opens the file', async () => {
@@ -86,12 +94,14 @@ test('File Manager screen: search shows matches and opens the file', async () =>
     ),
   );
   await wait(() => state().results.length > 0);
-  const hit = state().results.find((r) => r.path === 'locales/en.json');
-  assert.ok(hit, 'finds the line in locales/en.json');
+  const hit = state().results.find((r) => r.path === 'other/locales/en.json');
+  assert.ok(hit, 'finds the line in other/locales/en.json');
   b.click(
-    [...root().querySelectorAll('.fm-hit a')].find((a) => a.textContent === 'site/locales/en.json'),
+    [...root().querySelectorAll('.fm-hit a')].find(
+      (a) => a.textContent === 'plugins/other/locales/en.json',
+    ),
   );
-  await wait(() => state().tab === 'files' && state().file?.path === 'locales/en.json');
+  await wait(() => state().tab === 'files' && state().file?.path === 'other/locales/en.json');
 });
 
 // jsdom doesn't enforce the Content-Security-Policy a real browser does (script-src 'self'), which is how an inline
@@ -110,7 +120,7 @@ test('File Manager screen ships its script as a file, never inline (the CSP bloc
 
 test('File Manager screen: the create form is hidden until asked for', async () => {
   b.go('#/plugin-file-manager');
-  await wait(() => root() && state().roots.length === 3);
+  await wait(() => root() && state().roots.length === 2);
   const form = root().querySelector('form.fm-create');
   assert.equal(form.style.display, 'none', 'create form hidden by default');
   b.click(
@@ -121,7 +131,7 @@ test('File Manager screen: the create form is hidden until asked for', async () 
 
 test('File Manager screen: "New folder" works in public, opening the folder for its first file', async () => {
   b.go('#/plugin-file-manager');
-  await wait(() => root() && state().roots.length === 3);
+  await wait(() => root() && state().roots.length === 2);
   b.click(
     [...root().querySelectorAll('.fm-seg.roots button')].find((x) => x.textContent === 'public'),
   );

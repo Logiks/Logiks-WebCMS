@@ -6,12 +6,13 @@ import path from 'node:path';
  * File Manager — a worked example of how much a plugin can do (docs/DECISIONS.md D-060/D-061): its own backend
  * routes, admin screen, permissions, settings and audit trail, with no change to core.
  *
- * It edits three places, and they are NOT the same kind of thing:
+ * It edits two places, and they are NOT the same kind of thing:
  *   - `public`  — the site tree. The database is the truth and public/ is a derived mirror (D-035), so writes go
  *                 through `ctx.siteFiles` (validated, versioned, cluster-wide) and never touch the disk directly.
- *   - `site`    — the shipped starter site, themes and wording (D-043). Plain files on THIS server's disk.
  *   - `plugins` — every plugin's source (PLUGINS_DIR). Plain files on THIS server's disk.
- * On a cluster, `site` and `plugins` edits reach only the server that took the request; the screen says so.
+ * On a cluster, `plugins` edits reach only the server that took the request; the screen says so.
+ * The shipped `site/` folder (starter site, built-in themes, wording) is deliberately NOT reachable from here: it is
+ * code, changed through git and a deploy (D-043, D-121).
  *
  * Everything runs as the signed-in user's own permissions (`file_manager.view | edit | delete`).
  * Deleting is the one dangerous action, so it is validated on the server, not just in the screen: the exact name
@@ -42,13 +43,6 @@ export default async function (ctx) {
       kind: 'tree',
       note: 'The site tree (pages, components, wording). Saved to the database and shared by every server.',
     },
-    site: {
-      id: 'site',
-      label: 'site',
-      kind: 'disk',
-      dir: path.resolve(ctx.appRoot, 'site'),
-      note: 'Shipped with the app (starter site, themes, wording). Edits change this server only; commit them to git to keep them.',
-    },
     plugins: {
       id: 'plugins',
       label: 'plugins',
@@ -59,7 +53,7 @@ export default async function (ctx) {
   };
   const rootOf = (id) => {
     const root = ROOTS[id];
-    if (!root) throw bad('Choose one of: public, site, plugins.');
+    if (!root) throw bad('Choose one of: public, plugins.');
     return root;
   };
 
@@ -170,12 +164,6 @@ export default async function (ctx) {
     if (!segs.length) return 'That is the top folder itself.';
     if (rootId === 'public' && segs.length === 1)
       return `"${segs[0]}" is one of the site tree’s main folders. Delete the files inside it instead.`;
-    if (rootId === 'site') {
-      if (segs.length === 1)
-        return `"${segs[0]}" ships with the app. Delete something inside it, or remove it with git.`;
-      if (segs[0] === 'themes' && segs.length === 2 && ctx.settings.get('site.theme') === segs[1])
-        return `"${segs[1]}" is the theme your site is using right now. Switch theme in System → Themes first.`;
-    }
     if (rootId === 'plugins') {
       const slug = segs[0];
       if (slug === 'file-manager')
@@ -273,9 +261,7 @@ export default async function (ctx) {
   const pluginHint = (rootId) =>
     rootId === 'plugins'
       ? 'Saved. A running plugin picks up the change when you disable and enable it in Plugin Manager.'
-      : rootId === 'site'
-        ? 'Saved on this server. Commit it to git to keep the change on every server.'
-        : 'Saved.';
+      : 'Saved.';
 
   r.put('/file', need('file_manager.edit'), async (req, res) => {
     const { root: rootId, path: rel0, content, expectedHash } = req.body ?? {};

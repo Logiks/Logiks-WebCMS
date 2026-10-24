@@ -5,7 +5,7 @@
           <button type="button" class="btn btn-outline-secondary" :class="{active: tab === 'tables'}" @click="tab = 'tables'">Tables</button>
           <button type="button" class="btn btn-outline-secondary" :class="{active: tab === 'table'}" x-show="selectedTable" @click="tab = 'table'" x-text="selectedTable"></button>
           <button type="button" class="btn btn-outline-secondary" :class="{active: tab === 'console'}" x-show="can('dbms.query')" @click="openConsole()">SQL console</button>
-          <button type="button" class="btn btn-outline-secondary" :class="{active: tab === 'move'}" x-show="can('dbms.migrate')" @click="tab = 'move'">Move database</button>
+          <button type="button" class="btn btn-outline-secondary" :class="{active: tab === 'move'}" x-show="can('dbms.migrate')" @click="tab = 'move'">Copy database</button>
         </div>
 
         <template x-if="tab === 'tables'">
@@ -148,7 +148,7 @@
           <div x-data="dbMovePanel" class="row g-3">
             <div class="col-lg-8">
               <div class="panel p-3 mb-3">
-                <h2 class="h5">Move to another database</h2>
+                <h2 class="h5">Copy to another database</h2>
                 <p class="small muted mb-2">
                   Copies everything — content, users, settings, media records, logs — from the database this server uses now
                   (<strong x-text="sourceKindLabel"></strong>) into a new, <strong>empty</strong> database on MySQL or PostgreSQL.
@@ -166,8 +166,11 @@
 
               <div class="panel p-3 mb-3">
                 <label class="form-label" for="mv-url">New database connection string</label>
-                <input id="mv-url" class="form-control mono" type="password" autocomplete="off" spellcheck="false"
-                       placeholder="mysql://user:password@host:3306/dbname" x-model="url" :disabled="running">
+                <div class="input-group">
+                  <input id="mv-url" class="form-control mono" :type="showUrl ? 'text' : 'password'" name="new-database-connection-string" autocomplete="off" spellcheck="false"
+                         placeholder="mysql://user:password@host:3306/dbname" x-model="url" :disabled="running">
+                  <button type="button" class="btn btn-outline-secondary" @click="showUrl = !showUrl" :aria-pressed="!showUrl" x-text="showUrl ? 'Hide' : 'Show'"></button>
+                </div>
                 <div class="help small muted mt-1">mysql://user:password@host:3306/dbname or postgres://user:password@host:5432/dbname. It is used for this copy only and is not saved.</div>
                 <div class="d-flex flex-wrap gap-2 mt-3">
                   <button type="button" class="btn btn-outline-secondary" :disabled="busy || running || !url.trim()" @click="test()">Test connection</button>

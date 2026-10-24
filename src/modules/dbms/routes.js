@@ -172,5 +172,60 @@ export default function dbmsRoutes(ctx) {
     res.status(204).end();
   });
 
+  // Operations → System → Database (D-122): how the database is doing, and a double-guarded erase with one step back.
+  const planBody = z.object({
+    mode: z.enum(['all', 'tables']),
+    tables: z.array(z.string().max(64)).max(500).optional(),
+  });
+  const flushBody = z.object({
+    token: z.string().min(8).max(64),
+    phrase: z.string().max(40),
+    password: z.string().max(200),
+  });
+
+  r.get('/dbms/ops/stats', requirePermission('dbms.read'), async (_req, res) => {
+    res.json(await ctx.dbOps.stats());
+  });
+
+  r.post(
+    '/dbms/ops/flush/plan',
+    requirePermission('dbms.flush'),
+    docs({ body: planBody }),
+    async (req, res) => {
+      res.json(await ctx.dbOps.plan(parse(planBody, req.body)));
+    },
+  );
+
+  r.post(
+    '/dbms/ops/flush/challenge',
+    requirePermission('dbms.flush'),
+    docs({ body: planBody }),
+    async (req, res) => {
+      res.json(await ctx.dbOps.challenge(parse(planBody, req.body), actorOf(req)));
+    },
+  );
+
+  r.post(
+    '/dbms/ops/flush',
+    requirePermission('dbms.flush'),
+    docs({ body: flushBody }),
+    async (req, res) => {
+      res.json(await ctx.dbOps.flush(parse(flushBody, req.body), actorOf(req)));
+    },
+  );
+
+  r.get('/dbms/ops/flush/last', requirePermission('dbms.flush'), async (_req, res) => {
+    res.json({ last: await ctx.dbOps.last() });
+  });
+
+  r.post(
+    '/dbms/ops/flush/undo',
+    requirePermission('dbms.flush'),
+    docs({ noBody: true }),
+    async (req, res) => {
+      res.status(202).json(await ctx.dbOps.undo(actorOf(req)));
+    },
+  );
+
   return r;
 }

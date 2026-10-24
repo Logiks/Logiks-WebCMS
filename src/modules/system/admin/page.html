@@ -28,6 +28,73 @@
           </div>
         </div>
 
+        <div class="panel mb-3" x-show="db" aria-labelledby="sys-db-h">
+          <div class="panel-h"><span id="sys-db-h">Database</span>
+            <span class="d-flex gap-2 fw-normal">
+              <button type="button" class="btn btn-sm btn-outline-secondary" @click="loadDb()">Refresh</button>
+              <button type="button" class="btn btn-sm btn-outline-danger" x-show="can('dbms.flush') && !fl.open" @click="openFlush()">Erase data…</button>
+            </span>
+          </div>
+          <div class="p-3 row g-3" x-show="db">
+            <div class="col-6 col-md-3"><div class="muted small">Engine</div><div class="mono" x-text="db && (db.engine.kind + ' ' + (db.engine.version || ''))"></div></div>
+            <div class="col-6 col-md-3"><div class="muted small">Size on disk</div><div class="mono" x-text="db && size(db.sizeBytes)"></div></div>
+            <div class="col-6 col-md-3"><div class="muted small">Tables</div><div class="mono" x-text="db && (db.tables + (db.views ? ' (+' + db.views + ' views)' : ''))"></div></div>
+            <div class="col-6 col-md-3"><div class="muted small">Records <span x-show="db && db.rowsApprox">(estimate)</span></div><div class="mono" x-text="db && db.rows.toLocaleString()"></div></div>
+            <div class="col-6 col-md-3"><div class="muted small">Answers in</div><div class="mono" x-text="db && (db.pingMs + ' ms')"></div></div>
+            <div class="col-6 col-md-3"><div class="muted small">Connections now / allowed</div><div class="mono" x-text="db && (db.connections ? db.connections.current + ' / ' + db.connections.max + ' (' + db.connections.active + ' busy)' : '–')"></div></div>
+            <div class="col-6 col-md-3"><div class="muted small">This server's pool (busy / idle / waiting)</div><div class="mono" x-text="db && (db.pool ? db.pool.used + ' / ' + db.pool.free + ' / ' + db.pool.pending : '–')"></div></div>
+            <div class="col-6 col-md-3"><div class="muted small">Up for</div><div class="mono" x-text="db && (db.uptimeSec == null ? '–' : dur(db.uptimeSec))"></div></div>
+            <div class="col-6 col-md-3"><div class="muted small">Memory: this app</div><div class="mono" x-text="db && size(db.memory.app.rss)"></div></div>
+            <div class="col-6 col-md-6"><div class="muted small" x-text="db && db.memory.db ? 'Memory: ' + db.memory.db.label : 'Memory: database engine'"></div><div class="mono" x-text="db && (db.memory.db ? (db.memory.db.text || (size(db.memory.db.bytes) + (db.memory.db.of ? ' of ' + size(db.memory.db.of) : ''))) : '–')"></div></div>
+            <div class="col-6 col-md-3" x-show="db && db.cacheHitPct != null"><div class="muted small">Served from memory</div><div class="mono" x-text="db && db.cacheHitPct + '%'"></div></div>
+            <div class="col-12" x-show="db && db.biggest.length">
+              <div class="muted small mb-1">Largest tables</div>
+              <div class="table-responsive"><table class="table table-sm mb-0"><tbody>
+                <template x-for="t in (db ? db.biggest : [])" :key="t.name"><tr><td class="mono" x-text="t.name"></td><td class="text-end" x-text="t.rows.toLocaleString() + ' records'"></td><td class="text-end" x-text="t.bytes == null ? '' : size(t.bytes)"></td></tr></template>
+              </tbody></table></div>
+            </div>
+            <div class="col-12 small muted" x-show="db && db.engine.kind === 'sqlite'">SQLite is one file in this app, so it has no connection count, load or uptime of its own.</div>
+          </div>
+
+          <div class="p-3 border-top" x-show="fl.last && !fl.open">
+            <div class="fw-semibold">One step back</div>
+            <p class="small mb-2">An erase on <span x-text="fl.last && when(fl.last.createdAt)"></span> removed <strong x-text="fl.last && fl.last.rows.toLocaleString()"></strong> records from <strong x-text="fl.last && fl.last.tables.length"></strong> tables. A copy was kept (<span x-text="fl.last && size(fl.last.size)"></span>). Putting them back adds only the records that are missing; anything made since stays. Only the latest erase is kept.</p>
+            <button type="button" class="btn btn-sm btn-outline-primary" x-show="can('dbms.flush')" :disabled="fl.busy" @click="undoFlush()">Put the erased records back</button>
+          </div>
+
+          <!-- Erase wizard: choose, review + type the words and your password, erase. Nothing is erased before the last step. -->
+          <form class="p-3 border-top" x-show="fl.open" @submit.prevent="fl.step === 1 ? review() : erase()" aria-labelledby="sys-flush-h">
+            <h3 class="h6" id="sys-flush-h">Erase data <span class="muted fw-normal" x-text="'· step ' + fl.step + ' of 2'"></span></h3>
+            <div class="alert alert-danger py-2" role="alert" x-show="fl.error" x-text="fl.error"></div>
+
+            <div x-show="fl.step === 1">
+              <p class="small">Records are removed; the tables stay. Accounts, roles, sessions, the audit log, settings, installed plugins, the AI instructions, the list of backups and the migration records are always kept. A complete copy of what you erase is saved first, so you can go back one step.</p>
+              <div class="form-check"><input id="fl-all" class="form-check-input" type="radio" value="all" x-model="fl.mode" @change="planAll()"><label class="form-check-label" for="fl-all">All data (every table that can be erased)</label></div>
+              <div class="form-check mb-2"><input id="fl-some" class="form-check-input" type="radio" value="tables" x-model="fl.mode" @change="planAll()"><label class="form-check-label" for="fl-some">Only the tables I choose</label></div>
+              <div class="row g-1 mb-3" x-show="fl.mode === 'tables'" style="max-height:14rem;overflow:auto">
+                <template x-for="t in fl.candidates" :key="t.name"><div class="col-md-4"><div class="form-check"><input class="form-check-input" type="checkbox" :id="'fl-t-' + t.name" :value="t.name" x-model="fl.picked"><label class="form-check-label small" :for="'fl-t-' + t.name"><span class="mono" x-text="t.name"></span> <span class="muted" x-text="'(' + t.rows.toLocaleString() + ')'"></span></label></div></div></template>
+              </div>
+              <button class="btn btn-danger" :disabled="fl.busy || (fl.mode === 'tables' && !fl.picked.length)" x-text="fl.busy ? 'Checking…' : 'Review what will be erased'"></button>
+              <button type="button" class="btn btn-outline-secondary ms-2" @click="closeFlush()">Cancel</button>
+            </div>
+
+            <div x-show="fl.step === 2">
+              <p class="mb-1">This will erase <strong x-text="fl.ch && fl.ch.plan.total.toLocaleString()"></strong> records from <strong x-text="fl.ch && fl.ch.plan.tables.length"></strong> tables:</p>
+              <p class="small mono mb-2" x-text="fl.ch && fl.ch.plan.tables.map((t) => t + ' (' + fl.ch.plan.rows[t] + ')').join(', ')"></p>
+              <p class="small mb-2" x-show="fl.ch && fl.ch.plan.kept.length"><strong>Kept because other records depend on them:</strong> <span class="mono" x-text="fl.ch && fl.ch.plan.kept.map((k) => k.table + ' (used by ' + k.because + ')').join(', ')"></span></p>
+              <p class="small">A full copy of these records is saved first. If that copy cannot be made, nothing is erased.</p>
+              <label class="form-label" for="fl-phrase">Type <span class="mono fw-bold" x-text="fl.ch && fl.ch.phrase"></span> to confirm</label>
+              <input id="fl-phrase" class="form-control mono mb-2" style="max-width:18rem" autocomplete="off" x-model="fl.phrase">
+              <label class="form-label" for="fl-pass">Your password</label>
+              <input id="fl-pass" type="password" class="form-control mb-2" style="max-width:18rem" autocomplete="current-password" x-model="fl.password">
+              <div class="form-check mb-3"><input id="fl-ack" class="form-check-input" type="checkbox" x-model="fl.ack"><label class="form-check-label" for="fl-ack">I understand this removes these records from the live site right away.</label></div>
+              <button class="btn btn-danger" :disabled="fl.busy || !fl.ack || fl.phrase !== (fl.ch && fl.ch.phrase) || !fl.password" x-text="fl.busy ? 'Saving a copy and erasing…' : 'Erase these records'"></button>
+              <button type="button" class="btn btn-outline-secondary ms-2" :disabled="fl.busy" @click="fl.step = 1; fl.error = ''">Back</button>
+              <button type="button" class="btn btn-outline-secondary ms-2" :disabled="fl.busy" @click="closeFlush()">Cancel</button>
+            </div>
+          </form>
+        </div>
+
         <div class="panel mb-3">
           <div class="panel-h">Background jobs</div>
           <div class="p-3 row g-3" x-show="data">

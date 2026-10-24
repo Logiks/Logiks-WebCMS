@@ -7,6 +7,7 @@ import { makeNode, signedIn, until } from './helpers.js';
 
 // The File Manager plugin (plugins/file-manager) is copied into the test node's own PLUGINS_DIR, and the node gets a
 // throwaway appRoot, so nothing here can touch the repository's real site/ or plugins/ folders.
+// Disk edits are exercised on the `plugins` root (the only disk root: the shipped `site/` folder is not reachable).
 let node, admin, appRoot;
 const BASE = '/api/admin/apps/file-manager';
 const put = (p, content) => {
@@ -16,9 +17,6 @@ const put = (p, content) => {
 
 before(async () => {
   appRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'fm-app-'));
-  put(path.join(appRoot, 'site/themes/base/theme.json'), '{"id":"base"}');
-  put(path.join(appRoot, 'site/themes/base/styles/main.css'), 'body { color: red; }\n');
-  put(path.join(appRoot, 'site/locales/en.json'), '{"hello":"Hello world"}');
   node = await makeNode({ appRoot });
   fs.cpSync(
     path.resolve('plugins/file-manager'),
@@ -29,6 +27,12 @@ before(async () => {
   );
   put(path.join(node.ctx.env.PLUGINS_DIR, 'other/plugin.json'), '{"slug":"other"}');
   put(path.join(node.ctx.env.PLUGINS_DIR, 'other/notes.txt'), 'remember the milk\n');
+  put(path.join(node.ctx.env.PLUGINS_DIR, 'other/locales/en.json'), '{"hello":"Hello world"}');
+  put(path.join(node.ctx.env.PLUGINS_DIR, 'other/assets/base/theme.json'), '{"id":"base"}');
+  put(
+    path.join(node.ctx.env.PLUGINS_DIR, 'other/assets/base/styles/main.css'),
+    'body { color: red; }\n',
+  );
   admin = await signedIn(node.app);
   assert.equal((await admin.post('/api/admin/plugins/rescan').send({})).status, 200);
   assert.equal((await admin.post('/api/admin/plugins/file-manager/enable').send({})).status, 200);
@@ -40,15 +44,16 @@ after(async () => {
 
 const list = (root, p = '') => admin.get(`${BASE}/list?root=${root}&path=${p}`);
 const del = (body) => admin.post(`${BASE}/delete`).send(body);
+const PD = () => node.ctx.env.PLUGINS_DIR;
 
 describe('browsing and editing', () => {
   test('lists each root, folders first, and hides node_modules/.git', async () => {
-    put(path.join(appRoot, 'site/node_modules/x.js'), '1');
-    const r = await list('site');
+    put(path.join(PD(), 'other/node_modules/x.js'), '1');
+    const r = await list('plugins', 'other');
     assert.equal(r.status, 200);
     assert.deepEqual(
       r.body.entries.map((e) => e.name),
-      ['locales', 'themes'],
+      ['assets', 'locales', 'notes.txt', 'plugin.json'],
     );
     assert.equal(
       (await list('plugins')).body.entries.some((e) => e.name === 'file-manager'),
@@ -61,22 +66,22 @@ describe('browsing and editing', () => {
   });
 
   test('saves a disk file, and refuses a save made on top of a newer version', async () => {
-    const f = (await admin.get(`${BASE}/file?root=site&path=locales/en.json`)).body;
+    const f = (await admin.get(`${BASE}/file?root=plugins&path=other/locales/en.json`)).body;
     assert.equal(f.content, '{"hello":"Hello world"}');
     const ok = await admin.put(`${BASE}/file`).send({
-      root: 'site',
-      path: 'locales/en.json',
+      root: 'plugins',
+      path: 'other/locales/en.json',
       content: '{"hello":"Hi"}',
       expectedHash: f.hash,
     });
     assert.equal(ok.status, 200);
     assert.equal(
-      fs.readFileSync(path.join(appRoot, 'site/locales/en.json'), 'utf8'),
+      fs.readFileSync(path.join(PD(), 'other/locales/en.json'), 'utf8'),
       '{"hello":"Hi"}',
     );
     const stale = await admin.put(`${BASE}/file`).send({
-      root: 'site',
-      path: 'locales/en.json',
+      root: 'plugins',
+      path: 'other/locales/en.json',
       content: '{"hello":"Yo"}',
       expectedHash: f.hash,
     });
@@ -87,7 +92,7 @@ describe('browsing and editing', () => {
   test('rejects invalid JSON with a message that says how to fix it', async () => {
     const r = await admin
       .put(`${BASE}/file`)
-      .send({ root: 'site', path: 'locales/en.json', content: '{nope' });
+      .send({ root: 'plugins', path: 'other/locales/en.json', content: '{nope' });
     assert.equal(r.status, 422);
     assert.match(r.body.error.message, /isn’t valid JSON/);
   });
@@ -107,18 +112,22 @@ describe('browsing and editing', () => {
       (
         await admin
           .post(`${BASE}/create`)
-          .send({ root: 'site', path: 'extra/readme.md', content: '# hi' })
+          .send({ root: 'plugins', path: 'other/extra/readme.md', content: '# hi' })
       ).status,
       201,
     );
-    assert.equal(fs.readFileSync(path.join(appRoot, 'site/extra/readme.md'), 'utf8'), '# hi');
+    assert.equal(fs.readFileSync(path.join(PD(), 'other/extra/readme.md'), 'utf8'), '# hi');
     assert.equal(
-      (await admin.post(`${BASE}/create`).send({ root: 'site', path: 'extra/readme.md' })).status,
+      (await admin.post(`${BASE}/create`).send({ root: 'plugins', path: 'other/extra/readme.md' }))
+        .status,
       409,
     );
     assert.equal(
-      (await admin.post(`${BASE}/create`).send({ root: 'site', path: 'empty-dir', type: 'dir' }))
-        .status,
+      (
+        await admin
+          .post(`${BASE}/create`)
+          .send({ root: 'plugins', path: 'other/empty-dir', type: 'dir' })
+      ).status,
       201,
     );
     const tree = await admin
@@ -130,30 +139,36 @@ describe('browsing and editing', () => {
   test('renames a disk file', async () => {
     const r = await admin
       .post(`${BASE}/rename`)
-      .send({ root: 'site', from: 'extra/readme.md', to: 'extra/README.md' });
+      .send({ root: 'plugins', from: 'other/extra/readme.md', to: 'other/extra/README.md' });
     assert.equal(r.status, 200);
-    assert.equal(fs.existsSync(path.join(appRoot, 'site/extra/README.md')), true);
+    assert.equal(fs.existsSync(path.join(PD(), 'other/extra/README.md')), true);
   });
 
   test('refuses paths that escape the root, point at node_modules, or go through a symlink', async () => {
-    for (const p of ['../package.json', 'a/../../x', '/etc/passwd', 'node_modules/x.js', 'a\\b'])
+    for (const p of [
+      '../package.json',
+      'a/../../x',
+      '/etc/passwd',
+      'other/node_modules/x.js',
+      'a\\b',
+    ])
       assert.equal(
-        (await admin.get(`${BASE}/file?root=site&path=${encodeURIComponent(p)}`)).status,
+        (await admin.get(`${BASE}/file?root=plugins&path=${encodeURIComponent(p)}`)).status,
         422,
         p,
       );
     const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'fm-out-'));
     put(path.join(outside, 'secret.txt'), 'top secret');
-    fs.symlinkSync(outside, path.join(appRoot, 'site/escape'));
-    const r = await admin.get(`${BASE}/file?root=site&path=escape/secret.txt`);
+    fs.symlinkSync(outside, path.join(PD(), 'other/escape'));
+    const r = await admin.get(`${BASE}/file?root=plugins&path=other/escape/secret.txt`);
     assert.equal(r.status, 422);
     assert.match(r.body.error.message, /outside/);
     fs.rmSync(outside, { recursive: true, force: true });
   });
 
   test('will not open a binary file', async () => {
-    fs.writeFileSync(path.join(appRoot, 'site/pic.bin'), Buffer.from([1, 0, 2, 0, 3]));
-    const r = await admin.get(`${BASE}/file?root=site&path=pic.bin`);
+    fs.writeFileSync(path.join(PD(), 'other/pic.bin'), Buffer.from([1, 0, 2, 0, 3]));
+    const r = await admin.get(`${BASE}/file?root=plugins&path=other/pic.bin`);
     assert.equal(r.status, 415);
   });
 });
@@ -161,45 +176,51 @@ describe('browsing and editing', () => {
 describe('deleting is validated', () => {
   test('preview describes a folder, and delete needs the exact name', async () => {
     const pv = (
-      await admin.post(`${BASE}/delete-preview`).send({ root: 'site', path: 'themes/base' })
+      await admin
+        .post(`${BASE}/delete-preview`)
+        .send({ root: 'plugins', path: 'other/assets/base' })
     ).body;
     assert.equal(pv.kind, 'dir');
     assert.equal(pv.files, 2);
     assert.equal(pv.needsRecursive, true);
     const wrong = await del({
-      root: 'site',
-      path: 'themes/base',
+      root: 'plugins',
+      path: 'other/assets/base',
       confirm: 'nope',
       recursive: true,
     });
     assert.equal(wrong.status, 422);
     assert.equal(wrong.body.error.code, 'confirm_mismatch');
-    assert.equal(fs.existsSync(path.join(appRoot, 'site/themes/base')), true);
+    assert.equal(fs.existsSync(path.join(PD(), 'other/assets/base')), true);
   });
 
   test('a folder with files also needs recursive: true', async () => {
-    const r = await del({ root: 'site', path: 'themes/base', confirm: 'base' });
+    const r = await del({ root: 'plugins', path: 'other/assets/base', confirm: 'base' });
     assert.equal(r.status, 422);
     assert.equal(r.body.error.code, 'needs_recursive');
-    assert.equal(fs.existsSync(path.join(appRoot, 'site/themes/base')), true);
+    assert.equal(fs.existsSync(path.join(PD(), 'other/assets/base')), true);
   });
 
   test('deletes a file and a folder when confirmed', async () => {
     assert.equal(
-      (await del({ root: 'site', path: 'extra/README.md', confirm: 'README.md' })).status,
+      (await del({ root: 'plugins', path: 'other/extra/README.md', confirm: 'README.md' })).status,
       200,
     );
-    assert.equal(fs.existsSync(path.join(appRoot, 'site/extra/README.md')), false);
-    const r = await del({ root: 'site', path: 'themes/base', confirm: 'base', recursive: true });
+    assert.equal(fs.existsSync(path.join(PD(), 'other/extra/README.md')), false);
+    const r = await del({
+      root: 'plugins',
+      path: 'other/assets/base',
+      confirm: 'base',
+      recursive: true,
+    });
     assert.equal(r.status, 200);
     assert.equal(r.body.removed, 2);
-    assert.equal(fs.existsSync(path.join(appRoot, 'site/themes/base')), false);
+    assert.equal(fs.existsSync(path.join(PD(), 'other/assets/base')), false);
   });
 
   test('refuses protected paths: roots, top-level folders, installed plugins, the plugin itself', async () => {
     for (const [root, p] of [
-      ['site', 'themes'],
-      ['site', ''],
+      ['plugins', ''],
       ['public', 'pages'],
       ['plugins', 'file-manager'],
       ['plugins', 'file-manager/plugin.js'],
@@ -212,19 +233,6 @@ describe('deleting is validated', () => {
       });
       assert.equal(r.status, 409, `${root}/${p}`);
     }
-  });
-
-  test('refuses the theme the site is using', async () => {
-    const active = node.ctx.settings.get('site.theme');
-    put(path.join(appRoot, `site/themes/${active}/theme.json`), '{}');
-    const r = await del({
-      root: 'site',
-      path: `themes/${active}`,
-      confirm: active,
-      recursive: true,
-    });
-    assert.equal(r.status, 409);
-    assert.match(r.body.error.message, /using right now/);
   });
 
   test('deletes a plain file inside the plugins folder, but not an enabled plugin’s plugin.json', async () => {
@@ -276,13 +284,13 @@ describe('the public mirror on disk', () => {
 describe('search', () => {
   test('finds text across roots with line numbers, honours case, word and regex options', async () => {
     const s = (q) => admin.get(`${BASE}/search?${new URLSearchParams(q)}`);
-    const plain = await s({ q: 'hello', root: 'site' });
+    const plain = await s({ q: 'hello', root: 'plugins' });
     assert.equal(plain.status, 200);
-    assert.ok(plain.body.results.some((x) => x.path === 'locales/en.json' && x.line === 1));
-    assert.equal((await s({ q: 'HELLO', root: 'site', case: '1' })).body.results.length, 0);
-    assert.equal((await s({ q: 'hel', root: 'site', word: '1' })).body.results.length, 0);
-    assert.ok((await s({ q: 'he.lo', root: 'site', regex: '1' })).body.results.length > 0);
-    assert.equal((await s({ q: '(', root: 'site', regex: '1' })).status, 422);
+    assert.ok(plain.body.results.some((x) => x.path === 'other/locales/en.json' && x.line === 1));
+    assert.equal((await s({ q: 'HELLO', root: 'plugins', case: '1' })).body.results.length, 0);
+    assert.equal((await s({ q: 'hel', root: 'plugins', word: '1' })).body.results.length, 0);
+    assert.ok((await s({ q: 'he.lo', root: 'plugins', regex: '1' })).body.results.length > 0);
+    assert.equal((await s({ q: '(', root: 'plugins', regex: '1' })).status, 422);
     assert.ok(
       (await s({ q: 'export default', root: 'plugins', glob: '*.js' })).body.results.every((x) =>
         x.path.endsWith('.js'),
@@ -315,12 +323,12 @@ describe('permissions', () => {
     });
     assert.ok([200, 201].includes(mk.status), JSON.stringify(mk.body));
     const viewer = await signedIn(node.app, { email, password: 'Sup3r-secret-pass!' });
-    assert.equal((await viewer.get(`${BASE}/list?root=site`)).status, 200);
+    assert.equal((await viewer.get(`${BASE}/list?root=plugins`)).status, 200);
     assert.equal(
       (
         await viewer
           .put(`${BASE}/file`)
-          .send({ root: 'site', path: 'locales/en.json', content: '{}' })
+          .send({ root: 'plugins', path: 'other/locales/en.json', content: '{}' })
       ).status,
       403,
     );
@@ -328,9 +336,36 @@ describe('permissions', () => {
       (
         await viewer
           .post(`${BASE}/delete`)
-          .send({ root: 'site', path: 'locales', confirm: 'locales' })
+          .send({ root: 'plugins', path: 'other/locales', confirm: 'locales' })
       ).status,
       403,
     );
+  });
+});
+
+describe('the shipped site/ folder is out of reach', () => {
+  test('site is not one of the roots, and every route refuses it', async () => {
+    const roots = (await admin.get(`${BASE}/roots`)).body.roots.map((r) => r.id);
+    assert.deepEqual(roots, ['public', 'plugins']);
+    const shipped = path.join(appRoot, 'site/themes/base/theme.json');
+    put(shipped, '{"id":"base"}');
+    const calls = [
+      admin.get(`${BASE}/list?root=site`),
+      admin.get(`${BASE}/file?root=site&path=themes/base/theme.json`),
+      admin
+        .put(`${BASE}/file`)
+        .send({ root: 'site', path: 'themes/base/theme.json', content: '{}' }),
+      admin.post(`${BASE}/create`).send({ root: 'site', path: 'x.txt', content: 'x' }),
+      admin
+        .post(`${BASE}/rename`)
+        .send({ root: 'site', from: 'themes/base/theme.json', to: 'themes/base/t.json' }),
+      del({ root: 'site', path: 'themes/base/theme.json', confirm: 'theme.json' }),
+      admin.get(`${BASE}/search?q=base&root=site`),
+    ];
+    for (const r of await Promise.all(calls)) {
+      assert.equal(r.status, 422);
+      assert.match(r.body.error.message, /Choose one of: public, plugins/);
+    }
+    assert.equal(fs.readFileSync(shipped, 'utf8'), '{"id":"base"}', 'nothing was changed');
   });
 });

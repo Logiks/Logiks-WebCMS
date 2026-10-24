@@ -1,13 +1,22 @@
-import express, { Router } from 'express';
+import { randomBytes } from 'node:crypto';
+import { createWriteStream } from 'node:fs';
+import { rm } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { Transform } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
+import { Router } from 'express';
 import { z } from 'zod';
 import { HttpError, parse } from '../../core/http/errors.js';
 import { docs } from '../../core/http/docs.js';
 import { actorOf, requirePermission } from '../../core/http/middleware.js';
+import { MAX_UPLOAD_BYTES } from './service.js';
 
 const createBody = z.object({
   name: z.string().max(190).optional(),
   includeMedia: z.boolean().optional(),
   secrets: z.enum(['keep', 'remove']).optional(),
+  folders: z.array(z.enum(['public', 'plugins', 'site'])).optional(),
 });
 const restoreBody = z.object({ confirm: z.string(), safety: z.boolean().optional() });
 
@@ -48,20 +57,48 @@ export default function backupRoutes(ctx) {
     stream.pipe(res);
   });
 
+  // The request body goes to a temporary file as it arrives (never into memory), is checked, then moved into storage.
   r.post(
     '/backups/upload',
     requirePermission('backup.restore'),
     docs({ binary: 'application/zip' }),
-    express.raw({ type: () => true, limit: '1gb' }),
     async (req, res) => {
-      if (!Buffer.isBuffer(req.body) || !req.body.length)
+      const declared = Number(req.headers['content-length'] ?? 0);
+      if (declared > MAX_UPLOAD_BYTES)
         throw new HttpError(
-          415,
-          'unsupported_type',
-          'Send the backup .zip file itself as the request body.',
+          413,
+          'too_large',
+          'That file is too large to be a backup (the limit is 20 GB).',
         );
-      const name = typeof req.query.name === 'string' ? req.query.name : 'Uploaded backup';
-      res.status(201).json({ item: await backup.upload(req.body, name, actorOf(req)) });
+      const tmp = path.join(os.tmpdir(), `cms-upload-${randomBytes(6).toString('hex')}.zip`);
+      let bytes = 0;
+      const guard = new Transform({
+        transform(chunk, _e, cb) {
+          bytes += chunk.length;
+          if (bytes > MAX_UPLOAD_BYTES)
+            return cb(
+              new HttpError(
+                413,
+                'too_large',
+                'That file is too large to be a backup (the limit is 20 GB).',
+              ),
+            );
+          cb(null, chunk);
+        },
+      });
+      try {
+        await pipeline(req, guard, createWriteStream(tmp));
+        if (!bytes)
+          throw new HttpError(
+            415,
+            'unsupported_type',
+            'Send the backup .zip file itself as the request body.',
+          );
+        const name = typeof req.query.name === 'string' ? req.query.name : 'Uploaded backup';
+        res.status(201).json({ item: await backup.upload(tmp, name, actorOf(req)) });
+      } finally {
+        await rm(tmp, { force: true });
+      }
     },
   );
 

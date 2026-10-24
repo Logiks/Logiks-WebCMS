@@ -3,7 +3,7 @@
 <div class="fm" x-data="fileManager" data-testid="file-manager">
   <header class="fm-head">
     <h1>File Manager</h1>
-    <p>Source files under <b>public</b>, <b>site</b> and <b>plugins</b></p>
+    <p>Source files under <b>public</b> and <b>plugins</b></p>
     <div class="fm-seg" role="tablist" aria-label="View">
       <button type="button" role="tab" :class="{ on: tab === 'files' }" :aria-selected="tab === 'files'" @click="tab = 'files'"><i class="bi bi-folder2-open"></i> Files</button>
       <button type="button" role="tab" :class="{ on: tab === 'search' }" :aria-selected="tab === 'search'" @click="tab = 'search'"><i class="bi bi-search"></i> Search</button>

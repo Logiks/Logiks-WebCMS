@@ -127,8 +127,7 @@
         else if (ta) text = ta.value.slice(ta.selectionStart, ta.selectionEnd);
         return text.trim().slice(0, 4000);
       },
-      /** What the assistant can be pinned to: a site-tree file, or a whole plugin. The shipped `site` files have no
-       * assistant document kind, so there it just opens with the file named in the message. */
+      /** What the assistant can be pinned to: a site-tree file, or a whole plugin. */
       focusPath() {
         if (!this.file) return null;
         if (this.root === 'public') return this.file.path;

@@ -7512,9 +7512,20 @@ document.addEventListener('alpine:init', () => {
     busy: false,
     error: '',
     notice: '',
-    form: { name: '', secrets: 'keep', includeMedia: true },
+    form: {
+      name: '',
+      secrets: 'keep',
+      data: 'all',
+      includeMedia: true,
+      folders: ['public', 'plugins', 'site'],
+    },
+    folderChoices: [
+      { id: 'public', label: 'Site files (public/)' },
+      { id: 'plugins', label: 'Plugins (plugins/)' },
+      { id: 'site', label: 'Starter site, themes and wording (site/)' },
+    ],
     plan: null, // what restoring the chosen backup would do
-    safety: true,
+    safety: false,
     confirmText: '',
     timer: null,
     get running() {
@@ -7564,7 +7575,8 @@ document.addEventListener('alpine:init', () => {
     contents(b) {
       const m = b.manifest;
       if (!m) return '';
-      return `${m.rows} records, ${m.media.files} files, ${m.dialect}, passwords ${m.secrets === 'remove' ? 'left out' : 'kept'}`;
+      const folderFiles = Object.values(m.folders || {}).reduce((n, f) => n + f.files, 0);
+      return `${m.rows} records in ${Object.keys(m.tables).length} tables, ${m.media.files} uploads, ${folderFiles} folder files, ${m.dialect}, passwords ${m.secrets === 'remove' ? 'left out' : 'kept'}`;
     },
     async create() {
       this.busy = true;
@@ -7615,7 +7627,7 @@ document.addEventListener('alpine:init', () => {
         });
         this.plan = null;
         this.status = await api('GET', '/admin/backups/status');
-        this.notice = 'Restore started. You will be signed out when it finishes.';
+        this.notice = 'Restore started.';
       } catch (e) {
         this.error = e.message;
       } finally {
@@ -8287,10 +8299,11 @@ document.addEventListener('alpine:init', () => {
     },
   }));
 
-  // ───────── Move database (System → Database → Move database) ─────────
+  // ───────── Copy database (System → Database → Copy database; was "Move database") ─────────
   Alpine.data('dbMovePanel', () => ({
     ...H,
     url: '',
+    showUrl: true, // the string is shown so it can be checked; Hide masks it (it holds the new database's password)
     tested: null,
     st: { state: 'idle' },
     busy: false,
@@ -8751,13 +8764,150 @@ document.addEventListener('alpine:init', () => {
     data: null,
     failed: [],
     timer: null,
+    dbTimer: null,
+    db: null, // Database panel (D-122): null while the Database module is off or the person may not read it
+    fl: {
+      open: false,
+      step: 1,
+      mode: 'all',
+      candidates: [],
+      picked: [],
+      ch: null, // { token, phrase, expiresAt, plan }
+      phrase: '',
+      password: '',
+      ack: false,
+      busy: false,
+      error: '',
+      last: null,
+    },
     async init() {
       if (!(await this.mountFragment('system', 'page'))) return;
       await this.refresh();
       this.timer = setInterval(() => this.refresh(), 10000);
+      await this.loadDb();
+      this.dbTimer = setInterval(() => this.loadDb(), 30000);
     },
     destroy() {
       clearInterval(this.timer);
+      clearInterval(this.dbTimer);
+    },
+    size(n) {
+      if (n == null) return '–';
+      const u = ['B', 'KB', 'MB', 'GB', 'TB'];
+      let i = 0;
+      let v = Number(n);
+      while (v >= 1024 && i < u.length - 1) {
+        v /= 1024;
+        i++;
+      }
+      return `${v >= 100 || i === 0 ? Math.round(v) : v.toFixed(1)} ${u[i]}`;
+    },
+    dur(sec) {
+      const d = Math.floor(sec / 86400);
+      const h = Math.floor((sec % 86400) / 3600);
+      const m = Math.floor((sec % 3600) / 60);
+      return d ? `${d} d ${h} h` : h ? `${h} h ${m} min` : `${m} min`;
+    },
+    when(t) {
+      return new Date(t).toLocaleString();
+    },
+    async loadDb() {
+      try {
+        this.db = await api('GET', '/admin/dbms/ops/stats');
+      } catch {
+        this.db = null; // module off, or no dbms.read: the panel stays hidden
+        return;
+      }
+      if (this.can('dbms.flush')) {
+        try {
+          this.fl.last = (await api('GET', '/admin/dbms/ops/flush/last')).last;
+        } catch {
+          /* no snapshot info */
+        }
+      }
+    },
+    openFlush() {
+      Object.assign(this.fl, {
+        open: true,
+        step: 1,
+        mode: 'all',
+        picked: [],
+        ch: null,
+        phrase: '',
+        password: '',
+        ack: false,
+        error: '',
+      });
+      this.planAll();
+    },
+    closeFlush() {
+      this.fl.open = false;
+      this.fl.ch = null;
+      this.fl.phrase = this.fl.password = '';
+    },
+    /** The choices (every table that may be erased, with its record count). */
+    async planAll() {
+      try {
+        const p = await api('POST', '/admin/dbms/ops/flush/plan', { mode: 'all' });
+        this.fl.candidates = p.candidates;
+      } catch (e) {
+        this.fl.error = e.message;
+      }
+    },
+    /** Step 1 → 2: the server checks the choice and answers with the words to type. Nothing is erased. */
+    async review() {
+      this.fl.busy = true;
+      this.fl.error = '';
+      try {
+        const body =
+          this.fl.mode === 'all' ? { mode: 'all' } : { mode: 'tables', tables: this.fl.picked };
+        this.fl.ch = await api('POST', '/admin/dbms/ops/flush/challenge', body);
+        this.fl.phrase = this.fl.password = '';
+        this.fl.ack = false;
+        this.fl.step = 2;
+      } catch (e) {
+        this.fl.error = e.message;
+      } finally {
+        this.fl.busy = false;
+      }
+    },
+    async erase() {
+      this.fl.busy = true;
+      this.fl.error = '';
+      try {
+        const r = await api('POST', '/admin/dbms/ops/flush', {
+          token: this.fl.ch.token,
+          phrase: this.fl.phrase,
+          password: this.fl.password,
+        });
+        this.closeFlush();
+        toast(`Erased ${r.total.toLocaleString()} records. You can put them back below.`);
+        await this.loadDb();
+        await this.refresh();
+      } catch (e) {
+        this.fl.error = e.message;
+        if (/expired|already used/.test(e.message)) this.fl.step = 1;
+      } finally {
+        this.fl.busy = false;
+      }
+    },
+    async undoFlush() {
+      if (
+        !window.confirm(
+          'Put back the records that the last erase removed? Records made since stay.',
+        )
+      )
+        return;
+      this.fl.busy = true;
+      try {
+        await api('POST', '/admin/dbms/ops/flush/undo');
+        toast('Putting the erased records back…');
+        setTimeout(() => this.loadDb(), 3000);
+      } catch (e) {
+        this.fl.error = e.message;
+      } finally {
+        this.fl.busy = false;
+      }
     },
     async refresh() {
       try {
