@@ -1,4 +1,4 @@
-import { blocksToText } from './blocks.js';
+import { blocksToText, headingIds } from './blocks.js';
 import { excerptOf } from '../site/seo.js';
 
 const LIMITS = {
@@ -165,6 +165,21 @@ export async function runChecks(ctx, typeId, input, entryId = null) {
         'warn',
         `${broken.length} link${broken.length === 1 ? '' : 's'} on this site lead${broken.length === 1 ? 's' : ''} nowhere: ${broken.slice(0, 5).join(', ')}`,
         'Fix the address, or publish the page it points to.',
+      );
+  }
+  // "#section" links point at a heading of this same content; headings get their ids from their words, so a renamed
+  // heading silently orphans the link.
+  if (body) {
+    const anchors = new Set(headingIds(body).values());
+    const lost = [...hrefs].filter(
+      (h) => h.length > 1 && h.startsWith('#') && !anchors.has(h.slice(1)),
+    );
+    if (lost.length)
+      add(
+        'broken-anchors',
+        'warn',
+        `${lost.length} link${lost.length === 1 ? '' : 's'} to a heading on this page lead${lost.length === 1 ? 's' : ''} nowhere: ${lost.slice(0, 5).join(', ')}`,
+        'The address of a heading is its words in lower case with hyphens, for example #getting-started. Fix the link, or rename the heading back.',
       );
   }
   const bad = [...hrefs].filter((h) => h && !/^(https?:\/\/\S+|mailto:|tel:|\/|#|\?)/i.test(h));

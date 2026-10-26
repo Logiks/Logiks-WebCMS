@@ -58,7 +58,7 @@
                                 <button type="button" class="btn btn-sm btn-link text-danger" @click="removeBlock(f, i)" aria-label="Remove block" title="Remove"><i class="bi bi-x-lg"></i></button>
                               </div>
                               <template x-if="b.type === 'paragraph' && !b._src">
-                                <div class="rich form-control" contenteditable="true" role="textbox" aria-label="Paragraph text" :style="b.data.align ? 'text-align:' + b.data.align : ''" x-init="initRich($el, b)" @input="syncRich($el, b)" @paste.prevent="pastePlain($event, $el, b)"></div>
+                                <div class="rich form-control" contenteditable="true" role="textbox" aria-label="Paragraph text" :style="b.data.align ? 'text-align:' + b.data.align : ''" x-init="initRich($el, b)" @input="syncRich($el, b)" @paste.prevent="pasteRich($event, $el, b, f)"></div>
                               </template>
                               <template x-if="(b.type === 'paragraph' || b.type === 'callout') && b._src"><div><div class="small muted mb-1">HTML source. Only bold, italic, underline, links, colour and size are kept.</div><textarea class="form-control mono" rows="5" aria-label="HTML source" x-model="b.data.text"></textarea></div></template>
                               <template x-if="b.type === 'header'"><div class="d-flex gap-2"><input class="form-control" aria-label="Heading text" placeholder="Heading" maxlength="500" :style="b.data.align ? 'text-align:' + b.data.align : ''" x-model="b.data.text"><select class="form-select" style="max-width:6rem" aria-label="Heading level" x-model.number="b.data.level"><option value="1">H1</option><option value="2">H2</option><option value="3">H3</option><option value="4">H4</option><option value="5">H5</option><option value="6">H6</option></select></div></template>
@@ -93,7 +93,7 @@
                               <template x-if="b.type === 'callout'">
                                 <div>
                                   <select class="form-select mb-1" style="max-width:12rem" aria-label="Callout style" x-model="b.data.style"><option value="info">Note</option><option value="success">Tip</option><option value="warning">Warning</option><option value="danger">Important</option></select>
-                                  <div x-show="!b._src" :class="'callout callout-' + b.data.style"><div class="rich" contenteditable="true" role="textbox" aria-label="Callout text" x-init="initRich($el, b)" @input="syncRich($el, b)" @paste.prevent="pastePlain($event, $el, b)"></div></div>
+                                  <div x-show="!b._src" :class="'callout callout-' + b.data.style"><div class="rich" contenteditable="true" role="textbox" aria-label="Callout text" x-init="initRich($el, b)" @input="syncRich($el, b)" @paste.prevent="pasteRich($event, $el, b, f)"></div></div>
                                 </div>
                               </template>
                               <template x-if="b.type === 'embed'">

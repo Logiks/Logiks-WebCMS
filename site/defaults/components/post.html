@@ -12,6 +12,11 @@
   h1 { margin: 0 0 0.5rem; line-height: 1.2; }
   .meta { color: var(--muted, #5d7076); font-size: 0.9rem; margin: 0 0 1.5rem; }
   .hero { display: block; width: 100%; height: auto; border-radius: 10px; margin: 0 0 1.5rem; }
+  .toc { margin: 0 0 1.5rem; padding: 0.85rem 1.15rem; border: 1px solid var(--line, #dde3e1); border-radius: 10px; }
+  .toc strong { display: block; margin-bottom: 0.35rem; }
+  .toc ol { margin: 0; padding-left: 1.2rem; }
+  .toc ol ol { margin-top: 0.15rem; }
+  .body :is(h2, h3, h4, h5, h6) { scroll-margin-top: 5rem; }
   .body img { max-width: 100%; height: auto; }
 </style>
 {% assign post = api.post.item %}
@@ -24,6 +29,12 @@
     {% for t in post.terms %}{% if t.url %} · <a href="{{ t.url }}">{{ t.name }}</a>{% endif %}{% endfor %}
   </p>
   {% if post.featuredImage %}<img class="hero" src="{{ post.featuredImage.src }}"{% if post.featuredImage.srcset != blank %} srcset="{{ post.featuredImage.srcset }}" sizes="(min-width: 900px) 900px, 100vw"{% endif %} alt="{{ post.featuredImage.alt }}">{% endif %}
+  {% if post.fields.body.toc.size >= 3 %}
+    <nav class="toc" aria-label="{{ 'toc.label' | t: 'Table of contents' }}">
+      <strong>{{ 'toc.label' | t: 'Table of contents' }}</strong>
+      <ol>{% for h in post.fields.body.toc %}<li{% if h.level > 2 %} style="margin-left:1rem;list-style-type:circle"{% endif %}><a href="#{{ h.id }}">{{ h.text }}</a></li>{% endfor %}</ol>
+    </nav>
+  {% endif %}
   <div class="body">{{ post.fields.body.html }}</div>
   <p><a href="/blog">← {{ 'blog.all_posts' | t: 'All posts' }}</a></p>
 </article>

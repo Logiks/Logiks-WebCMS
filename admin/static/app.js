@@ -280,6 +280,178 @@ const htmlText = (h) =>
   new window.DOMParser()
     .parseFromString(String(h ?? ''), 'text/html')
     .body.textContent.replace(/\u00a0/g, ' ');
+/**
+ * Word and Google Docs put their formatting in inline styles and their own markup (classes, conditional comments,
+ * fake lists). This reads such a clipboard and keeps only what the editor has blocks for: headings, paragraphs with
+ * bold/italic/underline/strike/super/subscript and links, lists, tables, quotes, code and rules. Everything it
+ * builds is escaped here and sanitised again by the server on save. Pictures are counted, not kept.
+ * @returns {{blocks: {type: string, data: any}[], images: number}}
+ */
+function pasteToBlocks(html) {
+  const doc = new window.DOMParser().parseFromString(String(html ?? ''), 'text/html');
+  const state = { images: 0 };
+  const out = [];
+  let list = null;
+  let buf = '';
+  const SKIP = /^(SCRIPT|STYLE|META|LINK|TITLE|XML|HEAD|NOSCRIPT)$/;
+  const BLOCK = /^(P|DIV|H[1-6]|UL|OL|TABLE|BLOCKQUOTE|PRE|HR|SECTION|ARTICLE|FIGURE|LI)$/;
+  const wordList = (el) =>
+    /mso-list/i.test(el.getAttribute('style') || '') &&
+    !/mso-list:\s*none/i.test(el.getAttribute('style') || '');
+  const hasBlock = (el) => !!el.querySelector('p,div,h1,h2,h3,h4,h5,h6,ul,ol,table,blockquote,pre');
+  const safeHref = (raw) => {
+    let h = String(raw || '').trim();
+    try {
+      const u = new URL(h);
+      // Google Docs wraps every link in a redirect through google.com/url.
+      if (/(^|\.)google\.com$/.test(u.hostname) && u.pathname === '/url' && u.searchParams.get('q'))
+        h = u.searchParams.get('q');
+    } catch {
+      /* relative addresses stay as they are */
+    }
+    if (/^#_/.test(h)) return ''; // Word's own bookmarks (_Toc…, _Ref…) point at nothing once pasted
+    return /^(https?:\/\/\S+|mailto:|tel:|\/(?!\/)|#.|\?)/i.test(h) ? h : '';
+  };
+  const inline = (node, inLink = false) => {
+    let s = '';
+    for (const n of node.childNodes) {
+      if (n.nodeType === 3) {
+        s += escHtml(n.textContent.replace(/\u00a0/g, ' ').replace(/[\r\n\t ]+/g, ' '));
+        continue;
+      }
+      if (n.nodeType !== 1 || SKIP.test(n.tagName)) continue;
+      const tag = n.tagName;
+      if (tag === 'BR') {
+        s += '<br>';
+        continue;
+      }
+      if (tag === 'IMG') {
+        state.images++;
+        continue;
+      }
+      if (tag === 'UL' || tag === 'OL') continue; // a list inside an item is read as items of its own
+      let inner = inline(n, inLink || tag === 'A');
+      if (!inner) continue;
+      const st = n.style || {};
+      const fw = st.fontWeight;
+      // Docs wraps everything in <b style="font-weight:normal">: an explicit weight beats the tag.
+      if (fw ? /^(bold|[6-9]00)$/.test(fw) : tag === 'B' || tag === 'STRONG')
+        inner = `<b>${inner}</b>`;
+      const fs = st.fontStyle;
+      if (fs ? fs === 'italic' : tag === 'I' || tag === 'EM') inner = `<i>${inner}</i>`;
+      const td = st.textDecoration || st.textDecorationLine || '';
+      if (!inLink && tag !== 'A' && (tag === 'U' || /underline/.test(td)))
+        inner = `<u>${inner}</u>`;
+      if (tag === 'S' || tag === 'STRIKE' || /line-through/.test(td)) inner = `<s>${inner}</s>`;
+      if (tag === 'SUP' || st.verticalAlign === 'super') inner = `<sup>${inner}</sup>`;
+      if (tag === 'SUB' || st.verticalAlign === 'sub') inner = `<sub>${inner}</sub>`;
+      if (tag === 'A') {
+        const href = safeHref(n.getAttribute('href'));
+        if (href) inner = `<a href="${escHtml(href)}">${inner}</a>`;
+      }
+      s += inner;
+    }
+    return s;
+  };
+  const trimmed = (s) => s.replace(/^(\s|<br>)+|(\s|<br>)+$/g, '');
+  const plainOf = (el) =>
+    el.textContent
+      .replace(/\u00a0/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  const flush = () => {
+    const t = trimmed(buf);
+    buf = '';
+    list = null;
+    if (htmlText(t).trim()) out.push({ type: 'paragraph', data: { text: t } });
+  };
+  const put = (b) => {
+    flush();
+    out.push(b);
+  };
+  const items = (el, acc) => {
+    for (const li of el.children) {
+      if (li.tagName !== 'LI') continue;
+      const t = trimmed(inline(li));
+      if (htmlText(t).trim()) acc.push(t);
+      for (const sub of li.children) if (/^(UL|OL)$/.test(sub.tagName)) items(sub, acc);
+    }
+  };
+  const walk = (parent) => {
+    for (const n of parent.childNodes) {
+      if (n.nodeType === 3) {
+        buf += escHtml(n.textContent.replace(/\u00a0/g, ' ').replace(/[\r\n\t ]+/g, ' '));
+        continue;
+      }
+      if (n.nodeType !== 1 || SKIP.test(n.tagName)) continue;
+      const tag = n.tagName;
+      const cls = n.getAttribute('class') || '';
+      if (/^H[1-6]$/.test(tag) || /MsoTitle/.test(cls)) {
+        const text = plainOf(n);
+        if (text)
+          put({ type: 'header', data: { text, level: /^H/.test(tag) ? Number(tag[1]) : 1 } });
+      } else if (tag === 'UL' || tag === 'OL') {
+        const acc = [];
+        items(n, acc);
+        if (acc.length)
+          put({
+            type: 'list',
+            data: { style: tag === 'OL' ? 'ordered' : 'unordered', items: acc.slice(0, 200) },
+          });
+      } else if (tag === 'P' && wordList(n)) {
+        // Word's lists are plain paragraphs with a typed-out marker in a span it marks "Ignore".
+        const probe = n.cloneNode(true);
+        const marker = probe.querySelector(
+          '[style*="mso-list:Ignore" i], [style*="mso-list: Ignore" i]',
+        );
+        const mark = marker ? plainOf(marker) : '';
+        marker?.remove();
+        const text = trimmed(inline(probe));
+        if (!htmlText(text).trim()) continue;
+        const style =
+          /^\(?[0-9a-z]+[.)]/i.test(mark) && !/^o$/i.test(mark) ? 'ordered' : 'unordered';
+        if (!list || list.data.style !== style) {
+          flush();
+          list = { type: 'list', data: { style, items: [] } };
+          out.push(list);
+        }
+        if (list.data.items.length < 200) list.data.items.push(text);
+      } else if (tag === 'TABLE') {
+        const rows = [...n.querySelectorAll('tr')]
+          .slice(0, 50)
+          .map((tr) =>
+            [...tr.children]
+              .filter((c) => /^T[DH]$/.test(c.tagName))
+              .slice(0, 12)
+              .map((c) => trimmed(inline(c))),
+          )
+          .filter((r) => r.length);
+        if (rows.length)
+          put({ type: 'table', data: { header: !!n.querySelector('thead, th'), rows } });
+      } else if (tag === 'BLOCKQUOTE') {
+        const text = trimmed(inline(n));
+        if (htmlText(text).trim()) put({ type: 'quote', data: { text, caption: '' } });
+      } else if (tag === 'PRE') {
+        put({ type: 'code', data: { code: n.textContent.replace(/\r/g, '') } });
+      } else if (tag === 'HR') {
+        put({ type: 'delimiter', data: {} });
+      } else if ((tag === 'P' || tag === 'DIV' || tag === 'LI') && !hasBlock(n)) {
+        flush();
+        buf = inline(n);
+        flush();
+      } else if (BLOCK.test(tag) || hasBlock(n)) {
+        flush();
+        walk(n);
+        flush();
+      } else {
+        buf += inline({ childNodes: [n] });
+      }
+    }
+  };
+  walk(doc.body);
+  flush();
+  return { blocks: out.slice(0, 500), images: state.images };
+}
 /** A block's words as lines; with `labelled`, each line says what kind of block it came from (for the compare). */
 function blockPlain(b, labelled = false) {
   const d = b.data || {};
@@ -2255,8 +2427,35 @@ document.addEventListener('alpine:init', () => {
       const text = (e.clipboardData || window.clipboardData)?.getData('text/plain') ?? '';
       if (typeof document.execCommand === 'function')
         document.execCommand('insertText', false, text);
-      else el.textContent += text;
+      else el.append(document.createTextNode(text));
       this.syncRich(el, b);
+    },
+    /**
+     * Paste from Word, Google Docs or a web page: headings, lists, links, tables and basic formatting come across as
+     * the matching blocks. A short bit of formatted text goes into the paragraph at the caret; anything with structure
+     * becomes blocks after it (replacing it when it is empty). With nothing but plain text, the words are kept as-is.
+     */
+    pasteRich(e, el, b, f) {
+      const cd = e.clipboardData || window.clipboardData;
+      const html = cd?.getData('text/html') || '';
+      const { blocks, images } = html ? pasteToBlocks(html) : { blocks: [], images: 0 };
+      if (!blocks.length) return this.pastePlain(e, el, b);
+      if (images)
+        toast('Pictures in pasted text are not kept. Drop them into the editor to upload them.');
+      if (blocks.length === 1 && blocks[0].type === 'paragraph' && b.type === 'paragraph') {
+        const t = blocks[0].data.text;
+        if (typeof document.execCommand === 'function')
+          document.execCommand('insertHTML', false, t);
+        else el.innerHTML += t;
+        return this.syncRich(el, b);
+      }
+      const list = this.blocksOf(f);
+      const at = list.findIndex((x) => x._id === b._id);
+      const made = blocks.map((x) => ({ _id: uid(), _src: false, type: x.type, data: x.data }));
+      const empty = b.type === 'paragraph' && !htmlText(b.data.text).trim();
+      list.splice(empty ? at : at + 1, empty ? 1 : 0, ...made);
+      this.activeId = made[made.length - 1]._id;
+      toast(`Pasted ${made.length} block${made.length === 1 ? '' : 's'}.`);
     },
     // — the toolbar: one, fixed at the top of the content, acting on the block you last touched —
     activeBlock(f) {

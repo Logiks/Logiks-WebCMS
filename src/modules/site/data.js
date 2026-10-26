@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { HttpError, parse } from '../../core/http/errors.js';
 import { Safe } from '../themes/sandbox.js';
-import { mediaIdsIn, renderBlocks, blocksToText } from '../content/blocks.js';
+import { mediaIdsIn, renderBlocks, blocksToText, tocOf } from '../content/blocks.js';
 import { excerptOf } from './seo.js';
 import { compilePath, matchPath, splitApiPath } from '../../core/api/match.js';
 
@@ -54,7 +54,11 @@ export function createPublicData(ctx) {
         const v = e.data[f.key];
         if (f.type === 'blocks') {
           const html = renderBlocks(v, { images });
-          fields[f.key] = { html: safe ? new Safe(html) : html, blocks: v?.blocks ?? [] };
+          fields[f.key] = {
+            html: safe ? new Safe(html) : html,
+            blocks: v?.blocks ?? [],
+            toc: tocOf(v),
+          };
           if (f.key === 'body') excerpt ||= excerptOf(blocksToText(v), 200);
         } else if (f.type === 'media') fields[f.key] = v ? (images.get(Number(v)) ?? null) : null;
         else fields[f.key] = v;

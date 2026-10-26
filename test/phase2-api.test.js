@@ -149,7 +149,7 @@ test('a single entry comes with its rich content as HTML and as blocks, and imag
 
   const r = (await api('/content/page/docs-home')).body.item;
   assert.equal(r.title, 'Docs home');
-  assert.equal(r.fields.body.html.includes('<h2>Welcome</h2>'), true);
+  assert.equal(r.fields.body.html.includes('<h2 id="welcome">Welcome</h2>'), true);
   assert.match(r.fields.body.html, /<b>bold<\/b>/);
   assert.doesNotMatch(r.fields.body.html, /<script/);
   assert.deepEqual(

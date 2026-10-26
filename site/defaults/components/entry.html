@@ -16,6 +16,11 @@
   .crumbs { font-size: 0.9rem; color: var(--muted, #5d7076); margin: 0 0 1rem; }
   .crumbs a { color: inherit; }
   .hero { display: block; width: 100%; height: auto; border-radius: 10px; margin: 0 0 1.5rem; }
+  .toc { margin: 0 0 1.5rem; padding: 0.85rem 1.15rem; border: 1px solid var(--line, #dde3e1); border-radius: 10px; }
+  .toc strong { display: block; margin-bottom: 0.35rem; }
+  .toc ol { margin: 0; padding-left: 1.2rem; }
+  .toc ol ol { margin-top: 0.15rem; }
+  .body :is(h2, h3, h4, h5, h6) { scroll-margin-top: 5rem; }
   .body img { max-width: 100%; height: auto; }
   .kids { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--line, #dde3e1); }
 </style>
@@ -30,6 +35,12 @@
   {% endif %}
   <h1>{{ e.title }}</h1>
   {% if e.featuredImage %}<img class="hero" src="{{ e.featuredImage.src }}"{% if e.featuredImage.srcset != blank %} srcset="{{ e.featuredImage.srcset }}" sizes="(min-width: 900px) 900px, 100vw"{% endif %} alt="{{ e.featuredImage.alt }}">{% endif %}
+  {% if e.fields.body.toc.size >= 3 %}
+    <nav class="toc" aria-label="{{ 'toc.label' | t: 'Table of contents' }}">
+      <strong>{{ 'toc.label' | t: 'Table of contents' }}</strong>
+      <ol>{% for h in e.fields.body.toc %}<li{% if h.level > 2 %} style="margin-left:1rem;list-style-type:circle"{% endif %}><a href="#{{ h.id }}">{{ h.text }}</a></li>{% endfor %}</ol>
+    </nav>
+  {% endif %}
   <div class="body">{{ e.fields.body.html }}</div>
   {% if api.entry.children.size > 0 %}
     <ul class="kids">{% for k in api.entry.children %}<li><a href="{{ k.url }}">{{ k.title }}</a></li>{% endfor %}</ul>

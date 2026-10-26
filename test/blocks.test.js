@@ -1,7 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
-import { sanitizeBlocks, renderBlocks, blocksToText } from '../src/modules/content/blocks.js';
+import {
+  sanitizeBlocks,
+  renderBlocks,
+  blocksToText,
+  slugifyHeading,
+  tocOf,
+} from '../src/modules/content/blocks.js';
 
 /** Everything an attacker might smuggle into inline text. */
 const PAYLOADS = [
@@ -231,4 +237,37 @@ test('internal links survive without nofollow; external links keep it', () => {
   assert.match(html, /<a href="\/about">a<\/a>/);
   assert.match(html, /<a href="#faq">b<\/a>/);
   assert.match(html, /<a href="https:\/\/x\.example" rel="noopener nofollow ugc">c<\/a>/);
+});
+
+const heads = (...hs) => ({
+  blocks: hs.map(([text, level]) => ({ type: 'header', data: { text, level } })),
+});
+
+test('headings get ids from their words; only a repeated heading is numbered', () => {
+  assert.equal(slugifyHeading('Getting Started: Part 1!'), 'getting-started-part-1');
+  assert.equal(slugifyHeading('Café été'), 'cafe-ete');
+  assert.equal(slugifyHeading('日本語 テスト'), '日本語-テスト');
+  assert.equal(slugifyHeading('???'), 'section');
+  const doc = heads(['Intro', 2], ['Details', 2], ['Intro', 3]);
+  const html = renderBlocks(doc);
+  assert.match(html, /<h2 id="intro">Intro<\/h2>/);
+  assert.match(html, /<h3 id="intro-2">Intro<\/h3>/);
+  // Adding a heading elsewhere does not change the others' ids: that is what makes them safe to link to.
+  const more = renderBlocks(heads(['New first', 2], ['Intro', 2], ['Details', 2]));
+  assert.match(more, /id="intro"/);
+  assert.match(more, /id="details"/);
+  assert.doesNotMatch(renderBlocks(heads(['<b>"x"</b>', 2])), /id="[^"]*[<"][^"]*"/);
+});
+
+test('the table of contents lists headings 2 and 3 with the ids the page uses', () => {
+  const doc = heads(['Title', 1], ['One', 2], ['Sub', 3], ['Deep', 4], ['Two', 2], ['One', 2]);
+  assert.deepEqual(tocOf(doc), [
+    { id: 'one', text: 'One', level: 2 },
+    { id: 'sub', text: 'Sub', level: 3 },
+    { id: 'two', text: 'Two', level: 2 },
+    { id: 'one-2', text: 'One', level: 2 },
+  ]);
+  assert.equal(tocOf(doc, { min: 2, max: 4 }).length, 5);
+  const html = renderBlocks(doc);
+  for (const t of tocOf(doc)) assert.ok(html.includes(`id="${t.id}"`), t.id);
 });

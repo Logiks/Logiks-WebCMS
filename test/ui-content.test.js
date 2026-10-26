@@ -128,7 +128,7 @@ test('write a page: title, a paragraph with formatting, a heading, a list; save;
   const site = await request(node.app).get('/hello-from-the-editor');
   assert.equal(site.status, 200);
   assert.match(site.text, /<b>bold<\/b>/);
-  assert.match(site.text, /<h2>A heading<\/h2>/);
+  assert.match(site.text, /<h2 id="a-heading">A heading<\/h2>/);
 });
 
 test('editing keeps the block order you set, and moving and removing blocks works', async () => {

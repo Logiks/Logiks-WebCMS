@@ -363,6 +363,62 @@ test('the checklist says what is missing, with a fix for each, and finds dead li
   assert.equal(invalid.checks[0].level, 'error');
 });
 
+test("links to a heading on the same page are checked against the page's own headings", async () => {
+  const draft = (text) => ({
+    title: 'Anchors',
+    data: {
+      body: {
+        blocks: [
+          { type: 'header', data: { text: 'Getting started', level: 2 } },
+          { type: 'paragraph', data: { text } },
+        ],
+      },
+    },
+  });
+  const run = async (text) =>
+    (await admin.post('/api/admin/content/types/post/checks').send(draft(text))).body.checks;
+  assert.equal(
+    (await run('<a href="#getting-started">ok</a> <a href="#">top</a>')).some(
+      (c) => c.id === 'broken-anchors',
+    ),
+    false,
+  );
+  const bad = (await run('<a href="#gettin-started">typo</a>')).find(
+    (c) => c.id === 'broken-anchors',
+  );
+  assert.match(bad.message, /#gettin-started/);
+  assert.match(bad.fix, /getting-started/);
+});
+
+test('a published post shows a clickable table of contents that matches its heading ids', async () => {
+  const e = await mk('post', {
+    title: 'Toc post',
+    status: 'published',
+    data: {
+      body: {
+        blocks: [
+          { type: 'header', data: { text: 'Alpha', level: 2 } },
+          { type: 'paragraph', data: { text: 'a' } },
+          { type: 'header', data: { text: 'Beta', level: 2 } },
+          { type: 'header', data: { text: 'Gamma part', level: 3 } },
+        ],
+      },
+    },
+  });
+  const html = (await request(node.app).get(node.ctx.site.urls.entry(e))).text;
+  assert.match(html, /class="toc"/);
+  for (const id of ['alpha', 'beta', 'gamma-part']) {
+    assert.ok(html.includes(`href="#${id}"`), `link to ${id}`);
+    assert.ok(html.includes(`id="${id}"`), `target ${id}`);
+  }
+  const short = await mk('post', { ...post('Short post'), status: 'published' });
+  assert.doesNotMatch(
+    (await request(node.app).get(node.ctx.site.urls.entry(short))).text,
+    /class="toc"/,
+    'no contents for a short page',
+  );
+});
+
 test('the checklist needs permission to edit that kind of content', async () => {
   const role = await node.ctx.users.createRole(
     { name: 'Reader', permissions: ['content.post.read'] },

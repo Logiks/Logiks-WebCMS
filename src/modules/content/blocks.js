@@ -251,6 +251,55 @@ const esc = (s) =>
     (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c],
   );
 
+/**
+ * The anchor of a heading: its words, lower-cased, with anything but letters and digits turned into single hyphens.
+ * It depends on the words alone, so adding or moving other headings never changes it; only a second heading with the
+ * same words gets a number (-2, -3…), in document order. Letters of any script are kept.
+ */
+export function slugifyHeading(text) {
+  return (
+    String(text ?? '')
+      .normalize('NFKD')
+      .replace(/\p{M}+/gu, '')
+      .toLowerCase()
+      .replace(/[^\p{L}\p{N}]+/gu, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 80)
+      .replace(/-+$/, '') || 'section'
+  );
+}
+
+/** @returns {Map<any, string>} each heading block of the document → its unique id */
+export function headingIds(doc) {
+  const ids = new Map();
+  const used = new Set();
+  for (const b of doc?.blocks ?? []) {
+    if (b.type !== 'header') continue;
+    const base = slugifyHeading(b.data?.text);
+    let id = base;
+    for (let n = 2; used.has(id); n++) id = `${base}-${n}`;
+    used.add(id);
+    ids.set(b, id);
+  }
+  return ids;
+}
+
+/**
+ * The table of contents of a document: its headings of levels `min`..`max` (the title is the page's own heading 1, so
+ * the default starts at 2), each with the id that renderBlocks() gives that heading.
+ * @returns {{id: string, text: string, level: number}[]}
+ */
+export function tocOf(doc, { min = 2, max = 3 } = {}) {
+  const ids = headingIds(doc);
+  const out = [];
+  for (const [b, id] of ids) {
+    const level = Math.min(6, Math.max(1, Number(b.data.level) || 2));
+    const text = plain(b.data.text);
+    if (level >= min && level <= max && text) out.push({ id, text, level });
+  }
+  return out;
+}
+
 const alignAttr = (a) => (ALIGNS.includes(a) ? ` style="text-align:${a}"` : '');
 const fileSize = (n) =>
   n >= 1_048_576 ? `${(n / 1_048_576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`;
@@ -261,6 +310,7 @@ const fileSize = (n) =>
  */
 export function renderBlocks(doc, { images = new Map() } = {}) {
   const out = [];
+  const ids = headingIds(doc);
   for (const b of doc?.blocks ?? []) {
     const d = b.data ?? {};
     // Inline fields are sanitised again here: rendering must be safe even for documents that predate a rule change.
@@ -270,7 +320,7 @@ export function renderBlocks(doc, { images = new Map() } = {}) {
         break;
       case 'header': {
         const l = Math.min(6, Math.max(1, Number(d.level) || 2));
-        out.push(`<h${l}${alignAttr(d.align)}>${esc(d.text)}</h${l}>`);
+        out.push(`<h${l} id="${esc(ids.get(b))}"${alignAttr(d.align)}>${esc(d.text)}</h${l}>`);
         break;
       }
       case 'list': {
