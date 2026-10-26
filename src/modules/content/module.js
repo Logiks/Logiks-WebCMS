@@ -7,9 +7,14 @@ export default {
   requires: ['audit'],
   provides: {
     services: ['content'],
-    permissions: ['content.terms.manage', 'content.activity'],
+    permissions: [
+      'content.terms.manage',
+      'content.html_blocks',
+      'content.templates.manage',
+      'content.activity',
+    ],
     settings: ['content'],
-    events: ['content.published', 'content.updated', 'content.deleted'],
+    events: ['content.published', 'content.updated', 'content.deleted', 'content.review_requested'],
     jobs: ['content.publish_due', 'content.unpublish_due'],
     api: [
       {

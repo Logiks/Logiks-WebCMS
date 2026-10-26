@@ -24,9 +24,9 @@ const KEBAB = {
  *   csp_style_sources?: string[], csp_script_sources?: string[], csp_object_sources?: string[],
  *   csp_form_actions?: string[], csp_base_uri?: string[] }} CspSettings
  * @param {CspSettings} v
- * @param {{ https: boolean, nonce?: string }} opts
+ * @param {{ https: boolean, nonce?: string, frameSelf?: boolean }} opts
  */
-function directives(v, { https, nonce }) {
+function directives(v, { https, nonce, frameSelf }) {
   const x = (/** @type {string[] | undefined} */ l) => l ?? [];
   return {
     defaultSrc: ["'self'"],
@@ -48,7 +48,8 @@ function directives(v, { https, nonce }) {
     workerSrc: ["'self'", 'blob:'],
     // The embed block (content/blocks.js) only ever produces these two players.
     frameSrc: ["'self'", 'https://www.youtube-nocookie.com', 'https://player.vimeo.com'],
-    frameAncestors: ["'none'"],
+    // Only the admin's own device preview (D-126) frames a page, and only from this origin.
+    frameAncestors: frameSelf ? ["'self'"] : ["'none'"],
     ...(https ? { upgradeInsecureRequests: [] } : {}),
   };
 }
@@ -57,7 +58,7 @@ function directives(v, { https, nonce }) {
  * The literal `Content-Security-Policy` header value for one response, with a page-specific script nonce (or none).
  * Used to override the generic header set below for a rendered site page whose component(s) declared a `<script>`.
  * @param {CspSettings} v
- * @param {{ https: boolean, nonce?: string }} opts
+ * @param {{ https: boolean, nonce?: string, frameSelf?: boolean }} opts
  */
 export function cspHeader(v, opts) {
   return Object.entries(directives(v, opts))

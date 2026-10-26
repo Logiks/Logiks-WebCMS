@@ -109,6 +109,10 @@ The editor, revisions, SEO fields and scheduling exist; these are the 15 named g
 
 Notes: A and B touch `content/service.js` and the entry edit screen; unpublish (E) needs a migration (additive) and a queue job like scheduled publish. Anything in High/Low Priority of `feature_request.md` (paste from Word, TOC, source editing…) stays outside this milestone unless pulled in.
 
+### M2.8 Content-editor extras (built 2026-10-27, D-126; SQLite + jsdom only)
+
+The remaining Low-Priority and Good-to-Have items of `feature_request.md`: search preview, focus keyword and writing checks (readability, structure, quality, duplicates), device and shareable previews, link target choice and a link finder, whole-page HTML source, right-click and selection options, drag reordering, the site's look in the editor, Markdown import, button/html blocks and block styling, an approval workflow, and content templates. Exit criteria: every item above works in `ui-editor-tools.test.js` / `editor-tools.test.js`; **still to do before calling it done: MySQL/PostgreSQL run and a pass in a real browser** (selection bar, execCommand formatting, iframe preview, drag with a real mouse).
+
 ## 6. Phase 3 — eCommerce (planned, D-088..D-100)
 
 **Outcome:** a business customer or consumer can browse a large catalog, download specifications, request a quote or buy and pay, and the merchant can fulfil, invoice and report — with correct Indian GST. Scale target: **100k SKUs, 100k+ orders/day**.
@@ -255,6 +259,7 @@ additive, admin copy reviewed, `CLAUDE.md` "Where we are" updated.
 
 ## Change log
 
+- 2026-10-27 — M2.8 Content-editor extras built, D-126: search preview, focus keyword + writing checks, device/shareable previews, link choices, page source, Markdown, right-click menu, drag reorder, site look, button + HTML blocks, approval workflow, templates. SQLite + jsdom only.
 - 2026-10-26 — M2.7 Content-editor gaps (packages A–E) planned and then built, D-124: all 15 Partial items in `feature_request.md`. SQLite + jsdom only; not run on MySQL/PostgreSQL or in a real browser.
 - 2026-10-20 — Phase 3 eCommerce re-planned (D-088..D-100): independent catalog, 100k SKU / 100k orders-per-day target, request-a-quote, pluggable storage/search/gateways + COD, B2B price lists, data-ready multi-vendor. Payouts and commission are the next phase. Planning only; no code.
 - 2026-10-06 — Plugin Editor's Files panel is no longer read-only (D-066): a file can be viewed and edited by hand, through the same validation the AI's own write_file/delete_file tools use, in a Theme-editor-style file browser + code editor.

@@ -4,6 +4,9 @@ import { HttpError, forbidden, parse } from '../../core/http/errors.js';
 import { docs } from '../../core/http/docs.js';
 import { actorOf } from '../../core/http/middleware.js';
 import { runChecks } from './checks.js';
+import { analyse, searchLinks } from './analysis.js';
+import { markdownToBlocks } from './markdown.js';
+import { editorStyle } from './editor-style.js';
 
 const entryBody = z.object({
   title: z.string().optional(),
@@ -31,6 +34,12 @@ const checksBody = z.object({
   data: z.record(z.string(), z.any()).optional(),
   entryId: z.number().int().optional(),
 });
+const templateBody = z.object({
+  name: z.string(),
+  description: z.string().optional(),
+  data: z.record(z.string(), z.any()),
+});
+const markdownBody = z.object({ markdown: z.string().max(500_000) });
 const termBody = z.object({
   name: z.string().optional(),
   slug: z.string().optional(),
@@ -157,6 +166,52 @@ export default function contentRoutes(ctx) {
       throw forbidden("You can't edit this kind of content.");
     const b = parse(checksBody, req.body);
     res.json(await runChecks(ctx, req.params.type, b, b.entryId ?? null));
+  });
+
+  // Focus keyword, readability, quality, duplicates and link suggestions for what the editor shows now.
+  r.post('/content/types/:type/analysis', docs({ body: checksBody }), async (req, res) => {
+    if (!req.user.can(`content.${req.params.type}.write`))
+      throw forbidden("You can't edit this kind of content.");
+    const b = parse(checksBody, req.body);
+    res.json(await analyse(ctx, req.params.type, b, b.entryId ?? null));
+  });
+  // Published entries by title, for the link picker.
+  r.get('/content/link-search', async (req, res) => {
+    res.json({
+      results: await searchLinks(ctx, String(req.query.q ?? '').slice(0, 100), {
+        locale: typeof req.query.locale === 'string' ? req.query.locale : undefined,
+      }),
+    });
+  });
+  // The active theme's fonts and colours, so the editing area looks like the page will (D-126).
+  r.get('/content/editor-style', async (_req, res) => {
+    res.json(await editorStyle(ctx));
+  });
+  r.post('/content/markdown', docs({ body: markdownBody }), (req, res) => {
+    const { markdown } = parse(markdownBody, req.body);
+    // The browser still sends the blocks back through the normal save, which sanitises them.
+    res.json({ blocks: markdownToBlocks(markdown).slice(0, 1000) });
+  });
+
+  r.get('/content/types/:type/templates', async (req, res) => {
+    if (!req.user.can(`content.${req.params.type}.write`))
+      throw forbidden("You can't edit this kind of content.");
+    res.json({ templates: await content.templates.list(req.params.type) });
+  });
+  r.post('/content/types/:type/templates', docs({ body: templateBody }), async (req, res) => {
+    if (!req.user.can(`content.${req.params.type}.write`))
+      throw forbidden("You can't edit this kind of content.");
+    res.status(201).json({
+      template: await content.templates.create(
+        req.params.type,
+        parse(templateBody, req.body),
+        actorOf(req),
+      ),
+    });
+  });
+  r.delete('/content/templates/:id', async (req, res) => {
+    await content.templates.remove(req.params.id, actorOf(req));
+    res.status(204).end();
   });
 
   r.get('/content/taxonomies/:tax/terms', async (req, res) => {

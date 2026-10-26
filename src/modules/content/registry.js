@@ -194,6 +194,12 @@ export function defineCoreContent(registry) {
       max: 300,
       help: 'About 150 characters works best.',
     },
+    focus_keyword: {
+      type: 'string',
+      label: 'Focus keyword',
+      max: 100,
+      help: 'The phrase you want this page to be found for. The checks beside the editor use it.',
+    },
     featured_image: { type: 'media', label: 'Featured image' },
     noindex: { type: 'boolean', label: 'Hide from search engines' },
   };

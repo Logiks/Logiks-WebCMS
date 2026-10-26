@@ -1,5 +1,6 @@
 import { blocksToText, headingIds } from './blocks.js';
 import { excerptOf } from '../site/seo.js';
+import { duplicates } from './analysis.js';
 
 const LIMITS = {
   seoTitle: 60,
@@ -15,7 +16,8 @@ function htmlOf(doc) {
   const out = [];
   for (const b of doc?.blocks ?? []) {
     const d = b.data ?? {};
-    for (const k of ['text', 'caption']) if (typeof d[k] === 'string') out.push(d[k]);
+    for (const k of ['text', 'caption', 'code']) if (typeof d[k] === 'string') out.push(d[k]);
+    if (b.type === 'button' && d.url) out.push(`href="${d.url}"`);
     if (Array.isArray(d.items)) out.push(...d.items);
     if (Array.isArray(d.rows)) for (const r of d.rows) out.push(...r);
   }
@@ -202,6 +204,24 @@ export async function runChecks(ctx, typeId, input, entryId = null) {
         'Tick “Redirect the old address” so visitors still arrive.',
       );
   }
+  // The same words on two addresses split what search engines think of each.
+  const same = await duplicates(ctx, {
+    title,
+    seoTitle: data.seo_title,
+    description: data.seo_description,
+    text: bodyText,
+    entryId,
+  });
+  if (same.length)
+    add(
+      'duplicate-content',
+      'warn',
+      same
+        .slice(0, 3)
+        .map((d) => d.message)
+        .join(' '),
+      'Rewrite one of them, or merge them and redirect the old address.',
+    );
   if (!title) add('title', 'error', 'The title is empty.', 'Give it a title.');
   return { checks, suggestedDescription };
 }

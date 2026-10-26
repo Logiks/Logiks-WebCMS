@@ -157,9 +157,10 @@ test('safe formatting and links survive, and outbound links are marked', () => {
   assert.match(html, /<i>italic<\/i>/);
   assert.match(
     html,
-    /<a href="https:\/\/example\.com\/x\?a=1&amp;b=2" rel="noopener nofollow ugc">link<\/a>/,
+    /<a href="https:\/\/example\.com\/x\?a=1&amp;b=2" rel="noopener nofollow ugc noreferrer" target="_blank">link<\/a>/,
   );
-  assert.doesNotMatch(html, /target=/);
+  // "open in a new tab" is kept for a web address only (D-126); mailto and tel links never get a target.
+  assert.doesNotMatch(html, /mailto[^>]*target=|tel:[^>]*target=/);
   assert.match(html, /href="mailto:a@b\.co"/);
   assert.match(html, /href="tel:\+911234"/);
   assert.match(html, /<br \/>|<br>/);

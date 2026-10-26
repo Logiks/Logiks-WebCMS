@@ -517,7 +517,7 @@ test('an author sees only what they can use, and can only save drafts', async ()
     await wait(() => a.$('#e-status'));
     assert.deepEqual(
       [...a.$('#e-status').options].map((o) => o.textContent),
-      ['Draft'],
+      ['Draft', 'Awaiting review'],
     );
     assert.equal(a.$('#e-status').disabled, true);
     assert.ok(

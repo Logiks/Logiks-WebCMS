@@ -452,6 +452,172 @@ function pasteToBlocks(html) {
   flush();
   return { blocks: out.slice(0, 500), images: state.images };
 }
+/** Wrap the first mention of `title` that is not already inside a link; null when it is not mentioned. */
+function linkFirst(html, title, url) {
+  let inLink = 0;
+  let done = false;
+  const needle = String(title).toLowerCase();
+  const out = String(html ?? '')
+    .split(/(<[^>]+>)/)
+    .map((part) => {
+      if (part.startsWith('<')) {
+        if (/^<a[\s>]/i.test(part)) inLink++;
+        else if (/^<\/a>/i.test(part)) inLink = Math.max(0, inLink - 1);
+        return part;
+      }
+      if (done || inLink) return part;
+      const i = part.toLowerCase().indexOf(needle);
+      if (i < 0) return part;
+      done = true;
+      return `${part.slice(0, i)}<a href="${escHtml(url)}">${part.slice(i, i + needle.length)}</a>${part.slice(i + needle.length)}`;
+    })
+    .join('');
+  return done ? out : null;
+}
+/**
+ * The whole content as one HTML document for the "Page source" view. Blocks that plain HTML can't say (an image from
+ * the library, an embed, a download) carry their facts in data- attributes so the round trip through
+ * sourceToBlocks() loses nothing. This is the editor's view of the blocks, not the public page's markup.
+ */
+function blocksToHtml(blocks) {
+  const al = (d) => (d.align ? ` style="text-align:${d.align}"` : '');
+  const out = blocks.map((b) => {
+    const d = b.data || {};
+    switch (b.type) {
+      case 'paragraph':
+        return `<p${al(d)}>${d.text || ''}</p>`;
+      case 'header': {
+        const l = Math.min(6, Math.max(1, Number(d.level) || 2));
+        return `<h${l}${al(d)}>${escHtml(d.text)}</h${l}>`;
+      }
+      case 'list': {
+        const t = d.style === 'ordered' ? 'ol' : 'ul';
+        return `<${t}>\n${(d.items || []).map((i) => `  <li>${i}</li>`).join('\n')}\n</${t}>`;
+      }
+      case 'quote':
+        return `<blockquote${al(d)}><p>${d.text || ''}</p>${d.caption ? `<footer>${escHtml(d.caption)}</footer>` : ''}</blockquote>`;
+      case 'code':
+        return `<pre><code>${escHtml(d.code)}</code></pre>`;
+      case 'delimiter':
+        return '<hr>';
+      case 'image':
+        return `<figure data-media="${d.mediaId || ''}"><img alt="${escHtml(d.alt)}">${d.caption ? `<figcaption>${d.caption}</figcaption>` : ''}</figure>`;
+      case 'table': {
+        const row = (r, tag) => `<tr>${r.map((c) => `<${tag}>${c}</${tag}>`).join('')}</tr>`;
+        const [first, ...rest] = d.rows || [];
+        if (!first) return '<table></table>';
+        return `<table>${d.header ? `<thead>${row(first, 'th')}</thead>` : ''}<tbody>${(d.header ? rest : [first, ...rest]).map((r) => row(r, 'td')).join('')}</tbody></table>`;
+      }
+      case 'callout':
+        return `<aside class="callout callout-${d.style || 'info'}">${d.title ? `<strong class="callout-title">${escHtml(d.title)}</strong>` : ''}${d.text || ''}</aside>`;
+      case 'embed':
+        return `<figure class="embed" data-url="${escHtml(d.url)}" data-ratio="${escHtml(d.ratio || '16:9')}">${d.caption ? `<figcaption>${escHtml(d.caption)}</figcaption>` : ''}</figure>`;
+      case 'download':
+        return `<p class="download" data-media="${d.mediaId || ''}" data-look="${d.look || 'link'}"><a>${escHtml(d.label)}</a></p>`;
+      case 'button':
+        return `<p class="cms-button-row"${al(d)}><a class="cms-button cms-button-${d.look || 'primary'}" href="${escHtml(d.url)}"${d.newTab ? ' target="_blank"' : ''}>${escHtml(d.text)}</a></p>`;
+      case 'html':
+        return `<div class="html-block">${d.code || ''}</div>`;
+      default:
+        return '';
+    }
+  });
+  return out.filter(Boolean).join('\n\n');
+}
+
+/**
+ * The reverse of blocksToHtml(): a page of HTML (also anything pasted into the source view) back into blocks. Known
+ * blocks are read by their markers; everything else goes through pasteToBlocks(), so text is rebuilt from escaped,
+ * known tags only. `dropped` counts top-level elements that turned into nothing (scripts, forms, unknown media).
+ * @returns {{blocks: {type: string, data: any}[], dropped: number}}
+ */
+function sourceToBlocks(html) {
+  const doc = new window.DOMParser().parseFromString(String(html ?? ''), 'text/html');
+  const blocks = [];
+  let dropped = 0;
+  const alignOf = (el) =>
+    /text-align:\s*(left|center|right|justify)/i
+      .exec(el.getAttribute('style') || '')?.[1]
+      ?.toLowerCase();
+  /** Inline HTML made safe by the same reader the paste uses. */
+  const inl = (h) => pasteToBlocks(`<p>${h}</p>`).blocks[0]?.data.text || '';
+  const cls = (el, pre, all, dflt) => all.find((x) => el.classList.contains(pre + x)) || dflt;
+  for (const el of doc.body.children) {
+    const tag = el.tagName;
+    const c = el.classList;
+    if (tag === 'FIGURE' && el.dataset.media) {
+      blocks.push({
+        type: 'image',
+        data: {
+          mediaId: Number(el.dataset.media) || null,
+          alt: el.querySelector('img')?.getAttribute('alt') || '',
+          caption: inl(el.querySelector('figcaption')?.innerHTML || ''),
+        },
+      });
+    } else if (tag === 'FIGURE' && c.contains('embed')) {
+      blocks.push({
+        type: 'embed',
+        data: {
+          url: el.dataset.url || '',
+          caption: el.querySelector('figcaption')?.textContent.trim() || '',
+          ratio: ['16:9', '4:3', '1:1'].includes(el.dataset.ratio) ? el.dataset.ratio : '16:9',
+        },
+      });
+    } else if (tag === 'ASIDE' && c.contains('callout')) {
+      const t = el.querySelector('.callout-title');
+      const title = t?.textContent.trim() || '';
+      t?.remove();
+      blocks.push({
+        type: 'callout',
+        data: {
+          style: cls(el, 'callout-', ['info', 'success', 'warning', 'danger'], 'info'),
+          title,
+          text: inl(el.innerHTML),
+        },
+      });
+    } else if (tag === 'P' && c.contains('download')) {
+      blocks.push({
+        type: 'download',
+        data: {
+          mediaId: Number(el.dataset.media) || null,
+          label: el.textContent.trim(),
+          look: el.dataset.look === 'card' ? 'card' : 'link',
+        },
+      });
+    } else if (tag === 'P' && c.contains('cms-button-row')) {
+      const a = el.querySelector('a');
+      const b = {
+        text: a?.textContent.trim() || '',
+        url: a?.getAttribute('href') || '',
+        look: cls(a || el, 'cms-button-', ['primary', 'secondary', 'outline'], 'primary'),
+        newTab: a?.getAttribute('target') === '_blank',
+      };
+      const al = alignOf(el);
+      blocks.push({ type: 'button', data: al ? { ...b, align: al } : b });
+    } else if (tag === 'DIV' && c.contains('html-block')) {
+      blocks.push({ type: 'html', data: { code: el.innerHTML.trim() } });
+    } else if (tag === 'BLOCKQUOTE') {
+      const f = el.querySelector('footer');
+      const caption = f?.textContent.trim() || '';
+      f?.remove();
+      const ps = [...el.querySelectorAll('p')];
+      const b = {
+        text: inl(ps.length ? ps.map((x) => x.innerHTML).join('<br>') : el.innerHTML),
+        caption,
+      };
+      const al = alignOf(el);
+      blocks.push({ type: 'quote', data: al ? { ...b, align: al } : b });
+    } else {
+      const made = pasteToBlocks(el.outerHTML).blocks;
+      if (!made.length) dropped++;
+      const al = alignOf(el);
+      if (al && made.length === 1 && ['paragraph', 'header', 'quote'].includes(made[0].type))
+        made[0].data.align = al;
+      blocks.push(...made);
+    }
+  }
+  return { blocks: blocks.slice(0, 1000), dropped };
+}
 /** A block's words as lines; with `labelled`, each line says what kind of block it came from (for the compare). */
 function blockPlain(b, labelled = false) {
   const d = b.data || {};
@@ -2160,6 +2326,7 @@ document.addEventListener('alpine:init', () => {
     statusLabel(e) {
       if (e.status === 'scheduled' && e.publishAt)
         return 'Scheduled · ' + new Date(e.publishAt).toLocaleString();
+      if (e.status === 'review') return 'Awaiting review';
       return e.status[0].toUpperCase() + e.status.slice(1);
     },
     next() {
@@ -2206,6 +2373,22 @@ document.addEventListener('alpine:init', () => {
     dragging: false,
     uploading: 0,
     cmp: { open: false, a: '', b: 'current', rows: [], busy: false, error: '' },
+    design: null, // the active theme's fonts and colours, so the writing area looks like the page
+    templates: [],
+    tplOpen: false,
+    analysis: null, // focus keyword, readability, quality, duplicates and link suggestions
+    analysisBusy: false,
+    analysisTimer: null,
+    serpView: 'desktop',
+    device: { open: false, width: 1280, url: '', busy: false, error: '' },
+    share: { open: false, hours: 24, url: '', expiresAt: 0, busy: false, copied: false },
+    src: { open: false, f: null, text: '', error: '' }, // the whole content as HTML
+    md: { open: false, f: null, text: '', error: '', busy: false },
+    menu: { open: false, x: 0, y: 0, mode: 'context', f: null, id: null },
+    linkDlg: { open: false, url: '', newTab: false, q: '', results: [], note: '' },
+    dragFrom: null,
+    dragOver: null,
+    reviewNote: '',
     parents: [],
     terms: {},
     revisions: [],
@@ -2233,11 +2416,15 @@ document.addEventListener('alpine:init', () => {
       return this.canPublish
         ? [
             ['draft', 'Draft'],
+            ['review', 'Awaiting review'],
             ['published', 'Published'],
             ['scheduled', 'Scheduled'],
             ['archived', 'Archived'],
           ]
-        : [['draft', 'Draft']];
+        : [
+            ['draft', 'Draft'],
+            ['review', 'Awaiting review'],
+          ];
     },
     get addressPreview() {
       const slug = this.form.slug || (this.entry?.slug ?? '');
@@ -2264,6 +2451,9 @@ document.addEventListener('alpine:init', () => {
         this.authors = (await api('GET', '/admin/content/authors')).authors;
         if (this.isNew) this.fill(null);
         else this.fill((await api('GET', `/admin/content/entries/${this.id}`)).entry);
+        // After the form exists: these only decorate it, and must not race what the writer has typed.
+        this.loadDesign();
+        this.loadTemplates();
       } catch (e) {
         this.error = e.message;
       } finally {
@@ -2276,6 +2466,7 @@ document.addEventListener('alpine:init', () => {
               this.dirty = true;
               this.changeSeq++;
               this.scheduleAutosave();
+              this.scheduleAnalysis();
             },
             { deep: true },
           );
@@ -2290,6 +2481,7 @@ document.addEventListener('alpine:init', () => {
     },
     destroy() {
       clearTimeout(this.autosaveTimer);
+      clearTimeout(this.analysisTimer);
       if (this.onSelection) document.removeEventListener('selectionchange', this.onSelection);
     },
     fill(entry) {
@@ -2377,9 +2569,11 @@ document.addEventListener('alpine:init', () => {
             ['', ''],
           ],
         },
-        callout: { style: 'info', text: '' },
-        embed: { url: '', caption: '' },
-        download: { mediaId: null, label: '' },
+        callout: { style: 'info', title: '', text: '' },
+        embed: { url: '', caption: '', ratio: '16:9' },
+        download: { mediaId: null, label: '', look: 'link' },
+        button: { text: '', url: '', look: 'primary', newTab: false },
+        html: { code: '' },
       }[type];
       const b = { _id: uid(), _src: false, type, data: JSON.parse(JSON.stringify(d)) };
       this.blocksOf(f).push(b);
@@ -2522,16 +2716,6 @@ document.addEventListener('alpine:init', () => {
     size(v) {
       if (v) this.exec('fontSize', v);
     },
-    link() {
-      const url = window.prompt('Link address (https://…, mailto:, tel:, or /page for this site)');
-      if (!url) return;
-      if (!/^(https?:\/\/|mailto:|tel:|\/(?!\/)|#|\?)/i.test(url.trim()))
-        return toast(
-          'Use https://, mailto: or tel:, or a page on this site such as /about or #section.',
-          'error',
-        );
-      this.exec('createLink', url.trim());
-    },
     // — images dropped straight into the content —
     isFileDrag(e) {
       return !!e.dataTransfer?.types && [...e.dataTransfer.types].includes('Files');
@@ -2616,6 +2800,484 @@ document.addEventListener('alpine:init', () => {
       b.data.mediaId = item.id;
       if (!b.data.alt) b.data.alt = item.alt || '';
     },
+    // — the site's look in the writing area —
+    async loadDesign() {
+      try {
+        this.design = await api('GET', '/admin/content/editor-style');
+      } catch {
+        this.design = null; // the editor works without the theme's look
+      }
+    },
+    get designStyle() {
+      const d = this.design;
+      if (!d) return '';
+      const v = {
+        '--ed-ink': d.ink,
+        '--ed-bg': d.bg,
+        '--ed-accent': d.accent,
+        '--ed-line': d.line,
+        '--ed-soft': d.soft,
+        '--ed-font': d.fontFamily,
+        '--ed-size': d.fontSize,
+      };
+      return Object.entries(v)
+        .filter(([, x]) => x)
+        .map(([k, x]) => `${k}:${x}`)
+        .join(';');
+    },
+    // — templates —
+    get hasBody() {
+      return this.type.fields.some((f) => f.type === 'blocks');
+    },
+    async loadTemplates() {
+      if (!this.hasBody || !this.type.can?.write) return;
+      try {
+        this.templates = (
+          await api('GET', `/admin/content/types/${this.typeId}/templates`)
+        ).templates;
+      } catch {
+        this.templates = [];
+      }
+    },
+    applyTemplate(t) {
+      const filled = this.type.fields.some((f) => f.type === 'blocks' && this.blocksOf(f).length);
+      if (filled && !confirm('Replace what is in the editor with this template?')) return;
+      for (const f of this.type.fields) {
+        const v = t.data?.[f.key];
+        if (v === undefined) continue;
+        if (f.type === 'blocks')
+          this.form.data[f.key] = {
+            blocks: (v.blocks || []).map((b) => ({
+              _id: uid(),
+              _src: false,
+              type: b.type,
+              data: JSON.parse(JSON.stringify(b.data)),
+            })),
+          };
+        else if (f.key === 'excerpt' && !this.form.data[f.key]) this.form.data[f.key] = v;
+      }
+      this.tplOpen = false;
+      toast(`Started from “${t.name}”.`);
+    },
+    async saveAsTemplate() {
+      const name = (window.prompt('Name for this template') || '').trim();
+      if (!name) return;
+      const data = {};
+      for (const f of this.type.fields) {
+        const v = this.form.data[f.key];
+        if (f.type === 'blocks')
+          data[f.key] = { blocks: v.blocks.map(({ type, data: d }) => ({ type, data: d })) };
+        else if (f.key === 'excerpt') data[f.key] = v;
+      }
+      try {
+        const { template } = await api('POST', `/admin/content/types/${this.typeId}/templates`, {
+          name,
+          data,
+        });
+        this.templates.push(template);
+        toast(`Saved the template “${name}”.`);
+      } catch (e) {
+        toast(e.message, 'error');
+      }
+    },
+    async deleteTemplate(t) {
+      if (!confirm(`Delete the template “${t.name}”? Entries made from it are not affected.`))
+        return;
+      try {
+        await api('DELETE', `/admin/content/templates/${t.id}`);
+        this.templates = this.templates.filter((x) => x.id !== t.id);
+      } catch (e) {
+        toast(e.message, 'error');
+      }
+    },
+    // — search preview, focus keyword and writing checks —
+    get hasSeoPanel() {
+      return this.type.fields.some((f) => f.key === 'seo_title');
+    },
+    get serp() {
+      const d = this.form.data;
+      const mobile = this.serpView === 'mobile';
+      const clip = (t, n) => (t.length <= n ? t : t.slice(0, n - 1).trimEnd() + '…');
+      return {
+        title: clip((d.seo_title || this.form.title || 'Untitled').trim(), mobile ? 55 : 60),
+        desc: clip((d.seo_description || this.suggested || '').trim(), mobile ? 120 : 160),
+        host: location.host,
+        crumb: this.addressPreview.split('/').filter(Boolean).join(' › '),
+      };
+    },
+    scheduleAnalysis() {
+      if (!this.analysis) return; // keeps itself fresh only once someone has asked for it
+      clearTimeout(this.analysisTimer);
+      this.analysisTimer = setTimeout(() => this.runAnalysis(), 2500);
+    },
+    async runAnalysis() {
+      if (this.analysisBusy) return;
+      this.analysisBusy = true;
+      this.analysisError = '';
+      try {
+        const p = this.payload();
+        this.analysis = await api('POST', `/admin/content/types/${this.typeId}/analysis`, {
+          title: p.title,
+          slug: this.form.slug || undefined,
+          data: p.data,
+          entryId: this.entry?.id,
+        });
+      } catch (e) {
+        this.analysisError = e.message;
+        this.analysis ||= {
+          keyword: [],
+          structure: [],
+          readability: { items: [] },
+          quality: [],
+          duplicates: [],
+          links: [],
+        };
+      } finally {
+        this.analysisBusy = false;
+      }
+    },
+    analysisError: '',
+    get analysisGroups() {
+      const a = this.analysis;
+      if (!a) return [];
+      const r = a.readability;
+      return [
+        { key: 'keyword', title: 'Focus keyword', items: a.keyword },
+        { key: 'structure', title: 'Headings', items: a.structure },
+        {
+          key: 'readability',
+          title:
+            'Readability' +
+            (r.score == null ? '' : ` · ${r.score} of 100, ${r.label.toLowerCase()}`),
+          items: r.items,
+        },
+        { key: 'quality', title: 'Content quality', items: a.quality },
+      ].filter((g) => g.items?.length);
+    },
+    statusIcon(st) {
+      return (
+        {
+          good: 'bi-check-circle-fill text-success',
+          warn: 'bi-exclamation-triangle-fill text-warning',
+          bad: 'bi-x-circle-fill text-danger',
+        }[st] || 'bi-info-circle muted'
+      );
+    },
+    /** Link the first mention of a suggested page's title in the text. */
+    linkSuggestion(sug) {
+      for (const f of this.type.fields.filter((x) => x.type === 'blocks'))
+        for (const b of this.blocksOf(f)) {
+          if (b.type !== 'paragraph') continue;
+          const next = linkFirst(b.data.text, sug.title, sug.url);
+          if (!next) continue;
+          b.data.text = next;
+          const el = document.querySelector(`[data-bid="${b._id}"] .rich`);
+          if (el) el.innerHTML = next;
+          this.analysis.links = this.analysis.links.filter((x) => x.id !== sug.id);
+          return toast(`Linked “${sug.title}”.`);
+        }
+      toast(
+        `“${sug.title}” is not in a paragraph, so there is nothing to link. Select words and use the link button.`,
+        'error',
+      );
+    },
+    // — previews: new tab, on devices, and a link for reviewers —
+    async previewLink(hours = 1) {
+      return api('POST', `/admin/content/entries/${this.id}/preview-link`, { hours });
+    },
+    async openDevices() {
+      this.device.open = true;
+      this.device.error = '';
+      if (this.device.url) return;
+      this.device.busy = true;
+      try {
+        this.device.url = (await this.previewLink(1)).path;
+      } catch (e) {
+        this.device.error = e.message;
+      } finally {
+        this.device.busy = false;
+      }
+    },
+    closeDevices() {
+      this.device.open = false;
+      this.device.url = ''; // the link is short-lived: ask for a fresh one next time
+    },
+    async makeShare() {
+      this.share.busy = true;
+      this.share.copied = false;
+      try {
+        const r = await this.previewLink(Number(this.share.hours));
+        this.share.url = r.url;
+        this.share.expiresAt = r.expiresAt;
+      } catch (e) {
+        toast(e.message, 'error');
+      } finally {
+        this.share.busy = false;
+      }
+    },
+    async copyShare() {
+      try {
+        await window.navigator.clipboard.writeText(this.share.url);
+        this.share.copied = true;
+      } catch {
+        document.getElementById('share-url')?.select();
+        toast('Press Ctrl+C (or ⌘C) to copy the link.');
+      }
+    },
+    // — approval: writers submit, publishers approve or send back —
+    get canSubmitReview() {
+      return !this.canPublish && this.form.status === 'draft' && !!this.type.can?.write;
+    },
+    get inReview() {
+      return this.entry?.status === 'review';
+    },
+    async moveTo(status, note = '') {
+      const was = this.form.status;
+      this.form.status = status;
+      this.reviewNote = note;
+      await this.save();
+      this.reviewNote = '';
+      if (this.saveState === 'error') this.form.status = was;
+    },
+    submitForReview() {
+      return this.moveTo('review');
+    },
+    approve() {
+      return this.moveTo('published');
+    },
+    requestChanges() {
+      const note = window.prompt('What should the writer change? They see this in the history.');
+      if (note === null) return;
+      return this.moveTo('draft', `Changes requested: ${note.trim() || 'see the content'}`);
+    },
+    // — the whole content as HTML —
+    openSource(f) {
+      this.src = { open: true, f: f.key, text: blocksToHtml(this.blocksOf(f)), error: '' };
+    },
+    applySource() {
+      const { blocks, dropped } = sourceToBlocks(this.src.text);
+      if (!blocks.length && this.src.text.trim())
+        return (this.src.error =
+          'Nothing in this HTML could be turned into content. Use paragraphs, headings, lists, tables or quotes.');
+      this.form.data[this.src.f] = { blocks: this.made(blocks) };
+      this.src.open = false;
+      toast(
+        dropped
+          ? `Applied. ${dropped} part${dropped === 1 ? '' : 's'} could not be kept.`
+          : 'Applied.',
+      );
+    },
+    made(blocks) {
+      return blocks.map((x) => {
+        if ((x.type === 'image' || x.type === 'download') && x.data.mediaId)
+          this.loadMedia(x.data.mediaId);
+        return { _id: uid(), _src: false, type: x.type, data: x.data };
+      });
+    },
+    // — Markdown —
+    openMarkdown(f) {
+      this.md = { open: true, f: f.key, text: '', error: '', busy: false };
+    },
+    async readMarkdownFile(e) {
+      const file = e.target.files?.[0];
+      e.target.value = '';
+      if (!file) return;
+      if (file.size > 400_000)
+        return (this.md.error = 'That file is too large. Import it in parts.');
+      this.md.text = await file.text();
+    },
+    async importMarkdown(replace) {
+      if (!this.md.text.trim())
+        return (this.md.error = 'Paste some Markdown, or choose a .md file.');
+      this.md.busy = true;
+      this.md.error = '';
+      try {
+        const { blocks } = await api('POST', '/admin/content/markdown', { markdown: this.md.text });
+        if (!blocks.length) return (this.md.error = 'No content was found in that text.');
+        const f = this.type.fields.find((x) => x.key === this.md.f);
+        if (replace) this.form.data[f.key] = { blocks: this.made(blocks) };
+        else this.blocksOf(f).push(...this.made(blocks));
+        this.md.open = false;
+        toast(`Imported ${blocks.length} block${blocks.length === 1 ? '' : 's'}.`);
+      } catch (e) {
+        this.md.error = e.message;
+      } finally {
+        this.md.busy = false;
+      }
+    },
+    // — links: addresses, same tab or new tab, and pages of this site —
+    link() {
+      this.rememberSelection();
+      const picked = this.range ? this.range.toString().trim() : '';
+      this.linkDlg = {
+        open: true,
+        url: '',
+        newTab: false,
+        q: picked.slice(0, 60),
+        results: [],
+        note: '',
+        text: '',
+        collapsed: !picked,
+      };
+      if (picked) this.searchLinks();
+      this.$nextTick(() => document.getElementById('lk-url')?.focus());
+    },
+    async searchLinks() {
+      const q = this.linkDlg.q.trim();
+      if (q.length < 2) return (this.linkDlg.results = []);
+      try {
+        this.linkDlg.results = (
+          await api('GET', `/admin/content/link-search?q=${encodeURIComponent(q)}`)
+        ).results;
+      } catch {
+        this.linkDlg.results = [];
+      }
+    },
+    useLink(r) {
+      this.linkDlg.url = r.url;
+      this.linkDlg.newTab = false;
+      if (this.linkDlg.collapsed && !this.linkDlg.text) this.linkDlg.text = r.title;
+    },
+    applyLink() {
+      const d = this.linkDlg;
+      const url = d.url.trim();
+      if (!/^(https?:\/\/|mailto:|tel:|\/(?!\/)|#|\?)/i.test(url))
+        return (d.note =
+          'Use https://, mailto: or tel:, or a page on this site such as /about or #section.');
+      const rg = this.range;
+      const node =
+        rg &&
+        (rg.commonAncestorContainer.nodeType === 1
+          ? rg.commonAncestorContainer
+          : rg.commonAncestorContainer.parentElement);
+      const host = node?.closest?.('.rich');
+      if (!rg || !host) return (d.note = 'Click in the text where the link goes, then try again.');
+      const a = document.createElement('a');
+      a.setAttribute('href', url);
+      if (d.newTab && /^https?:/i.test(url)) a.setAttribute('target', '_blank');
+      if (rg.collapsed) a.textContent = d.text.trim() || url;
+      else {
+        a.appendChild(rg.extractContents());
+        a.querySelectorAll('a').forEach((x) => x.replaceWith(...x.childNodes)); // no link inside a link
+      }
+      rg.insertNode(a);
+      this.range = null;
+      d.open = false;
+      host.dispatchEvent(new window.Event('input', { bubbles: true }));
+    },
+    // — right-click and selected-text options —
+    openMenu(e, f, b, mode = 'context') {
+      this.activeId = b._id;
+      this.rememberSelection();
+      this.menu = { open: true, x: e.clientX, y: e.clientY, mode, f, id: b._id };
+    },
+    /** After a mouse-up or key-up inside text: a small bar appears above whatever is selected. */
+    selectionBar(f, b) {
+      setTimeout(() => {
+        const sel = window.getSelection?.();
+        if (!sel || !sel.rangeCount || sel.isCollapsed || !sel.toString().trim())
+          return this.menu.mode === 'bubble' && this.closeMenu();
+        const r = sel.getRangeAt(0).getBoundingClientRect?.() || { left: 0, top: 0, width: 0 };
+        this.activeId = b._id;
+        this.rememberSelection();
+        this.menu = {
+          open: true,
+          x: r.left + r.width / 2,
+          y: Math.max(8, r.top - 44),
+          mode: 'bubble',
+          f,
+          id: b._id,
+        };
+      }, 0);
+    },
+    closeMenu() {
+      this.menu.open = false;
+    },
+    get menuStyle() {
+      const w = this.menu.mode === 'bubble' ? 230 : 220;
+      const left = Math.max(
+        8,
+        Math.min(
+          this.menu.x - (this.menu.mode === 'bubble' ? w / 2 : 0),
+          window.innerWidth - w - 8,
+        ),
+      );
+      return `left:${left}px;top:${this.menu.y}px`;
+    },
+    menuDo(action) {
+      const f = this.menu.f;
+      const list = this.blocksOf(f);
+      const b = list.find((x) => x._id === this.menu.id);
+      const i = list.indexOf(b);
+      this.closeMenu();
+      if (!b) return;
+      this.activeId = b._id;
+      switch (action) {
+        case 'bold':
+        case 'italic':
+        case 'underline':
+          return this.format(action);
+        case 'link':
+          return this.link();
+        case 'unlink':
+          return this.exec('unlink');
+        case 'clear':
+          return this.exec('removeFormat');
+        case 'p':
+        case 'h2':
+        case 'h3':
+          return this.setStyle(f, action);
+        case 'quote':
+          if (b.type === 'paragraph' || b.type === 'header') {
+            b.data = { text: htmlText(b.data.text), caption: '' };
+            b.type = 'quote';
+          }
+          return;
+        case 'duplicate':
+          return this.duplicateBlock(f, i);
+        case 'up':
+          return this.moveBlock(f, i, -1);
+        case 'down':
+          return this.moveBlock(f, i, 1);
+        case 'remove':
+          return this.removeBlock(f, i);
+      }
+    },
+    /** One class string: Alpine can't mix objects into a class list. */
+    blockClass(i, b) {
+      const moving = this.dragFrom !== null && this.dragOver === i;
+      return [
+        this.activeId === b._id && 'block-active',
+        moving && this.dragFrom > i && 'drop-before',
+        moving && this.dragFrom < i && 'drop-after',
+        b.type === 'header' && 'block-h' + b.data.level,
+      ]
+        .filter(Boolean)
+        .join(' ');
+    },
+    // — drag a block to a new place —
+    dragStart(e, i) {
+      this.dragFrom = i;
+      if (e.dataTransfer) {
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('application/x-cms-block', String(i));
+      }
+    },
+    dragOverBlock(i) {
+      if (this.dragFrom !== null) this.dragOver = i;
+    },
+    dropBlock(f, i) {
+      const from = this.dragFrom;
+      this.dragFrom = this.dragOver = null;
+      if (from === null || from === i) return;
+      const list = this.blocksOf(f);
+      const [b] = list.splice(from, 1);
+      list.splice(i, 0, b);
+      this.activeId = b._id;
+    },
+    dragEnd() {
+      this.dragFrom = this.dragOver = null;
+    },
     // — taxonomy —
     hasTerm(tid) {
       return this.form.termIds.includes(tid);
@@ -2673,6 +3335,7 @@ document.addEventListener('alpine:init', () => {
       if (this.form.status === 'published' || this.form.status === 'scheduled')
         body.unpublishAt = this.form.unpublishAt ? new Date(this.form.unpublishAt).getTime() : null;
       if (this.addressChanged) body.redirect = this.redirectOld;
+      if (this.reviewNote) body.note = this.reviewNote;
       return body;
     },
     /** A live entry whose address is changing: its old address would stop working. */

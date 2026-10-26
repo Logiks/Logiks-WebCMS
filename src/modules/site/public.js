@@ -241,10 +241,11 @@ export default function publicSite(ctx) {
     req,
     res,
     out,
-    /** @type {{cacheControl: string, etag?: string, result: string}} */ {
+    /** @type {{cacheControl: string, etag?: string, result: string, frameSelf?: boolean}} */ {
       cacheControl,
       etag,
       result,
+      frameSelf,
     },
   ) {
     res.status(out.status);
@@ -257,11 +258,12 @@ export default function publicSite(ctx) {
       ...(settings.get('site.noindex') ? { 'X-Robots-Tag': 'noindex, nofollow' } : {}),
       // A component's <script> was compiled with this exact nonce baked in (D-055); a cache HIT must repeat the
       // same header the original render sent, never a fresh random one, or the browser refuses the cached script.
-      ...(out.cspNonce
+      ...(out.cspNonce || frameSelf
         ? {
             'Content-Security-Policy': cspHeader(settings.ns('security'), {
               https: req.secure,
               nonce: out.cspNonce,
+              frameSelf,
             }),
           }
         : {}),
@@ -373,7 +375,7 @@ export default function publicSite(ctx) {
         req.log,
       );
       res.set({ 'X-Robots-Tag': 'noindex, nofollow', 'Referrer-Policy': 'no-referrer' });
-      send(req, res, out, { cacheControl: 'no-store', result: 'BYPASS' });
+      send(req, res, out, { cacheControl: 'no-store', result: 'BYPASS', frameSelf: true });
     } catch (e) {
       next(e);
     }

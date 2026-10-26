@@ -43,7 +43,7 @@ const INLINE = {
     'sub',
     'span',
   ],
-  allowedAttributes: { a: ['href', 'rel'], span: ['style'] },
+  allowedAttributes: { a: ['href', 'rel', 'target'], span: ['style'] },
   // Text colour and size are the only styles a span may carry, and only values we can vouch for (no url(), no expression()).
   allowedStyles: {
     span: {
@@ -67,13 +67,98 @@ const INLINE = {
     a: (_tag, attribs) => {
       const href = attribs.href ?? '';
       const external = /^(https?:|mailto:|tel:)/i.test(href);
+      // "Open in a new tab" is the editor's choice for web addresses only; every other target is dropped.
+      const newTab = /^https?:/i.test(href) && attribs.target === '_blank';
+      const rel = 'noopener nofollow ugc';
       return {
         tagName: 'a',
-        attribs: external ? { href, rel: 'noopener nofollow ugc' } : { href },
+        attribs: external
+          ? {
+              href,
+              rel: newTab ? rel + ' noreferrer' : rel,
+              ...(newTab ? { target: '_blank' } : {}),
+            }
+          : { href },
       };
     },
   },
 };
+/**
+ * The custom HTML block (D-126) is for markup the other blocks can't say: a styled box, a small table of badges. It is
+ * sanitised harder than it looks: no scripts, frames, forms, styles or event handlers, no `style` attribute at all (it
+ * could paint over the page or hide a link), only http(s)/mailto/tel links and same-site or https images.
+ * @type {import('sanitize-html').IOptions}
+ */
+const HTML_BLOCK = {
+  allowedTags: [
+    'a',
+    'abbr',
+    'b',
+    'blockquote',
+    'br',
+    'caption',
+    'cite',
+    'code',
+    'dd',
+    'details',
+    'div',
+    'dl',
+    'dt',
+    'em',
+    'figcaption',
+    'figure',
+    'h2',
+    'h3',
+    'h4',
+    'h5',
+    'h6',
+    'hr',
+    'i',
+    'img',
+    'kbd',
+    'li',
+    'mark',
+    'ol',
+    'p',
+    'pre',
+    'q',
+    's',
+    'section',
+    'small',
+    'span',
+    'strong',
+    'sub',
+    'summary',
+    'sup',
+    'table',
+    'tbody',
+    'td',
+    'tfoot',
+    'th',
+    'thead',
+    'tr',
+    'u',
+    'ul',
+  ],
+  allowedAttributes: {
+    a: ['href', 'rel', 'target', 'title'],
+    img: ['src', 'alt', 'width', 'height', 'loading'],
+    td: ['colspan', 'rowspan'],
+    th: ['colspan', 'rowspan', 'scope'],
+    '*': ['class', 'title', 'lang', 'dir'],
+  },
+  allowedClasses: { '*': ['*'] },
+  allowedSchemes: ['http', 'https', 'mailto', 'tel'],
+  allowedSchemesByTag: { img: ['http', 'https'] },
+  allowProtocolRelative: false,
+  disallowedTagsMode: 'discard',
+  transformTags: {
+    a: INLINE.transformTags.a,
+    img: (_tag, attribs) => ({ tagName: 'img', attribs: { ...attribs, loading: 'lazy' } }),
+  },
+};
+const htmlBlock = (s) => sanitizeHtml(String(s ?? ''), HTML_BLOCK).trim();
+
 /**
  * A browser's contenteditable starts each new line as a <div> (or <p>). Those tags aren't allowed, and discarding them
  * glued the lines together on save, so a reopened draft lost its line breaks. They become <br> first.
@@ -98,6 +183,8 @@ const text = (max) => z.string().max(max).default('');
 const ALIGNS = ['left', 'center', 'right', 'justify'];
 const align = z.enum(ALIGNS).optional().catch(undefined);
 const CALLOUTS = ['info', 'success', 'warning', 'danger'];
+const RATIOS = ['16:9', '4:3', '1:1'];
+const BUTTONS = ['primary', 'secondary', 'outline'];
 const SCHEMAS = {
   paragraph: z.object({ text: text(20000), align }),
   header: z.object({
@@ -124,10 +211,33 @@ const SCHEMAS = {
       .max(50)
       .default([]),
   }),
-  callout: z.object({ style: z.enum(CALLOUTS).default('info'), text: text(5000) }),
-  embed: z.object({ url: text(500), caption: text(500) }),
-  download: z.object({ mediaId: z.coerce.number().int().positive(), label: text(200) }),
+  callout: z.object({
+    style: z.enum(CALLOUTS).default('info'),
+    title: text(120),
+    text: text(5000),
+  }),
+  embed: z.object({
+    url: text(500),
+    caption: text(500),
+    ratio: z.enum(RATIOS).default('16:9').catch('16:9'),
+  }),
+  download: z.object({
+    mediaId: z.coerce.number().int().positive(),
+    label: text(200),
+    look: z.enum(['link', 'card']).default('link').catch('link'),
+  }),
+  button: z.object({
+    text: text(120),
+    url: text(500),
+    look: z.enum(BUTTONS).default('primary').catch('primary'),
+    newTab: z.boolean().default(false).catch(false),
+    align,
+  }),
+  html: z.object({ code: text(50000) }),
 };
+
+/** Where a button may lead: the web, mail, phone, a page of this site or a heading of this page. */
+export const BUTTON_URL = /^(https?:\/\/\S+|mailto:\S+|tel:\S+|\/(?!\/)\S*|#\S+)$/i;
 
 /** Only these video hosts can be embedded; the page gets the provider's privacy-friendly player, never an arbitrary iframe. */
 export function embedSource(url) {
@@ -204,7 +314,14 @@ export function sanitizeBlocks(input) {
           data: { header: d.header, rows: d.rows.map((r) => r.map(inline)) },
         };
       case 'callout':
-        return { type: 'callout', data: { style: d.style, text: inline(d.text) } };
+        return {
+          type: 'callout',
+          data: {
+            style: d.style,
+            ...(d.title ? { title: plain(d.title) } : {}),
+            text: inline(d.text),
+          },
+        };
       case 'embed':
         if (d.url && !embedSource(d.url))
           throw new HttpError(
@@ -212,9 +329,36 @@ export function sanitizeBlocks(input) {
             'invalid_input',
             `Block ${i + 1}: only https YouTube and Vimeo links can be embedded. Use a link or a download block for anything else.`,
           );
-        return { type: 'embed', data: { url: d.url.trim(), caption: plain(d.caption) } };
+        return {
+          type: 'embed',
+          data: { url: d.url.trim(), caption: plain(d.caption), ratio: d.ratio },
+        };
       case 'download':
-        return { type: 'download', data: { mediaId: d.mediaId, label: plain(d.label) } };
+        return {
+          type: 'download',
+          data: { mediaId: d.mediaId, label: plain(d.label), look: d.look },
+        };
+      case 'button':
+        if (d.url && !BUTTON_URL.test(d.url.trim()))
+          throw new HttpError(
+            422,
+            'invalid_input',
+            `Block ${i + 1}: a button address starts with https://, mailto:, tel:, / (a page of this site) or #.`,
+          );
+        return {
+          type: 'button',
+          data: withAlign(
+            {
+              text: plain(d.text),
+              url: d.url.trim(),
+              look: d.look,
+              newTab: d.newTab && /^https?:/i.test(d.url.trim()),
+            },
+            d.align,
+          ),
+        };
+      case 'html':
+        return { type: 'html', data: { code: htmlBlock(d.code) } };
       default:
         return {
           type: 'image',
@@ -355,14 +499,17 @@ export function renderBlocks(doc, { images = new Map() } = {}) {
       }
       case 'callout': {
         const style = CALLOUTS.includes(d.style) ? d.style : 'info';
-        out.push(`<aside class="callout callout-${style}" role="note">${inline(d.text)}</aside>`);
+        const title = d.title ? `<strong class="callout-title">${esc(d.title)}</strong>` : '';
+        out.push(
+          `<aside class="callout callout-${style}" role="note">${title}${inline(d.text)}</aside>`,
+        );
         break;
       }
       case 'embed': {
         const src = embedSource(d.url);
         if (!src) break;
         out.push(
-          `<figure class="embed"><iframe src="${esc(src)}" title="${esc(d.caption || 'Embedded video')}" loading="lazy" allowfullscreen referrerpolicy="strict-origin-when-cross-origin"></iframe>${d.caption ? `<figcaption>${esc(d.caption)}</figcaption>` : ''}</figure>`,
+          `<figure class="embed embed-${RATIOS.includes(d.ratio) ? d.ratio.replace(':', 'x') : '16x9'}"><iframe src="${esc(src)}" title="${esc(d.caption || 'Embedded video')}" loading="lazy" allowfullscreen referrerpolicy="strict-origin-when-cross-origin"></iframe>${d.caption ? `<figcaption>${esc(d.caption)}</figcaption>` : ''}</figure>`,
         );
         break;
       }
@@ -371,10 +518,24 @@ export function renderBlocks(doc, { images = new Map() } = {}) {
         if (!f) break;
         const size = f.size ? ` <span class="download-size">(${fileSize(f.size)})</span>` : '';
         out.push(
-          `<p class="download"><a href="${esc(f.src)}" download>${esc(d.label || f.filename || 'Download')}</a>${size}</p>`,
+          `<p class="download${d.look === 'card' ? ' download-card' : ''}"><a href="${esc(f.src)}" download>${esc(d.label || f.filename || 'Download')}</a>${size}</p>`,
         );
         break;
       }
+      case 'button': {
+        if (!d.text || !BUTTON_URL.test(String(d.url ?? ''))) break;
+        const look = BUTTONS.includes(d.look) ? d.look : 'primary';
+        const ext = /^https?:/i.test(d.url);
+        const rel = d.newTab && ext ? 'noopener noreferrer' : ext ? 'noopener' : '';
+        out.push(
+          `<p class="cms-button-row"${alignAttr(d.align)}><a class="cms-button cms-button-${look}" href="${esc(d.url)}"${d.newTab && ext ? ' target="_blank"' : ''}${rel ? ` rel="${rel}"` : ''}>${esc(d.text)}</a></p>`,
+        );
+        break;
+      }
+      case 'html':
+        // Sanitised on save and again here, like every inline field: a document from before a rule change is still safe.
+        out.push(`<div class="html-block">${htmlBlock(d.code)}</div>`);
+        break;
       case 'image': {
         const img = images.get(Number(d.mediaId));
         if (!img) break; // deleted from the library: leave the gap rather than a broken image
@@ -404,6 +565,8 @@ export function blocksToText(doc) {
     else if (b.type === 'table')
       parts.push((d.rows ?? []).map((r) => r.map(plain).join(' ')).join('\n'));
     else if (b.type === 'download') parts.push(plain(d.label));
+    else if (b.type === 'button') parts.push(plain(d.text));
+    else if (b.type === 'html') parts.push(plain(d.code));
     else if (b.type === 'embed') parts.push(plain(d.caption));
     else parts.push(plain(d.text) + (d.caption ? ' ' + plain(d.caption) : ''));
   }

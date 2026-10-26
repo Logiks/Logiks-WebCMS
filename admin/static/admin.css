@@ -1990,3 +1990,178 @@ video.ms-stage {
     padding: 0 0.5rem 6rem 0;
   }
 }
+
+/* ── editor: the site's look in the writing area, block moving, menus, dialogs, previews (D-126) ── */
+.blocks.themed .block {
+  background: var(--ed-bg, #fbfcfb);
+  color: var(--ed-ink, inherit);
+  font-family: var(--ed-font, inherit);
+}
+.blocks.themed .block .rich,
+.blocks.themed .block .form-control,
+.blocks.themed .block .form-select {
+  font-family: inherit;
+  font-size: var(--ed-size, inherit);
+  color: inherit;
+  background-color: transparent;
+}
+.blocks.themed .block .rich a {
+  color: var(--ed-accent, var(--cobalt));
+}
+.blocks.themed .block .callout {
+  border-left-color: var(--ed-accent, var(--cobalt));
+  background: var(--ed-soft, #eef3fc);
+}
+.blocks.themed .block-bar {
+  font-family: system-ui, sans-serif;
+  color: var(--ink);
+}
+/* Heading levels look like headings, at the sizes browsers give them on the site */
+.block-h1 input[aria-label='Heading text'] {
+  font-size: 2em;
+  font-weight: 700;
+}
+.block-h2 input[aria-label='Heading text'] {
+  font-size: 1.5em;
+  font-weight: 700;
+}
+.block-h3 input[aria-label='Heading text'] {
+  font-size: 1.17em;
+  font-weight: 700;
+}
+.block-h4 input[aria-label='Heading text'],
+.block-h5 input[aria-label='Heading text'],
+.block-h6 input[aria-label='Heading text'] {
+  font-weight: 700;
+}
+.block-h5 input[aria-label='Heading text'] {
+  font-size: 0.83em;
+}
+.block-h6 input[aria-label='Heading text'] {
+  font-size: 0.67em;
+}
+.block-grip {
+  cursor: grab;
+  color: var(--muted, #5d7076);
+  padding: 0 0.2rem;
+}
+.block-grip:active {
+  cursor: grabbing;
+}
+.blocks .block.drop-before {
+  box-shadow: 0 -3px 0 var(--cobalt);
+}
+.blocks .block.drop-after {
+  box-shadow: 0 3px 0 var(--cobalt);
+}
+.callout-title {
+  display: block;
+}
+.cms-button {
+  display: inline-block;
+  padding: 0.4rem 1rem;
+  border-radius: 8px;
+  border: 2px solid var(--ed-accent, var(--cobalt));
+  background: var(--ed-accent, var(--cobalt));
+  color: #fff;
+  font-weight: 600;
+}
+.cms-button-secondary {
+  background: var(--ed-soft, #eef3fc);
+  border-color: var(--ed-line, var(--line));
+  color: var(--ed-ink, inherit);
+}
+.cms-button-outline {
+  background: transparent;
+  color: var(--ed-accent, var(--cobalt));
+}
+.ctx-menu {
+  position: fixed;
+  z-index: 1080;
+  min-width: 13rem;
+  background: var(--surface, #fff);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+  padding: 0.25rem;
+  font-size: 0.9rem;
+}
+.ctx-menu .list-group-item {
+  border: 0;
+  padding: 0.3rem 0.7rem;
+  border-radius: 4px;
+}
+.dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1070;
+  background: rgba(10, 20, 24, 0.45);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 4vh 1rem;
+  overflow-y: auto;
+}
+.dialog {
+  width: min(32rem, 100%);
+}
+.dialog-wide {
+  width: min(48rem, 100%);
+}
+.dialog-device {
+  width: min(1340px, 100%);
+}
+.link-results {
+  max-height: 10rem;
+  overflow-y: auto;
+}
+.device-stage {
+  overflow: auto;
+  max-height: 72vh;
+  background: var(--soft, #f5f7f6);
+  border-radius: 6px;
+  padding: 0.5rem;
+  text-align: center;
+}
+.device-frame {
+  display: block;
+  max-width: none;
+  height: 70vh;
+  margin: 0 auto;
+  border: 1px solid var(--line);
+  background: #fff;
+}
+.serp {
+  font-family: Arial, Helvetica, sans-serif;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0.6rem 0.8rem;
+  background: #fff;
+  color: #202124;
+}
+.serp-mobile {
+  max-width: 22rem;
+}
+.serp-url {
+  font-size: 0.8rem;
+  color: #4d5156;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.serp-title {
+  font-size: 1.15rem;
+  line-height: 1.3;
+  color: #1a0dab;
+  margin: 0.1rem 0;
+}
+.serp-desc {
+  font-size: 0.85rem;
+  line-height: 1.5;
+  color: #4d5156;
+}
+@media (prefers-color-scheme: dark) {
+  .serp {
+    background: #fff;
+  }
+}

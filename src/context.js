@@ -23,6 +23,7 @@ import { createRecovery } from './modules/auth/recovery.js';
 import { createUpdatesService } from './modules/updates/service.js';
 import { createContentRegistry, defineCoreContent } from './modules/content/registry.js';
 import { createContentService } from './modules/content/service.js';
+import { createContentTemplates } from './modules/content/templates.js';
 import { createLocalStorage } from './modules/media/storage.js';
 import { createMediaService } from './modules/media/service.js';
 import { createThemesService } from './modules/themes/service.js';
@@ -188,6 +189,8 @@ export async function createContext({ env, bus: busOverride, log: logOverride, a
 
   permissions.define('Content', {
     'content.terms.manage': 'Manage categories and tags',
+    'content.html_blocks': 'Add and change custom HTML blocks in content',
+    'content.templates.manage': "Change and delete other people's content templates",
     // Deliberately separate from audit.read (System, administrator-tier): an editor/author who has no business
     // seeing security-sensitive audit rows (logins, settings, webhooks…) can still see who created, edited,
     // published, restored or deleted a page, entry or piece of media — the same audit_logs data, filtered to
@@ -207,7 +210,15 @@ export async function createContext({ env, bus: busOverride, log: logOverride, a
       registry: contentRegistry,
       log,
     }),
-    { registry: contentRegistry },
+    {
+      registry: contentRegistry,
+      templates: createContentTemplates({
+        db,
+        dialect: dialect(db),
+        registry: contentRegistry,
+        audit,
+      }),
+    },
   );
   // Built-in content events (docs/DECISIONS.md D-050) — reuses content's own change notifier (search already
   // subscribes to the same one to reindex), so content/service.js itself needed no changes.
@@ -219,6 +230,12 @@ export async function createContext({ env, bus: busOverride, log: logOverride, a
         type: entry.type,
         title: entry.title,
         path: entry.path,
+      });
+    else if (type === 'save' && entry.status === 'review' && before?.status !== 'review')
+      await events.emit('content.review_requested', {
+        id: entry.id,
+        type: entry.type,
+        title: entry.title,
       });
     else if (type === 'delete' && wasPublished)
       await events.emit('content.deleted', { id: entry.id, type: entry.type, title: entry.title });

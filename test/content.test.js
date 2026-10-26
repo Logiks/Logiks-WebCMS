@@ -387,7 +387,13 @@ test('dashboardSummary: published/draft counts and this-week creations, scoped t
 
   // An actor who can read no content type at all gets a hidden, zeroed tile rather than an error.
   const hidden = await node.ctx.content.dashboardSummary({ can: () => false });
-  assert.deepEqual(hidden, { visible: false, published: 0, draft: 0, createdThisWeek: 0 });
+  assert.deepEqual(hidden, {
+    visible: false,
+    published: 0,
+    draft: 0,
+    review: 0,
+    createdThisWeek: 0,
+  });
 
   // The route sits behind the same `usesContent` gate as the rest of /content: no readable type, no access at all.
   const noContent = await userWith('NoContentKpi', ['admin.access']);

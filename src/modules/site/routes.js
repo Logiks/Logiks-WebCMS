@@ -8,6 +8,7 @@ const menuBody = z.object({
   title: z.string().max(120).optional(),
   items: z.array(z.any()).max(200),
 });
+const previewBody = z.object({ hours: z.number().int().min(1).max(168).optional() });
 const redirectBody = z.object({
   from: z.string(),
   to: z.string(),
@@ -65,12 +66,14 @@ export default function siteRoutes(ctx) {
     res.status(204).end();
   });
 
-  /** A signed link that shows a draft as visitors would see it, for one hour. Needs permission to edit that type. */
-  r.post('/content/entries/:id/preview-link', docs({ noBody: true }), async (req, res) => {
+  /** A signed link that shows a draft as visitors would see it, for 1 hour to 7 days. Needs permission to edit that type. */
+  r.post('/content/entries/:id/preview-link', docs({ body: previewBody }), async (req, res) => {
     const entry = await content.get(req.params.id, actorOf(req));
     if (!req.user.can(`content.${entry.type}.write`))
       throw forbidden('Previews are for people who can edit this content.');
-    const link = site.preview.link(entry.id);
+    // Reviewers outside the team get a link that works for a day or a week; it carries no sign-in.
+    const hours = parse(previewBody, req.body ?? {}).hours ?? 1;
+    const link = site.preview.link(entry.id, hours * 3600_000);
     res.json({
       url: ctx.site.urls.absolute(link.path),
       path: link.path,

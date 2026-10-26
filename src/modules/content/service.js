@@ -3,7 +3,18 @@ import { now } from '../../core/db/index.js';
 import { HttpError, forbidden, notFound } from '../../core/http/errors.js';
 import { RESERVED_ROOT } from './registry.js';
 
-const STATUSES = ['draft', 'scheduled', 'published', 'archived'];
+const STATUSES = ['draft', 'review', 'scheduled', 'published', 'archived'];
+/** Not visible to visitors: a writer may change these without the Publish permission. */
+const UNPUBLISHED = new Set(['draft', 'review']);
+
+/** The code of every custom HTML block in an entry's fields, so a save can tell which ones are new or changed. */
+function htmlCodes(data) {
+  const out = new Set();
+  for (const v of Object.values(data ?? {}))
+    if (v && Array.isArray(v.blocks))
+      for (const b of v.blocks) if (b?.type === 'html') out.add(String(b.data?.code ?? ''));
+  return out;
+}
 const MAX_DEPTH = 6;
 
 export const slugify = (s) =>
@@ -239,13 +250,13 @@ export function createContentService({ db, dialect, audit, cache, settings, regi
       throw new HttpError(
         422,
         'invalid_status',
-        'Status must be draft, scheduled, published or archived.',
+        'Status must be draft, review, scheduled, published or archived.',
         { field: 'status' },
       );
-    const publishing = want !== 'draft' || (prev && prev.status !== 'draft');
+    const publishing = !UNPUBLISHED.has(want) || (prev && !UNPUBLISHED.has(prev.status));
     if (publishing && !can(actor, type.id, 'publish'))
       throw forbidden(
-        prev && prev.status !== 'draft'
+        prev && !UNPUBLISHED.has(prev.status)
           ? 'This is already live. Ask someone who can publish to change it, or to move it back to draft first.'
           : 'You can save drafts, but publishing needs the “Publish” permission for this type.',
       );
@@ -288,6 +299,20 @@ export function createContentService({ db, dialect, audit, cache, settings, regi
       }
     }
     return r;
+  }
+
+  /**
+   * Custom HTML is the one block that carries markup an editor wrote by hand, so adding or changing it needs its own
+   * permission. Leaving existing ones alone, or deleting them, never does.
+   */
+  function guardHtml(actor, prevData, nextData) {
+    if (!actor || actor.can('content.html_blocks')) return;
+    const had = htmlCodes(prevData);
+    for (const code of htmlCodes(nextData))
+      if (!had.has(code))
+        throw forbidden(
+          'Adding or changing a custom HTML block needs the “Use custom HTML blocks” permission. Remove the block, or ask an administrator.',
+        );
   }
 
   async function saveTerms(trx, type, entryId, termIds) {
@@ -471,11 +496,13 @@ export function createContentService({ db, dialect, audit, cache, settings, regi
         .types()
         .filter((t) => can(actor, t.id, 'read'))
         .map((t) => t.id);
-      if (!allowed.length) return { visible: false, published: 0, draft: 0, createdThisWeek: 0 };
+      if (!allowed.length)
+        return { visible: false, published: 0, draft: 0, review: 0, createdThisWeek: 0 };
       const base = () => db('entries').whereIn('type', allowed);
-      const [published, draft, createdThisWeek] = await Promise.all([
+      const [published, draft, review, createdThisWeek] = await Promise.all([
         base().where('status', 'published').count({ n: '*' }).first(),
         base().where('status', 'draft').count({ n: '*' }).first(),
+        base().where('status', 'review').count({ n: '*' }).first(),
         base()
           .where('created_at', '>=', now() - 7 * 86_400_000)
           .count({ n: '*' })
@@ -485,6 +512,7 @@ export function createContentService({ db, dialect, audit, cache, settings, regi
         visible: true,
         published: Number(published.n) || 0,
         draft: Number(draft.n) || 0,
+        review: Number(review.n) || 0,
         createdThisWeek: Number(createdThisWeek.n) || 0,
       };
     },
@@ -510,6 +538,7 @@ export function createContentService({ db, dialect, audit, cache, settings, regi
           field: 'authorId',
         });
       const data = registry.cleanData(typeId, input.data);
+      guardHtml(actor, null, data);
       const loc = locale(input);
       const st = resolveStatus(actor, type, null, input);
       const ts = now();
@@ -604,7 +633,7 @@ export function createContentService({ db, dialect, audit, cache, settings, regi
           'autosave_draft_only',
           'Autosave only works on drafts. Save to change something that is live.',
         );
-      if (actor && before.status !== 'draft' && !can(actor, before.type, 'publish'))
+      if (actor && !UNPUBLISHED.has(before.status) && !can(actor, before.type, 'publish'))
         throw forbidden(
           'This is already live. Ask someone who can publish to change it, or to move it back to draft first.',
         );
@@ -618,6 +647,7 @@ export function createContentService({ db, dialect, audit, cache, settings, regi
         input.data === undefined
           ? before.data
           : registry.cleanData(before.type, { ...before.data, ...input.data });
+      guardHtml(actor, before.data, data);
       const st = resolveStatus(
         actor,
         type,
@@ -693,7 +723,11 @@ export function createContentService({ db, dialect, audit, cache, settings, regi
         if (autosave) return; // not an event worth an audit line every few seconds
         const action =
           st.status !== before.status
-            ? `content.${st.status === 'published' ? 'publish' : st.status === 'draft' ? 'unpublish' : st.status === 'scheduled' ? 'schedule' : 'archive'}`
+            ? st.status === 'review'
+              ? 'content.submit_review'
+              : before.status === 'review' && st.status === 'draft'
+                ? 'content.request_changes'
+                : `content.${st.status === 'published' ? 'publish' : st.status === 'draft' ? 'unpublish' : st.status === 'scheduled' ? 'schedule' : 'archive'}`
             : 'content.update';
         await audit.log(
           {
