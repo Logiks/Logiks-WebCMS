@@ -1,12 +1,17 @@
               <div class="page-head d-flex justify-content-between align-items-end flex-wrap gap-2"><div><h1 x-text="type.plural"></h1><p x-text="'Every ' + type.label.toLowerCase() + ', newest changes first.'"></p></div>
                 <a class="btn btn-primary" x-show="type.can.write" :href="'#/content/' + typeId + '/new'" x-text="'New ' + type.label.toLowerCase()"></a></div>
-              <div class="d-flex gap-2 mb-3 flex-wrap">
-                <input class="form-control" style="max-width:18rem" placeholder="Search titles" aria-label="Search titles" x-model="q" @input.debounce.300ms="load(true)">
-                <select class="form-select" style="max-width:12rem" aria-label="Filter by status" x-model="status" @change="load(true)"><option value="">All statuses</option><option value="draft">Draft</option><option value="scheduled">Scheduled</option><option value="published">Published</option><option value="archived">Archived</option></select>
+              <div class="d-flex gap-2 mb-3 flex-wrap align-items-end">
+                <input class="form-control" style="max-width:16rem" placeholder="Search titles" aria-label="Search titles" x-model="q" @input.debounce.300ms="load(true)">
+                <select class="form-select" style="max-width:11rem" aria-label="Filter by status" x-model="status" @change="load(true)"><option value="">All statuses</option><option value="draft">Draft</option><option value="scheduled">Scheduled</option><option value="published">Published</option><option value="archived">Archived</option></select>
+                <select class="form-select" style="max-width:12rem" aria-label="Filter by category or tag" x-show="terms.length" x-model="termId" @change="load(true)"><option value="">All categories and tags</option><template x-for="t in terms" :key="t.id"><option :value="t.id" x-text="t.name + ' (' + t.group.toLowerCase() + ')'"></option></template></select>
+                <select class="form-select" style="max-width:11rem" aria-label="Filter by author" x-show="authors.length > 1" x-model="authorId" @change="load(true)"><option value="">All authors</option><template x-for="a in authors" :key="a.id"><option :value="a.id" x-text="a.name"></option></template></select>
+                <div><label class="form-label small muted mb-0" for="l-from">Changed from</label><input id="l-from" type="date" class="form-control" x-model="from" @change="load(true)"></div>
+                <div><label class="form-label small muted mb-0" for="l-to">to</label><input id="l-to" type="date" class="form-control" x-model="to" @change="load(true)"></div>
+                <button type="button" class="btn btn-link" x-show="filtered" @click="clearFilters()">Clear filters</button>
               </div>
               <div class="alert alert-danger" role="alert" x-show="error" x-text="error"></div>
               <div class="panel">
-                <div class="empty" x-show="loaded && !entries.length">Nothing here yet.</div>
+                <div class="empty" x-show="loaded && !entries.length" x-text="filtered ? 'Nothing matches these filters.' : 'Nothing here yet.'"></div>
                 <table class="table" x-show="entries.length"><thead><tr><th>Title</th><th>Status</th><th>By</th><th>Changed</th></tr></thead><tbody>
                   <template x-for="e in entries" :key="e.id"><tr>
                     <td><a :href="'#/content/' + typeId + '/' + e.id" :style="'padding-left:' + (depth(e) * 1.25) + 'rem'" x-text="e.title"></a><div class="muted small mono" :style="'padding-left:' + (depth(e) * 1.25) + 'rem'" x-text="'/' + e.path"></div></td>

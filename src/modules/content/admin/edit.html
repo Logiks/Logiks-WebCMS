@@ -7,14 +7,17 @@
                     <label class="form-label" for="e-title">Title</label>
                     <input id="e-title" class="form-control form-control-lg" maxlength="255" :class="{'is-invalid': errors.title}" x-model="form.title" @input="slugFromTitle($event.target.value)">
                     <div class="invalid-feedback d-block" x-show="errors.title" x-text="errors.title"></div>
+                    <div class="counter small muted" x-text="form.title.length + ' / 255'"></div>
                   </div>
 
                   <template x-for="f in type.fields" :key="f.key">
                     <div class="panel p-3 mb-3">
                       <label class="form-label fw-semibold" :for="'f-' + f.key" x-text="f.label"></label>
                       <div class="help small muted mb-1" x-show="f.help" x-text="f.help"></div>
-                      <template x-if="f.type === 'string'"><input :id="'f-' + f.key" class="form-control" :maxlength="f.max || 500" x-model="form.data[f.key]"></template>
-                      <template x-if="f.type === 'text'"><textarea :id="'f-' + f.key" rows="3" class="form-control" :maxlength="f.max || 20000" x-model="form.data[f.key]"></textarea></template>
+                      <template x-if="f.type === 'string'"><input :id="'f-' + f.key" class="form-control" :maxlength="f.max || 500" :placeholder="f.key === 'seo_title' ? form.title : ''" x-model="form.data[f.key]"></template>
+                      <template x-if="f.type === 'text'"><textarea :id="'f-' + f.key" rows="3" class="form-control" :maxlength="f.max || 20000" :placeholder="f.key === 'seo_description' ? suggested : ''" x-model="form.data[f.key]"></textarea></template>
+                      <div class="counter small" :class="counterClass(f)" x-show="f.type === 'string' || f.type === 'text'" x-text="counterText(f)"></div>
+                      <template x-if="f.key === 'seo_description' && !form.data[f.key] && suggested"><div class="small mt-1">Left empty, search engines will show: <span class="fst-italic" x-text="suggested"></span> <button type="button" class="btn btn-link btn-sm p-0 align-baseline" @click="form.data[f.key] = suggested">Use this</button></div></template>
                       <template x-if="f.type === 'number'"><input :id="'f-' + f.key" type="number" class="form-control" style="max-width:10rem" x-model.number="form.data[f.key]"></template>
                       <template x-if="f.type === 'boolean'"><div class="form-check form-switch"><input :id="'f-' + f.key" type="checkbox" class="form-check-input" role="switch" x-model="form.data[f.key]"><label class="form-check-label muted" :for="'f-' + f.key" x-text="form.data[f.key] ? 'Yes' : 'No'"></label></div></template>
                       <template x-if="f.type === 'select'"><select :id="'f-' + f.key" class="form-select" x-model="form.data[f.key]"><template x-for="o in f.options" :key="o.value"><option :value="o.value" x-text="o.label"></option></template></select></template>
@@ -22,31 +25,45 @@
                       <template x-if="f.type === 'media'">
                         <div class="d-flex align-items-center gap-3">
                           <span class="ph thumb" x-show="form.data[f.key]"><img x-show="media[form.data[f.key]] && media[form.data[f.key]].kind === 'image'" :src="thumb(media[form.data[f.key]])" alt=""></span>
-                          <span class="muted small" x-show="form.data[f.key]" x-text="media[form.data[f.key]] ? media[form.data[f.key]].filename : ''"></span>
+                          <span class="muted small" x-show="form.data[f.key]" x-text="media[form.data[f.key]] ? media[form.data[f.key]].filename + ' · ' + sizeHint(media[form.data[f.key]]) : ''"></span>
                           <button type="button" class="btn btn-outline-secondary btn-sm" @click="pick(f)" x-text="form.data[f.key] ? 'Change' : 'Choose from the library'"></button>
                           <button type="button" class="btn btn-link btn-sm" x-show="form.data[f.key]" @click="form.data[f.key] = null">Remove</button>
                         </div>
                       </template>
                       <template x-if="f.type === 'blocks'">
-                        <div class="blocks">
+                        <div class="blocks" :class="{'drop-active': dragging}" @dragover.prevent="isFileDrag($event) && (dragging = true)" @dragleave.self="dragging = false" @drop.prevent="isFileDrag($event) && dropFiles($event, f)">
+                          <div class="rich-toolbar" role="toolbar" aria-label="Formatting">
+                            <select class="form-select form-select-sm" style="width:8.5rem" aria-label="Text style" :value="styleOf(f)" :disabled="!styleOf(f)" @change="setStyle(f, $event.target.value)"><option value="" disabled hidden>Style</option><option value="p">Paragraph</option><option value="h1">Heading 1</option><option value="h2">Heading 2</option><option value="h3">Heading 3</option><option value="h4">Heading 4</option><option value="h5">Heading 5</option><option value="h6">Heading 6</option></select>
+                            <button type="button" class="btn btn-sm btn-outline-secondary" :disabled="!richActive(f)" @mousedown.prevent="format('bold')" aria-label="Bold" title="Bold"><i class="bi bi-type-bold"></i></button>
+                            <button type="button" class="btn btn-sm btn-outline-secondary" :disabled="!richActive(f)" @mousedown.prevent="format('italic')" aria-label="Italic" title="Italic"><i class="bi bi-type-italic"></i></button>
+                            <button type="button" class="btn btn-sm btn-outline-secondary" :disabled="!richActive(f)" @mousedown.prevent="format('underline')" aria-label="Underline" title="Underline"><i class="bi bi-type-underline"></i></button>
+                            <button type="button" class="btn btn-sm btn-outline-secondary" :disabled="!richActive(f)" @mousedown.prevent="link()" aria-label="Link" title="Link"><i class="bi bi-link-45deg"></i></button>
+                            <input type="color" class="form-control form-control-color form-control-sm" value="#1c2b2f" aria-label="Text colour" title="Text colour" :disabled="!richActive(f)" @change="colour($event.target.value)">
+                            <select class="form-select form-select-sm" style="width:6.5rem" aria-label="Text size" :disabled="!richActive(f)" @change="size($event.target.value); $event.target.value = ''"><option value="">Size</option><option value="2">Small</option><option value="3">Normal</option><option value="5">Large</option><option value="6">Huge</option></select>
+                            <span class="btn-group"><button type="button" class="btn btn-sm btn-outline-secondary" @click="setAlign(f, 'left')" aria-label="Align left" title="Align left"><i class="bi bi-text-left"></i></button><button type="button" class="btn btn-sm btn-outline-secondary" @click="setAlign(f, 'center')" aria-label="Align centre" title="Align centre"><i class="bi bi-text-center"></i></button><button type="button" class="btn btn-sm btn-outline-secondary" @click="setAlign(f, 'right')" aria-label="Align right" title="Align right"><i class="bi bi-text-right"></i></button><button type="button" class="btn btn-sm btn-outline-secondary" @click="setAlign(f, 'justify')" aria-label="Justify" title="Justify"><i class="bi bi-justify"></i></button></span>
+                            <button type="button" class="btn btn-sm btn-outline-secondary" @click="toggleSource(f)" aria-label="Edit HTML source" title="Edit the HTML of this block"><i class="bi bi-code-slash"></i></button>
+                            <span class="ms-auto small muted" x-text="wordCount(f)"></span>
+                          </div>
+                          <div class="small muted mb-2" x-show="!blocksOf(f).length">Add a block below, or drop images here.</div>
+                          <div class="drop-hint" x-show="dragging" aria-hidden="true">Drop images to add them</div>
+                          <div class="small muted mb-2" x-show="uploading" role="status">Uploading…</div>
                           <template x-for="(b, i) in blocksOf(f)" :key="b._id">
-                            <div class="block">
+                            <div class="block" :class="{'block-active': activeId === b._id}" @focusin="activeId = b._id" @click="activeId = b._id">
                               <div class="block-bar">
                                 <span class="tag" x-text="b.type"></span>
                                 <span class="ms-auto"></span>
+                                <button type="button" class="btn btn-sm btn-link" @click.stop="duplicateBlock(f, i)" aria-label="Duplicate block" title="Duplicate"><i class="bi bi-copy"></i></button>
                                 <button type="button" class="btn btn-sm btn-link" @click="moveBlock(f, i, -1)" aria-label="Move up" title="Move up"><i class="bi bi-arrow-up"></i></button>
                                 <button type="button" class="btn btn-sm btn-link" @click="moveBlock(f, i, 1)" aria-label="Move down" title="Move down"><i class="bi bi-arrow-down"></i></button>
                                 <button type="button" class="btn btn-sm btn-link text-danger" @click="removeBlock(f, i)" aria-label="Remove block" title="Remove"><i class="bi bi-x-lg"></i></button>
                               </div>
-                              <template x-if="b.type === 'paragraph'">
-                                <div>
-                                  <div class="rich-tools"><button type="button" class="btn btn-sm btn-outline-secondary" @mousedown.prevent="format('bold')" aria-label="Bold"><i class="bi bi-type-bold"></i></button> <button type="button" class="btn btn-sm btn-outline-secondary" @mousedown.prevent="format('italic')" aria-label="Italic"><i class="bi bi-type-italic"></i></button> <button type="button" class="btn btn-sm btn-outline-secondary" @mousedown.prevent="link()" aria-label="Link"><i class="bi bi-link-45deg"></i></button></div>
-                                  <div class="rich form-control" contenteditable="true" role="textbox" aria-label="Paragraph text" x-init="initRich($el, b)" @input="syncRich($el, b)" @paste.prevent="pastePlain($event, $el, b)"></div>
-                                </div>
+                              <template x-if="b.type === 'paragraph' && !b._src">
+                                <div class="rich form-control" contenteditable="true" role="textbox" aria-label="Paragraph text" :style="b.data.align ? 'text-align:' + b.data.align : ''" x-init="initRich($el, b)" @input="syncRich($el, b)" @paste.prevent="pastePlain($event, $el, b)"></div>
                               </template>
-                              <template x-if="b.type === 'header'"><div class="d-flex gap-2"><input class="form-control" aria-label="Heading text" placeholder="Heading" maxlength="500" x-model="b.data.text"><select class="form-select" style="max-width:6rem" aria-label="Heading level" x-model.number="b.data.level"><option value="1">H1</option><option value="2">H2</option><option value="3">H3</option><option value="4">H4</option><option value="5">H5</option><option value="6">H6</option></select></div></template>
+                              <template x-if="(b.type === 'paragraph' || b.type === 'callout') && b._src"><div><div class="small muted mb-1">HTML source. Only bold, italic, underline, links, colour and size are kept.</div><textarea class="form-control mono" rows="5" aria-label="HTML source" x-model="b.data.text"></textarea></div></template>
+                              <template x-if="b.type === 'header'"><div class="d-flex gap-2"><input class="form-control" aria-label="Heading text" placeholder="Heading" maxlength="500" :style="b.data.align ? 'text-align:' + b.data.align : ''" x-model="b.data.text"><select class="form-select" style="max-width:6rem" aria-label="Heading level" x-model.number="b.data.level"><option value="1">H1</option><option value="2">H2</option><option value="3">H3</option><option value="4">H4</option><option value="5">H5</option><option value="6">H6</option></select></div></template>
                               <template x-if="b.type === 'list'"><div><select class="form-select mb-1" style="max-width:12rem" aria-label="List style" x-model="b.data.style"><option value="unordered">Bulleted</option><option value="ordered">Numbered</option></select><textarea class="form-control" rows="4" aria-label="List items" placeholder="One item per line" x-init="$el.value = blockLines(b)" @input="setBlockLines(b, $event.target.value)"></textarea></div></template>
-                              <template x-if="b.type === 'quote'"><div><textarea class="form-control mb-1" rows="3" aria-label="Quote" placeholder="Quote" x-model="b.data.text"></textarea><input class="form-control" aria-label="Who said it" placeholder="Who said it (optional)" x-model="b.data.caption"></div></template>
+                              <template x-if="b.type === 'quote'"><div><textarea class="form-control mb-1" rows="3" aria-label="Quote" placeholder="Quote" :style="b.data.align ? 'text-align:' + b.data.align : ''" x-model="b.data.text"></textarea><input class="form-control" aria-label="Who said it" placeholder="Who said it (optional)" x-model="b.data.caption"></div></template>
                               <template x-if="b.type === 'code'"><textarea class="form-control mono" rows="6" aria-label="Code" x-codejar="{ get: b.data.code, set: (v) => (b.data.code = v) }"></textarea></template>
                               <template x-if="b.type === 'delimiter'"><hr class="my-2"></template>
                               <template x-if="b.type === 'image'">
@@ -56,13 +73,47 @@
                                     <button type="button" class="btn btn-outline-secondary btn-sm mb-2" @click="pickBlockImage(b)" x-text="b.data.mediaId ? 'Change image' : 'Choose an image'"></button>
                                     <input class="form-control mb-1" aria-label="Image description for screen readers" placeholder="Describe the image (alt text)" maxlength="500" x-model="b.data.alt">
                                     <input class="form-control" aria-label="Caption" placeholder="Caption (optional)" maxlength="500" x-model="b.data.caption">
+                                    <div class="small text-warning mt-1" x-show="needsAlt(b)"><i class="bi bi-exclamation-triangle"></i> No description. Screen readers and search engines can't tell what this shows.</div>
+                                    <div class="small muted mt-1" x-show="b.data.mediaId && media[b.data.mediaId]" x-text="sizeHint(media[b.data.mediaId])"></div>
                                   </div>
+                                </div>
+                              </template>
+                              <template x-if="b.type === 'table'">
+                                <div>
+                                  <div class="form-check mb-1"><input class="form-check-input" type="checkbox" :id="'th-' + b._id" x-model="b.data.header"><label class="form-check-label" :for="'th-' + b._id">First row is a header</label></div>
+                                  <div class="table-responsive"><table class="table table-sm table-bordered mb-1"><tbody>
+                                    <template x-for="(row, ri) in b.data.rows" :key="ri"><tr>
+                                      <template x-for="(cell, ci) in row" :key="ci"><td class="p-0"><input class="form-control form-control-sm border-0" :class="{'fw-semibold': b.data.header && ri === 0}" :aria-label="'Row ' + (ri + 1) + ', column ' + (ci + 1)" x-model="b.data.rows[ri][ci]"></td></template>
+                                      <td class="p-0 text-nowrap" style="width:1%"><button type="button" class="btn btn-sm btn-link text-danger" @click="removeRow(b, ri)" :aria-label="'Remove row ' + (ri + 1)" title="Remove row"><i class="bi bi-x"></i></button></td>
+                                    </tr></template>
+                                  </tbody></table></div>
+                                  <button type="button" class="btn btn-sm btn-outline-secondary" @click="addRow(b)">Add row</button> <button type="button" class="btn btn-sm btn-outline-secondary" @click="addCol(b)">Add column</button> <button type="button" class="btn btn-sm btn-outline-secondary" @click="removeCol(b)">Remove last column</button>
+                                </div>
+                              </template>
+                              <template x-if="b.type === 'callout'">
+                                <div>
+                                  <select class="form-select mb-1" style="max-width:12rem" aria-label="Callout style" x-model="b.data.style"><option value="info">Note</option><option value="success">Tip</option><option value="warning">Warning</option><option value="danger">Important</option></select>
+                                  <div x-show="!b._src" :class="'callout callout-' + b.data.style"><div class="rich" contenteditable="true" role="textbox" aria-label="Callout text" x-init="initRich($el, b)" @input="syncRich($el, b)" @paste.prevent="pastePlain($event, $el, b)"></div></div>
+                                </div>
+                              </template>
+                              <template x-if="b.type === 'embed'">
+                                <div>
+                                  <input class="form-control mb-1" aria-label="Video address" placeholder="https://www.youtube.com/watch?v=… or https://vimeo.com/…" maxlength="500" x-model="b.data.url">
+                                  <div class="small text-warning mb-1" x-show="b.data.url && !embedOk(b.data.url)">Only https YouTube and Vimeo links can be embedded.</div>
+                                  <input class="form-control" aria-label="Video caption" placeholder="Caption (optional)" maxlength="500" x-model="b.data.caption">
+                                </div>
+                              </template>
+                              <template x-if="b.type === 'download'">
+                                <div class="d-flex gap-2 flex-wrap align-items-center">
+                                  <button type="button" class="btn btn-outline-secondary btn-sm" @click="pickBlockFile(b)" x-text="b.data.mediaId ? 'Change file' : 'Choose a file'"></button>
+                                  <span class="muted small" x-show="b.data.mediaId && media[b.data.mediaId]" x-text="media[b.data.mediaId] ? media[b.data.mediaId].filename + ' · ' + bytes(media[b.data.mediaId].size) : ''"></span>
+                                  <input class="form-control" style="max-width:20rem" aria-label="Link text" placeholder="Link text, e.g. Price list" maxlength="200" x-model="b.data.label">
                                 </div>
                               </template>
                             </div>
                           </template>
                           <div class="block-add"><span class="muted small me-1">Add:</span>
-                            <template x-for="t in ['paragraph','header','list','quote','image','code','delimiter']" :key="t"><button type="button" class="btn btn-sm btn-outline-secondary" @click="addBlock(f, t)" x-text="t"></button></template></div>
+                            <template x-for="t in ['paragraph','header','list','quote','image','code','delimiter','table','callout','embed','download']" :key="t"><button type="button" class="btn btn-sm btn-outline-secondary" @click="addBlock(f, t)" x-text="t"></button></template></div>
                         </div>
                       </template>
                       <div class="invalid-feedback d-block" x-show="errors['data.' + f.key]" x-text="errors['data.' + f.key]"></div>
@@ -77,16 +128,33 @@
                     <select id="e-status" class="form-select mb-2" :disabled="!canPublish" x-model="form.status"><template x-for="o in statuses" :key="o[0]"><option :value="o[0]" :selected="o[0] === form.status" x-text="o[1]"></option></template></select>
                     <div class="small muted mb-2" x-show="!canPublish">You can save drafts. Someone with the Publish permission makes them live.</div>
                     <div class="mb-2" x-show="form.status === 'scheduled'"><label class="form-label" for="e-when">Go live at</label><input id="e-when" type="datetime-local" class="form-control" :class="{'is-invalid': errors.publishAt}" x-model="form.publishAt"><div class="invalid-feedback d-block" x-show="errors.publishAt" x-text="errors.publishAt"></div></div>
+                    <div class="mb-2" x-show="form.status === 'published' || form.status === 'scheduled'"><label class="form-label" for="e-off">Take offline at <span class="muted">(optional)</span></label><input id="e-off" type="datetime-local" class="form-control" :class="{'is-invalid': errors.unpublishAt}" x-model="form.unpublishAt"><div class="small muted">It goes back to draft by itself at that time.</div><div class="invalid-feedback d-block" x-show="errors.unpublishAt" x-text="errors.unpublishAt"></div></div>
                     <label class="form-label" for="e-slug">Address</label>
                     <input id="e-slug" class="form-control mono mb-1" :class="{'is-invalid': errors.slug}" x-model="form.slug" @input="slugTouched = true" placeholder="made from the title">
                     <div class="invalid-feedback d-block" x-show="errors.slug" x-text="errors.slug"></div>
                     <div class="small muted mono mb-2" x-text="addressPreview"></div>
+                    <template x-if="addressChanged"><div class="alert alert-warning small py-2 mb-2" role="alert"><i class="bi bi-exclamation-triangle"></i> This is live. Changing its address breaks links and search results that point to the old one.<div class="form-check mt-1"><input class="form-check-input" type="checkbox" id="e-redirect" x-model="redirectOld"><label class="form-check-label" for="e-redirect">Redirect the old address to the new one (recommended)</label></div></div></template>
+                    <div class="mb-2" x-show="authors.length > 1"><label class="form-label" for="e-author">Author</label><select id="e-author" class="form-select" :disabled="!type.can.others" x-model.number="form.authorId"><template x-for="a in authors" :key="a.id"><option :value="a.id" :selected="a.id === form.authorId" x-text="a.name"></option></template></select><div class="small muted" x-show="!type.can.others">Choosing another author needs the permission to edit other people's work.</div></div>
                     <div class="mb-2" x-show="type.hierarchical"><label class="form-label" for="e-parent">Parent page</label><select id="e-parent" class="form-select" x-model.number="form.parentId"><option :value="null">None (top level)</option><template x-for="p in parents" :key="p.id"><option :value="p.id" :selected="p.id === form.parentId" x-text="'/' + p.path"></option></template></select></div>
                     <div class="d-flex gap-2 flex-wrap mt-3">
                       <button type="button" class="btn btn-primary" :disabled="busy" @click="save()" x-text="busy ? 'Saving…' : 'Save'"></button>
                       <button type="button" class="btn btn-outline-secondary" x-show="!isNew" @click="preview()">Preview</button>
                     </div>
                     <div class="small text-warning mt-2" x-show="dirty">You have unsaved changes.</div>
+                    <div class="small mt-2" role="status" aria-live="polite" x-show="saveState">
+                      <span class="muted" x-show="saveState === 'saving'">Saving…</span>
+                      <span class="text-success" x-show="saveState === 'saved'"><i class="bi bi-check2"></i> <span x-text="(canAutosave ? 'Draft saved at ' : 'Saved at ') + saveNote"></span></span>
+                      <span class="text-danger" x-show="saveState === 'error'" x-text="'Not saved: ' + saveNote"></span>
+                    </div>
+                    <div class="small muted mt-1" x-show="canAutosave">Drafts save themselves a few seconds after you stop typing.</div>
+                    <div class="small muted mt-1" x-show="!isNew && !canAutosave">Live content is not autosaved. Press Save to publish your changes.</div>
+                  </div>
+
+                  <div class="panel p-3 mb-3">
+                    <div class="d-flex justify-content-between align-items-center"><div class="fw-semibold">Before you publish</div><button type="button" class="btn btn-sm btn-outline-secondary" :disabled="checksBusy" @click="runChecks()" x-text="checks ? 'Check again' : 'Check now'"></button></div>
+                    <div class="small muted mt-1" x-show="!checks">Looks for a missing search description or featured image, images without a description, and links on this site that lead nowhere. It runs by itself when you choose Published or Scheduled.</div>
+                    <div class="small text-success mt-2" x-show="checks && !checks.length"><i class="bi bi-check-circle"></i> Nothing to fix.</div>
+                    <ul class="list-unstyled mb-0 mt-2" aria-label="Checklist"><template x-for="c in (checks || [])" :key="c.id"><li class="small py-1 border-top"><span class="tag ms-0" :class="c.level === 'info' ? '' : 'warn'" x-text="c.level === 'info' ? 'Tip' : (c.level === 'warn' ? 'Fix' : 'Error')"></span> <span x-text="c.message"></span><div class="muted" x-text="c.fix"></div></li></template></ul>
                   </div>
 
                   <template x-for="t in type.taxonomies" :key="t.id">
@@ -100,11 +168,25 @@
                   <div class="panel p-3" x-show="!isNew">
                     <button type="button" class="btn btn-link px-0" @click="loadRevisions()" x-text="showRevisions ? 'Hide history' : 'History'"></button>
                     <div x-show="showRevisions">
-                      <template x-for="r in revisions" :key="r.id"><div class="d-flex justify-content-between align-items-center small py-1 border-top"><div><span x-text="'v' + r.version"></span> · <span class="muted" x-text="(r.by || 'system') + ', ' + ago(r.at)"></span><div class="muted" x-show="r.note" x-text="r.note"></div></div><button type="button" class="btn btn-sm btn-outline-secondary" @click="restore(r)">Restore</button></div></template>
+                      <template x-for="r in revisions" :key="r.id"><div class="d-flex justify-content-between align-items-center small py-1 border-top"><div><span x-text="'v' + r.version"></span> · <span class="muted" x-text="(r.by || 'system') + ', ' + ago(r.at)"></span><div class="muted" x-show="r.note" x-text="r.note"></div></div><span class="text-nowrap"><button type="button" class="btn btn-sm btn-outline-secondary" @click="compare(r)">Compare</button> <button type="button" class="btn btn-sm btn-outline-secondary" @click="restore(r)">Restore</button></span></div></template>
                     </div>
                     <hr>
                     <button type="button" class="btn btn-outline-danger btn-sm" x-show="type.can.delete" @click="remove()">Delete</button>
                   </div>
+                </div>
+              </div>
+              <div class="panel p-3 mt-3" x-show="cmp.open" aria-label="Compare versions">
+                <div class="d-flex flex-wrap gap-2 align-items-end mb-2">
+                  <div class="fw-semibold me-auto">Compare versions</div>
+                  <div><label class="form-label small muted mb-0" for="c-a">Earlier</label><select id="c-a" class="form-select form-select-sm" x-model="cmp.a" @change="runCompare()"><template x-for="r in revisions" :key="r.id"><option :value="String(r.id)" :selected="String(r.id) === cmp.a" x-text="'v' + r.version + ' · ' + ago(r.at)"></option></template></select></div>
+                  <div><label class="form-label small muted mb-0" for="c-b">Later</label><select id="c-b" class="form-select form-select-sm" x-model="cmp.b" @change="runCompare()"><option value="current">Current (saved)</option><template x-for="r in revisions" :key="r.id"><option :value="String(r.id)" :selected="String(r.id) === cmp.b" x-text="'v' + r.version + ' · ' + ago(r.at)"></option></template></select></div>
+                  <button type="button" class="btn btn-sm btn-link" @click="closeCompare()">Close</button>
+                </div>
+                <div class="alert alert-danger" role="alert" x-show="cmp.error" x-text="cmp.error"></div>
+                <div class="small muted" x-show="cmp.busy">Comparing…</div>
+                <div class="small muted" x-show="!cmp.busy && !cmp.error && cmp.rows.length && !cmp.rows.some(r => r.kind !== 'same')">These two versions have the same text.</div>
+                <div class="diff" x-show="cmp.rows.length">
+                  <template x-for="(row, i) in cmp.rows" :key="i"><div class="diff-row" :class="'diff-' + row.kind"><div class="diff-cell diff-l" x-text="row.l ?? ''"></div><div class="diff-cell diff-r" x-text="row.r ?? ''"></div></div></template>
                 </div>
               </div>
               <div class="muted" x-show="loading">Loading…</div>

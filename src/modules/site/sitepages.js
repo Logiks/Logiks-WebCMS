@@ -543,6 +543,9 @@ export function createSitePages(ctx) {
     return im ? im.src : null;
   }
 
+  const ARTICLE_TYPES = ['BlogPosting', 'Article', 'NewsArticle'];
+  const PAGE_TYPES = ['WebPage', 'AboutPage', 'ContactPage'];
+
   async function finalSeo(front, state, req, status) {
     const { site } = req.globals;
     const s = { ...state.seo };
@@ -552,6 +555,7 @@ export function createSitePages(ctx) {
       s.exact_title ??= item.fields?.seo_title || undefined;
       s.description ??= item.fields?.seo_description || item.excerpt || '';
       s.type ??= item.type === 'post' ? 'article' : 'website';
+      s.schemaType ??= item.fields?.schema_type || undefined;
       s.noindex ??= Boolean(item.fields?.noindex);
       s.published ??= item.publishedAt;
       s.modified ??= item.updatedAt;
@@ -603,7 +607,7 @@ export function createSitePages(ctx) {
       type === 'article'
         ? {
             '@context': 'https://schema.org',
-            '@type': 'BlogPosting',
+            '@type': ARTICLE_TYPES.includes(s.schemaType) ? s.schemaType : 'BlogPosting',
             headline: s.title,
             datePublished: s.published || undefined,
             dateModified: s.modified || undefined,
@@ -626,7 +630,7 @@ export function createSitePages(ctx) {
             }
           : {
               '@context': 'https://schema.org',
-              '@type': 'WebPage',
+              '@type': PAGE_TYPES.includes(s.schemaType) ? s.schemaType : 'WebPage',
               name: s.title ?? front.title ?? name,
               url: canonical,
               description: description || undefined,

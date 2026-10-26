@@ -270,6 +270,92 @@ const bytes = (n) =>
     : n < 1048576
       ? `${Math.round(n / 1024)} KB`
       : `${(n / 1048576).toFixed(1)} MB`;
+const escHtml = (t) =>
+  String(t ?? '').replace(
+    /[&<>"']/g,
+    (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c],
+  );
+/** The words of some inline HTML. DOMParser builds an inert document, so nothing in it runs. */
+const htmlText = (h) =>
+  new window.DOMParser()
+    .parseFromString(String(h ?? ''), 'text/html')
+    .body.textContent.replace(/\u00a0/g, ' ');
+/** A block's words as lines; with `labelled`, each line says what kind of block it came from (for the compare). */
+function blockPlain(b, labelled = false) {
+  const d = b.data || {};
+  const t = (x) => htmlText(x).trim();
+  const tag = (x) => (labelled ? x : '');
+  switch (b.type) {
+    case 'paragraph':
+      return [t(d.text)];
+    case 'header':
+      return [`${tag('#'.repeat(d.level || 2) + ' ')}${t(d.text)}`];
+    case 'list':
+      return (d.items || []).map((i) => `${tag('• ')}${t(i)}`);
+    case 'quote':
+      return [`${tag('“')}${t(d.text)}${tag('”')}${d.caption ? ' — ' + d.caption : ''}`];
+    case 'code':
+      return String(d.code || '')
+        .split('\n')
+        .map((l) => tag('    ') + l);
+    case 'table':
+      return (d.rows || []).map((r) => r.map(t).join(' | '));
+    case 'callout':
+      return [`${tag('[' + d.style + '] ')}${t(d.text)}`];
+    case 'image':
+      return [
+        `${tag('[image #' + d.mediaId + '] ')}${d.alt || ''}${d.caption ? ' — ' + t(d.caption) : ''}`,
+      ];
+    case 'embed':
+      return [`${tag('[video] ')}${d.url || ''}`];
+    case 'download':
+      return [`${tag('[download #' + d.mediaId + '] ')}${d.label || ''}`];
+    case 'delimiter':
+      return tag('———') ? ['———'] : [];
+    default:
+      return [];
+  }
+}
+/**
+ * A line diff laid out for two columns: unchanged lines on both sides, a run of removed lines beside the run of added
+ * lines that replaced it. Plain longest-common-subsequence; documents are capped so a huge page can't freeze the tab.
+ */
+function diffRows(a, b, cap = 1500) {
+  a = a.slice(0, cap);
+  b = b.slice(0, cap);
+  const n = a.length;
+  const m = b.length;
+  const lcs = Array.from({ length: n + 1 }, () => new Uint16Array(m + 1));
+  for (let i = n - 1; i >= 0; i--)
+    for (let j = m - 1; j >= 0; j--)
+      lcs[i][j] = a[i] === b[j] ? lcs[i + 1][j + 1] + 1 : Math.max(lcs[i + 1][j], lcs[i][j + 1]);
+  const rows = [];
+  let del = [];
+  let add = [];
+  const flush = () => {
+    for (let k = 0; k < Math.max(del.length, add.length); k++)
+      rows.push({
+        l: del[k] ?? null,
+        r: add[k] ?? null,
+        kind: del[k] != null && add[k] != null ? 'chg' : del[k] != null ? 'del' : 'add',
+      });
+    del = [];
+    add = [];
+  };
+  let i = 0;
+  let j = 0;
+  while (i < n || j < m) {
+    if (i < n && j < m && a[i] === b[j]) {
+      flush();
+      rows.push({ l: a[i], r: b[j], kind: 'same' });
+      i++;
+      j++;
+    } else if (j < m && (i === n || lcs[i][j + 1] >= lcs[i + 1][j])) add.push(b[j++]);
+    else del.push(a[i++]);
+  }
+  flush();
+  return rows;
+}
 const uid = (() => {
   let n = 0;
   return () => `b${++n}`;
@@ -1833,6 +1919,12 @@ document.addEventListener('alpine:init', () => {
     loaded: false,
     status: '',
     q: '',
+    termId: '',
+    authorId: '',
+    from: '',
+    to: '',
+    terms: [], // every term of the type's taxonomies, for the category filter
+    authors: [],
     offset: 0,
     limit: 25,
     error: '',
@@ -1846,9 +1938,30 @@ document.addEventListener('alpine:init', () => {
         }
       );
     },
+    get filtered() {
+      return !!(this.q || this.status || this.termId || this.authorId || this.from || this.to);
+    },
     async init() {
       if (!(await this.mountFragment('content', 'list'))) return;
       await this.load();
+      // The filters' choices come after the list so a slow one never holds the entries back.
+      try {
+        for (const t of this.type.taxonomies || [])
+          this.terms.push(
+            ...(await api('GET', `/admin/content/taxonomies/${t.id}/terms`)).terms.map((x) => ({
+              id: x.id,
+              name: x.name,
+              group: t.plural,
+            })),
+          );
+        this.authors = (await api('GET', '/admin/content/authors')).authors;
+      } catch {
+        /* the list still works without its filters' choices */
+      }
+    },
+    clearFilters() {
+      this.q = this.status = this.termId = this.authorId = this.from = this.to = '';
+      return this.load(true);
     },
     async load(reset = false) {
       if (reset) this.offset = 0;
@@ -1856,6 +1969,11 @@ document.addEventListener('alpine:init', () => {
         const qs = new URLSearchParams({ limit: String(this.limit), offset: String(this.offset) });
         if (this.status) qs.set('status', this.status);
         if (this.q) qs.set('q', this.q);
+        if (this.termId) qs.set('termId', this.termId);
+        if (this.authorId) qs.set('authorId', this.authorId);
+        // A day, in the person's own timezone: from its first millisecond to its last.
+        if (this.from) qs.set('from', String(new Date(`${this.from}T00:00:00`).getTime()));
+        if (this.to) qs.set('to', String(new Date(`${this.to}T23:59:59.999`).getTime()));
         const r = await api('GET', `/admin/content/types/${this.typeId}/entries?${qs}`);
         this.entries = r.entries;
         this.total = r.total;
@@ -1897,9 +2015,25 @@ document.addEventListener('alpine:init', () => {
       publishAt: '',
       parentId: null,
       termIds: [],
+      authorId: null,
+      unpublishAt: '',
       data: {},
     },
     slugTouched: false,
+    authors: [],
+    redirectOld: true, // redirect the old address when a live entry's address changes
+    checks: null, // the pre-publish checklist: null = not run yet
+    checksBusy: false,
+    saveState: '', // '' | saving | saved | error — what autosave and Save last did
+    saveNote: '',
+    autosaveMs: 5000,
+    autosaveTimer: null,
+    changeSeq: 0,
+    activeId: null, // the block the toolbar acts on
+    range: null, // the last selection inside a text block, kept while a toolbar control has focus
+    dragging: false,
+    uploading: 0,
+    cmp: { open: false, a: '', b: 'current', rows: [], busy: false, error: '' },
     parents: [],
     terms: {},
     revisions: [],
@@ -1955,6 +2089,7 @@ document.addEventListener('alpine:init', () => {
           this.terms[t.id] = (await api('GET', `/admin/content/taxonomies/${t.id}/terms`)).terms;
           this.newTerm[t.id] = '';
         }
+        this.authors = (await api('GET', '/admin/content/authors')).authors;
         if (this.isNew) this.fill(null);
         else this.fill((await api('GET', `/admin/content/entries/${this.id}`)).entry);
       } catch (e) {
@@ -1963,9 +2098,27 @@ document.addEventListener('alpine:init', () => {
         this.loading = false;
         this.$nextTick(() => {
           this.dirty = false;
-          this.$watch('form', () => (this.dirty = true), { deep: true });
+          this.$watch(
+            'form',
+            () => {
+              this.dirty = true;
+              this.changeSeq++;
+              this.scheduleAutosave();
+            },
+            { deep: true },
+          );
+          // Choosing to go live is the moment to see what is missing, before pressing Save.
+          this.$watch('form.status', (st) => {
+            if (st === 'published' || st === 'scheduled') this.runChecks();
+          });
         });
+        this.onSelection = () => this.rememberSelection();
+        document.addEventListener('selectionchange', this.onSelection);
       }
+    },
+    destroy() {
+      clearTimeout(this.autosaveTimer);
+      if (this.onSelection) document.removeEventListener('selectionchange', this.onSelection);
     },
     fill(entry) {
       this.entry = entry;
@@ -1974,14 +2127,15 @@ document.addEventListener('alpine:init', () => {
         const v = entry?.data?.[f.key];
         if (f.type === 'blocks')
           data[f.key] = {
-            blocks: (v?.blocks || []).map((b) => ({
-              _id: uid(),
-              type: b.type,
-              data: { ...b.data },
-            })),
+            blocks: (v?.blocks || []).map((b) => {
+              if ((b.type === 'image' || b.type === 'download') && b.data.mediaId)
+                this.loadMedia(b.data.mediaId);
+              return { _id: uid(), _src: false, type: b.type, data: { ...b.data } };
+            }),
           };
         else if (f.type === 'list') data[f.key] = v || [];
         else if (f.type === 'boolean') data[f.key] = !!v;
+        else if (f.type === 'select') data[f.key] = v ?? f.options?.[0]?.value ?? '';
         else data[f.key] = v ?? (f.type === 'media' ? null : '');
         if (f.type === 'media' && data[f.key]) this.loadMedia(data[f.key]);
       }
@@ -1992,8 +2146,11 @@ document.addEventListener('alpine:init', () => {
         publishAt: entry?.publishAt ? this.toLocal(entry.publishAt) : '',
         parentId: entry?.parentId ?? null,
         termIds: (entry?.terms || []).map((t) => t.id),
+        authorId: entry?.authorId ?? auth.user?.id ?? null,
+        unpublishAt: entry?.unpublishAt ? this.toLocal(entry.unpublishAt) : '',
         data,
       };
+      this.redirectOld = true;
       this.slugTouched = !!entry;
     },
     toLocal(ms) {
@@ -2009,6 +2166,7 @@ document.addEventListener('alpine:init', () => {
       }
     },
     thumb,
+    bytes,
     async pick(f) {
       const item = await new Promise((resolve) =>
         window.dispatchEvent(new CustomEvent('pick-media', { detail: { resolve } })),
@@ -2040,8 +2198,32 @@ document.addEventListener('alpine:init', () => {
         code: { code: '' },
         delimiter: {},
         image: { mediaId: null, caption: '', alt: '' },
+        table: {
+          header: true,
+          rows: [
+            ['', ''],
+            ['', ''],
+          ],
+        },
+        callout: { style: 'info', text: '' },
+        embed: { url: '', caption: '' },
+        download: { mediaId: null, label: '' },
       }[type];
-      this.blocksOf(f).push({ _id: uid(), type, data: { ...d } });
+      const b = { _id: uid(), _src: false, type, data: JSON.parse(JSON.stringify(d)) };
+      this.blocksOf(f).push(b);
+      this.activeId = b._id;
+    },
+    duplicateBlock(f, i) {
+      const list = this.blocksOf(f);
+      const b = list[i];
+      const copy = {
+        _id: uid(),
+        _src: false,
+        type: b.type,
+        data: JSON.parse(JSON.stringify(b.data)),
+      };
+      list.splice(i + 1, 0, copy);
+      this.activeId = copy._id;
     },
     moveBlock(f, i, d) {
       const list = this.blocksOf(f);
@@ -2076,19 +2258,155 @@ document.addEventListener('alpine:init', () => {
       else el.textContent += text;
       this.syncRich(el, b);
     },
+    // — the toolbar: one, fixed at the top of the content, acting on the block you last touched —
+    activeBlock(f) {
+      return this.blocksOf(f).find((b) => b._id === this.activeId) || null;
+    },
+    /** Text blocks that hold inline formatting (bold, colour…). */
+    richActive(f) {
+      const b = this.activeBlock(f);
+      return !!b && (b.type === 'paragraph' || b.type === 'callout') && !b._src;
+    },
+    styleOf(f) {
+      const b = this.activeBlock(f);
+      if (!b) return '';
+      return b.type === 'paragraph' ? 'p' : b.type === 'header' ? 'h' + b.data.level : '';
+    },
+    /** Paragraph ⇄ heading, in place, keeping the words. */
+    setStyle(f, v) {
+      const b = this.activeBlock(f);
+      if (!b || !v || (b.type !== 'paragraph' && b.type !== 'header')) return;
+      const keep = b.data.align ? { align: b.data.align } : {};
+      if (v === 'p') {
+        if (b.type === 'header') {
+          b.data = { text: escHtml(b.data.text), ...keep };
+          b.type = 'paragraph';
+        }
+        return;
+      }
+      const level = Number(v.slice(1));
+      if (b.type === 'paragraph') {
+        b.data = { text: htmlText(b.data.text), level, ...keep };
+        b.type = 'header';
+      } else b.data.level = level;
+    },
+    setAlign(f, a) {
+      const b = this.activeBlock(f);
+      if (!b || !['paragraph', 'header', 'quote'].includes(b.type)) return;
+      b.data.align = b.data.align === a ? undefined : a;
+    },
+    toggleSource(f) {
+      const b = this.activeBlock(f);
+      if (b && (b.type === 'paragraph' || b.type === 'callout')) b._src = !b._src;
+    },
+    /** A toolbar control takes focus away from the text, so the selection is kept as it moves. */
+    rememberSelection() {
+      const sel = window.getSelection?.();
+      if (!sel || !sel.rangeCount) return;
+      const node = sel.anchorNode?.nodeType === 1 ? sel.anchorNode : sel.anchorNode?.parentElement;
+      if (node?.closest?.('.rich')) this.range = sel.getRangeAt(0).cloneRange();
+    },
+    exec(cmd, value) {
+      if (typeof document.execCommand !== 'function' || !this.range) return;
+      const sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(this.range);
+      document.execCommand(cmd, false, value);
+      this.rememberSelection();
+    },
     format(cmd) {
-      if (typeof document.execCommand === 'function') document.execCommand(cmd);
+      this.exec(cmd);
+    },
+    colour(v) {
+      this.exec('foreColor', v);
+    },
+    size(v) {
+      if (v) this.exec('fontSize', v);
     },
     link() {
-      const url = window.prompt('Link address (https://…, mailto:, tel:)');
+      const url = window.prompt('Link address (https://…, mailto:, tel:, or /page for this site)');
       if (!url) return;
       if (!/^(https?:\/\/|mailto:|tel:|\/(?!\/)|#|\?)/i.test(url.trim()))
         return toast(
           'Use https://, mailto: or tel:, or a page on this site such as /about or #section.',
           'error',
         );
-      if (typeof document.execCommand === 'function')
-        document.execCommand('createLink', false, url.trim());
+      this.exec('createLink', url.trim());
+    },
+    // — images dropped straight into the content —
+    isFileDrag(e) {
+      return !!e.dataTransfer?.types && [...e.dataTransfer.types].includes('Files');
+    },
+    async dropFiles(e, f) {
+      this.dragging = false;
+      const files = [...(e.dataTransfer?.files || [])];
+      if (!files.length) return;
+      const images = files.filter((x) => /^image\//.test(x.type));
+      if (images.length < files.length)
+        toast('Only images can be dropped here. Add other files with a Download block.', 'error');
+      const list = this.blocksOf(f);
+      let at = list.findIndex((b) => b._id === this.activeId);
+      at = at < 0 ? list.length : at + 1;
+      for (const file of images) {
+        this.uploading++;
+        try {
+          const { item } = await api(
+            'POST',
+            `/admin/media?name=${encodeURIComponent(file.name)}`,
+            file,
+          );
+          this.media[item.id] = item;
+          const b = {
+            _id: uid(),
+            _src: false,
+            type: 'image',
+            data: { mediaId: item.id, caption: '', alt: item.alt || '' },
+          };
+          list.splice(at++, 0, b);
+          this.activeId = b._id;
+        } catch (err) {
+          toast(`${file.name}: ${err.message}`, 'error');
+        } finally {
+          this.uploading--;
+        }
+      }
+    },
+    sizeHint(m) {
+      if (!m || !m.size) return '';
+      return m.size > 512_000
+        ? `${bytes(m.size)} — large. Smaller images load faster; compress it in the Media library.`
+        : `${bytes(m.size)} — a good size.`;
+    },
+    needsAlt(b) {
+      const m = this.media[b.data.mediaId];
+      return !!b.data.mediaId && !b.data.alt && !(m && m.alt);
+    },
+    embedOk(url) {
+      return /^https:\/\/((www\.|m\.)?youtube\.com\/(watch\?|embed\/)|youtu\.be\/|(player\.)?vimeo\.com\/)/i.test(
+        String(url || '').trim(),
+      );
+    },
+    // — a table block —
+    addRow(b) {
+      b.data.rows.push(new Array(b.data.rows[0]?.length || 2).fill(''));
+    },
+    addCol(b) {
+      if ((b.data.rows[0]?.length || 0) < 12) b.data.rows.forEach((r) => r.push(''));
+    },
+    removeRow(b, i) {
+      if (b.data.rows.length > 1) b.data.rows.splice(i, 1);
+    },
+    removeCol(b) {
+      if ((b.data.rows[0]?.length || 0) > 1) b.data.rows.forEach((r) => r.pop());
+    },
+    async pickBlockFile(b) {
+      const item = await new Promise((resolve) =>
+        window.dispatchEvent(new CustomEvent('pick-media', { detail: { resolve } })),
+      );
+      if (!item) return;
+      this.media[item.id] = item;
+      b.data.mediaId = item.id;
+      if (!b.data.label) b.data.label = item.filename.replace(/\.[^.]+$/, '');
     },
     async pickBlockImage(b) {
       const item = await new Promise((resolve) =>
@@ -2152,12 +2470,140 @@ document.addEventListener('alpine:init', () => {
       if (this.form.slug) body.slug = this.form.slug;
       if (this.type.hierarchical) body.parentId = this.form.parentId || null;
       if (this.entry) body.version = this.entry.version;
+      if (this.type.can?.others && this.form.authorId) body.authorId = Number(this.form.authorId);
+      if (this.form.status === 'published' || this.form.status === 'scheduled')
+        body.unpublishAt = this.form.unpublishAt ? new Date(this.form.unpublishAt).getTime() : null;
+      if (this.addressChanged) body.redirect = this.redirectOld;
       return body;
     },
+    /** A live entry whose address is changing: its old address would stop working. */
+    get addressChanged() {
+      const e = this.entry;
+      if (!e || e.status !== 'published') return false;
+      const slug = this.form.slug && this.form.slug !== e.slug;
+      const moved = this.type.hierarchical && (this.form.parentId || null) !== (e.parentId ?? null);
+      return !!(slug || moved);
+    },
+    // — counters and the suggested description —
+    textLen(f) {
+      const v = this.form.data[f.key];
+      return typeof v === 'string' ? v.length : 0;
+    },
+    counterText(f) {
+      const n = this.textLen(f);
+      const max = f.max || 500;
+      const hint =
+        f.key === 'seo_description' && n
+          ? n < 120
+            ? ' · a little short'
+            : n > 160
+              ? ' · search results cut it off'
+              : ' · good length'
+          : f.key === 'seo_title' && n > 60
+            ? ' · search results cut it off'
+            : '';
+      return `${n} / ${max}${hint}`;
+    },
+    counterClass(f) {
+      const n = this.textLen(f);
+      if (f.key === 'seo_description' && n)
+        return n < 120 || n > 160 ? 'text-warning' : 'text-success';
+      if (f.key === 'seo_title' && n) return n > 60 ? 'text-warning' : 'text-success';
+      return n >= (f.max || 500) * 0.95 ? 'text-warning' : 'muted';
+    },
+    wordCount(f) {
+      const words = this.blocksOf(f)
+        .map((b) => blockPlain(b).join(' '))
+        .join(' ')
+        .split(/\s+/)
+        .filter(Boolean).length;
+      return `${words} word${words === 1 ? '' : 's'}`;
+    },
+    /** What search engines show when the description is left empty: the summary, else the start of the text. */
+    get suggested() {
+      const d = this.form.data;
+      let text = (d.excerpt || '').trim();
+      if (!text)
+        for (const f of this.type.fields)
+          if (f.type === 'blocks')
+            text +=
+              ' ' +
+              this.blocksOf(f)
+                .filter((b) => b.type === 'paragraph')
+                .map((b) => htmlText(b.data.text))
+                .join(' ');
+      text = text.replace(/\s+/g, ' ').trim();
+      return text.length <= 155 ? text : text.slice(0, 154).replace(/\s+\S*$/, '') + '…';
+    },
+    // — the pre-publish checklist —
+    async runChecks() {
+      if (this.checksBusy) return;
+      this.checksBusy = true;
+      try {
+        const p = this.payload();
+        this.checks = (
+          await api('POST', `/admin/content/types/${this.typeId}/checks`, {
+            title: p.title,
+            slug: this.form.slug || undefined,
+            data: p.data,
+            entryId: this.entry?.id,
+          })
+        ).checks;
+      } catch (e) {
+        this.checks = [{ id: 'failed', level: 'error', message: e.message, fix: 'Try again.' }];
+      } finally {
+        this.checksBusy = false;
+      }
+    },
+    // — autosave: drafts only —
+    scheduleAutosave() {
+      clearTimeout(this.autosaveTimer);
+      this.autosaveTimer = setTimeout(() => this.autosave(), this.autosaveMs);
+    },
+    get canAutosave() {
+      return (
+        !!this.type.can?.write &&
+        this.form.status === 'draft' &&
+        (!this.entry || this.entry.status === 'draft')
+      );
+    },
+    async autosave() {
+      if (!this.dirty || this.busy || !this.canAutosave || !this.form.title.trim()) return;
+      const seq = this.changeSeq;
+      this.saveState = 'saving';
+      try {
+        if (!this.entry) {
+          const { entry } = await api(
+            'POST',
+            `/admin/content/types/${this.typeId}/entries`,
+            this.payload(),
+          );
+          this.entry = entry;
+          this.isNew = false;
+          this.id = String(entry.id);
+          // The address now names the entry, without the screen reloading under the writer's cursor.
+          history.replaceState(null, '', `#/content/${this.typeId}/${entry.id}`);
+        } else {
+          const { entry } = await api('PUT', `/admin/content/entries/${this.id}`, {
+            ...this.payload(),
+            autosave: true,
+          });
+          this.entry = { ...this.entry, version: entry.version, updatedAt: entry.updatedAt };
+        }
+        if (seq === this.changeSeq) this.dirty = false;
+        this.saveState = 'saved';
+        this.saveNote = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      } catch (e) {
+        this.saveState = 'error';
+        this.saveNote = e.message;
+      }
+    },
     async save() {
+      clearTimeout(this.autosaveTimer);
       this.busy = true;
       this.error = '';
       this.errors = {};
+      this.saveState = 'saving';
       try {
         if (this.isNew) {
           const { entry } = await api(
@@ -2170,11 +2616,19 @@ document.addEventListener('alpine:init', () => {
           location.hash = `#/content/${this.typeId}/${entry.id}`;
           return;
         }
-        const { entry } = await api('PUT', `/admin/content/entries/${this.id}`, this.payload());
-        this.fill(entry);
+        const r = await api('PUT', `/admin/content/entries/${this.id}`, this.payload());
+        this.fill(r.entry);
         this.$nextTick(() => (this.dirty = false));
-        toast('Saved.');
+        this.saveState = 'saved';
+        this.saveNote = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        if (r.redirect && !r.redirect.error)
+          toast(`Saved. ${r.redirect.from} now redirects to ${r.redirect.to}.`);
+        else if (r.redirect)
+          toast(`Saved. The old address was not redirected: ${r.redirect.error}`, 'error');
+        else toast('Saved.');
       } catch (e) {
+        this.saveState = 'error';
+        this.saveNote = e.message;
         if (e.field) this.errors[e.field] = e.message;
         this.error = e.message;
       } finally {
@@ -2227,6 +2681,44 @@ document.addEventListener('alpine:init', () => {
       } catch (e) {
         this.error = e.message;
       }
+    },
+    // — side-by-side compare of two versions —
+    async compare(r) {
+      this.cmp = { open: true, a: String(r.id), b: 'current', rows: [], busy: false, error: '' };
+      await this.runCompare();
+    },
+    async runCompare() {
+      this.cmp.busy = true;
+      this.cmp.error = '';
+      try {
+        const load = async (id) =>
+          id === 'current'
+            ? { title: this.entry.title, data: this.entry.data }
+            : (await api('GET', `/admin/content/entries/${this.id}/revisions/${id}`)).revision;
+        const [a, b] = await Promise.all([load(this.cmp.a), load(this.cmp.b)]);
+        this.cmp.rows = diffRows(this.docLines(a), this.docLines(b));
+      } catch (e) {
+        this.cmp.error = e.message;
+      } finally {
+        this.cmp.busy = false;
+      }
+    },
+    /** A version as lines of plain text, one per block row, for the diff. */
+    docLines(v) {
+      const out = [`Title: ${v.title}`];
+      for (const f of this.type.fields) {
+        const val = v.data?.[f.key];
+        if (f.type === 'blocks')
+          for (const b of val?.blocks || []) out.push(...blockPlain(b, true));
+        else if (f.type === 'list') {
+          if (val?.length) out.push(`${f.label}: ${val.join(', ')}`);
+        } else if (val !== undefined && val !== null && val !== '' && val !== false)
+          out.push(`${f.label}: ${val}`);
+      }
+      return out;
+    },
+    closeCompare() {
+      this.cmp.open = false;
     },
   }));
 

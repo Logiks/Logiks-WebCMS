@@ -197,6 +197,14 @@ export function defineCoreContent(registry) {
     featured_image: { type: 'media', label: 'Featured image' },
     noindex: { type: 'boolean', label: 'Hide from search engines' },
   };
+  const schemaChoice = (options) => ({
+    schema_type: {
+      type: 'select',
+      label: 'Structured data type',
+      help: 'What search engines are told this is (schema.org). NewsArticle suits news; BlogPosting suits a blog.',
+      options: options.map((o) => ({ value: o, label: o })),
+    },
+  });
   registry.defineType('page', {
     // "Content pages", not "Pages": Webmaster → Site pages are a different thing (template files for developers).
     label: 'Content page',
@@ -214,6 +222,7 @@ export function defineCoreContent(registry) {
         help: 'Optional. A theme template name, for a page that needs its own layout.',
       },
       ...seo,
+      ...schemaChoice(['WebPage', 'AboutPage', 'ContactPage']),
     },
   });
   registry.defineType('post', {
@@ -226,6 +235,7 @@ export function defineCoreContent(registry) {
       body: { type: 'blocks', label: 'Content' },
       excerpt: { type: 'text', label: 'Summary', max: 500 },
       ...seo,
+      ...schemaChoice(['BlogPosting', 'Article', 'NewsArticle']),
     },
   });
 }

@@ -320,6 +320,10 @@ export async function createContext({ env, bus: busOverride, log: logOverride, a
     await content.publishDue();
   });
   jobs.schedule('content.publish_due', { everyMs: 60_000 });
+  jobs.define('content.unpublish_due', async () => {
+    await content.unpublishDue();
+  });
+  jobs.schedule('content.unpublish_due', { everyMs: 60_000 });
 
   state.ready = true;
 

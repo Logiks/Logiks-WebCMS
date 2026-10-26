@@ -95,6 +95,20 @@ Demo: marketing site on a 3-node cluster, theme switched live, a page edit visib
 
 Phase 2 dependencies already in place: settings registry, permissions, audit, queue, mailer, cache, cluster nodes view.
 
+### M2.7 Content-editor gaps (built 2026-10-26, D-124; tested on SQLite + jsdom, not yet in a real browser; from Ashwini/Omkar feedback, tracked in `feature_request.md`)
+
+The editor, revisions, SEO fields and scheduling exist; these are the 15 named gaps, grouped so each package ships and tests on its own. Order = value for writers first. Each package: code + tests (SQLite first, then MySQL/PostgreSQL) + docs; nothing is marked done until verified in a browser.
+
+| Package                            | Closes (feature_request.md item)                                                                                                                                                                                                                                                              | Exit criteria                                                                                                            |
+| ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| **A. Save feedback**               | Autosave draft + a "Saved" confirmation (Ashwini #1 / Omkar 7)                                                                                                                                                                                                                                | Reopen after autosave loses nothing; the status line shows saved / saving / failed; no revision spam                     |
+| **B. Pre-publish safety**          | Pre-publish checklist: meta description, featured image, broken links (#16) · warn on slug change of a published entry, offer a redirect (#15) · missing-alt warning and file-size guidance (#7) · live character counters (#3) · default meta description generated from content (Omkar 4/B) | Publishing shows each warning with how to fix it; slug change offers one-click redirect; counters on every limited field |
+| **C. Editor toolbar and blocks**   | Paragraph/heading style dropdown (#8) · tables, alignment, font size, text colour, fixed toolbar, source view (Omkar 1) · duplicate, table, callout, embed, download blocks (Omkar 2) · drag-and-drop images into content (#6)                                                                | New blocks are sanitised server-side (extend the M2.2 XSS corpus); round-trip save/reopen keeps formatting               |
+| **D. Authors and finding entries** | Author picker on the edit page (#11) · category, author and date filters on the entry list (#12)                                                                                                                                                                                              | Author shown on the page and in schema matches the pick; filters combine and survive paging                              |
+| **E. Schema and lifecycle**        | NewsArticle / per-content-type schema choice (#14) · automatic unpublishing (Omkar C) · side-by-side revision compare (Omkar C)                                                                                                                                                               | Chosen schema validates in the Testing module; an entry unpublishes on time from any node; diff shows two revisions      |
+
+Notes: A and B touch `content/service.js` and the entry edit screen; unpublish (E) needs a migration (additive) and a queue job like scheduled publish. Anything in High/Low Priority of `feature_request.md` (paste from Word, TOC, source editing…) stays outside this milestone unless pulled in.
+
 ## 6. Phase 3 — eCommerce (planned, D-088..D-100)
 
 **Outcome:** a business customer or consumer can browse a large catalog, download specifications, request a quote or buy and pay, and the merchant can fulfil, invoice and report — with correct Indian GST. Scale target: **100k SKUs, 100k+ orders/day**.
@@ -241,6 +255,7 @@ additive, admin copy reviewed, `CLAUDE.md` "Where we are" updated.
 
 ## Change log
 
+- 2026-10-26 — M2.7 Content-editor gaps (packages A–E) planned and then built, D-124: all 15 Partial items in `feature_request.md`. SQLite + jsdom only; not run on MySQL/PostgreSQL or in a real browser.
 - 2026-10-20 — Phase 3 eCommerce re-planned (D-088..D-100): independent catalog, 100k SKU / 100k orders-per-day target, request-a-quote, pluggable storage/search/gateways + COD, B2B price lists, data-ready multi-vendor. Payouts and commission are the next phase. Planning only; no code.
 - 2026-10-06 — Plugin Editor's Files panel is no longer read-only (D-066): a file can be viewed and edited by hand, through the same validation the AI's own write_file/delete_file tools use, in a Theme-editor-style file browser + code editor.
 - 2026-10-06 — Webmaster → AI Page Designer built (D-065): a chat session plans a complete new page, picks or proposes components (owner approves anything new), generates raster/SVG images straight into the media library, and lays the page out, reusing the Pages builder's save path, Media Generator's image pipeline and Services/Database's table creation. SVG upload support added to the media library as part of this (sanitized, allow-listed).

@@ -48,6 +48,7 @@ export function createContentService({ db, dialect, audit, cache, settings, regi
     authorId: r.author_id == null ? null : Number(r.author_id),
     author: r.author_name ?? r.author_email ?? undefined,
     publishAt: r.publish_at == null ? null : Number(r.publish_at),
+    unpublishAt: r.unpublish_at == null ? null : Number(r.unpublish_at),
     publishedAt: r.published_at == null ? null : Number(r.published_at),
     version: Number(r.version),
     createdAt: Number(r.created_at),
@@ -249,7 +250,12 @@ export function createContentService({ db, dialect, audit, cache, settings, regi
           : 'You can save drafts, but publishing needs the “Publish” permission for this type.',
       );
     const t = now();
-    const r = { status: want, publish_at: null, published_at: prev?.published_at ?? null };
+    const r = {
+      status: want,
+      publish_at: null,
+      unpublish_at: null,
+      published_at: prev?.published_at ?? null,
+    };
     if (want === 'scheduled') {
       const at = Number(input.publishAt ?? prev?.publish_at);
       if (!at || at <= t)
@@ -259,6 +265,28 @@ export function createContentService({ db, dialect, audit, cache, settings, regi
       r.publish_at = at;
     }
     if (want === 'published' && prev?.status !== 'published') r.published_at = t;
+    // Automatic unpublishing only makes sense for something that is, or will be, live.
+    if (want === 'published' || want === 'scheduled') {
+      const raw = input.unpublishAt === undefined ? prev?.unpublish_at : input.unpublishAt;
+      const off = raw ? Number(raw) : null;
+      if (off) {
+        if (off <= t)
+          throw new HttpError(
+            422,
+            'invalid_unpublish_at',
+            'Pick a time in the future to take it offline.',
+            { field: 'unpublishAt' },
+          );
+        if (r.publish_at && off <= r.publish_at)
+          throw new HttpError(
+            422,
+            'invalid_unpublish_at',
+            'It must come off after it goes live. Pick a later time.',
+            { field: 'unpublishAt' },
+          );
+        r.unpublish_at = off;
+      }
+    }
     return r;
   }
 
@@ -280,7 +308,46 @@ export function createContentService({ db, dialect, audit, cache, settings, regi
       await trx('entry_terms').insert(ids.map((t) => ({ entry_id: entryId, term_id: t })));
   }
 
-  async function snapshot(trx, row, actor, note = null) {
+  /**
+   * Who an entry is attributed to. Anyone may leave it as it is; choosing someone else needs the same permission as
+   * editing other people's work, because it hands the piece to another person's name.
+   */
+  function authorId(actor, typeId, requested, current) {
+    if (requested === undefined || requested === null || Number(requested) === current)
+      return current;
+    if (!Number.isInteger(Number(requested)) || Number(requested) <= 0)
+      throw new HttpError(422, 'invalid_input', 'Choose an author from the list.', {
+        field: 'authorId',
+      });
+    if (!can(actor, typeId, 'others'))
+      throw forbidden(
+        'Changing the author needs the “Edit other people’s” permission for this type.',
+      );
+    return Number(requested);
+  }
+
+  /**
+   * An autosave replaces the previous autosave by the same person instead of adding a revision every few seconds, so
+   * history stays a list of things somebody chose to save.
+   */
+  async function snapshot(trx, row, actor, note = null, { coalesce = false } = {}) {
+    if (coalesce) {
+      const last = await trx('entry_revisions')
+        .where({ entry_id: row.id })
+        .orderBy('id', 'desc')
+        .first();
+      if (last && last.note === 'Autosave' && (last.saved_by ?? null) === (actor?.id ?? null)) {
+        await trx('entry_revisions').where({ id: last.id }).update({
+          version: row.version,
+          title: row.title,
+          slug: row.slug,
+          status: row.status,
+          data: row.data,
+          created_at: now(),
+        });
+        return;
+      }
+    }
     await trx('entry_revisions').insert({
       entry_id: row.id,
       version: row.version,
@@ -331,7 +398,18 @@ export function createContentService({ db, dialect, audit, cache, settings, regi
 
     // ───────── reading (admin) ─────────
     async list(typeId, /** @type {any} */ opts = {}, actor = null) {
-      const { status, q, parentId, termId, locale: loc, limit = 50, offset = 0 } = opts;
+      const {
+        status,
+        q,
+        parentId,
+        termId,
+        authorId: by,
+        from,
+        to,
+        locale: loc,
+        limit = 50,
+        offset = 0,
+      } = opts;
       const type = registry.type(typeId);
       need(actor, typeId, 'read');
       const build = () => {
@@ -350,6 +428,10 @@ export function createContentService({ db, dialect, audit, cache, settings, regi
               .where({ term_id: Number(termId) })
               .select('entry_id'),
           );
+        if (by) b.where('e.author_id', Number(by) || 0);
+        // Dates are when it was last changed, as epoch milliseconds (the admin sends the start of the first day and the end of the last).
+        if (from && Number(from)) b.where('e.updated_at', '>=', Number(from));
+        if (to && Number(to)) b.where('e.updated_at', '<=', Number(to));
         if (loc) b.where('e.locale', loc);
         return b;
       };
@@ -417,6 +499,16 @@ export function createContentService({ db, dialect, audit, cache, settings, regi
         throw new HttpError(422, 'invalid_input', 'The title can be 255 characters at most.', {
           field: 'title',
         });
+      if (
+        input.authorId !== undefined &&
+        input.authorId !== null &&
+        !(await db('users')
+          .where({ id: Number(input.authorId) || 0 })
+          .first())
+      )
+        throw new HttpError(422, 'invalid_input', 'Choose an author from the list.', {
+          field: 'authorId',
+        });
       const data = registry.cleanData(typeId, input.data);
       const loc = locale(input);
       const st = resolveStatus(actor, type, null, input);
@@ -458,8 +550,9 @@ export function createContentService({ db, dialect, audit, cache, settings, regi
           parent_id: parentId,
           position: Number(input.position) || 0,
           data: JSON.stringify(data),
-          author_id: actor?.id ?? null,
+          author_id: authorId(actor, typeId, input.authorId, actor?.id ?? null),
           publish_at: st.publish_at,
+          unpublish_at: st.unpublish_at,
           published_at: st.published_at,
           version: 1,
           created_at: ts,
@@ -504,6 +597,13 @@ export function createContentService({ db, dialect, audit, cache, settings, regi
           'Someone saved this while you were editing. Reload to see their changes, then apply yours again.',
           { currentVersion: before.version },
         );
+      const autosave = !!input.autosave;
+      if (autosave && (before.status !== 'draft' || (input.status && input.status !== 'draft')))
+        throw new HttpError(
+          409,
+          'autosave_draft_only',
+          'Autosave only works on drafts. Save to change something that is live.',
+        );
       if (actor && before.status !== 'draft' && !can(actor, before.type, 'publish'))
         throw forbidden(
           'This is already live. Ask someone who can publish to change it, or to move it back to draft first.',
@@ -521,9 +621,19 @@ export function createContentService({ db, dialect, audit, cache, settings, regi
       const st = resolveStatus(
         actor,
         type,
-        { status: before.status, publish_at: before.publishAt, published_at: before.publishedAt },
+        {
+          status: before.status,
+          publish_at: before.publishAt,
+          unpublish_at: before.unpublishAt,
+          published_at: before.publishedAt,
+        },
         input,
       );
+      const author = authorId(actor, before.type, input.authorId, before.authorId);
+      if (author !== before.authorId && !(await db('users').where({ id: author }).first()))
+        throw new HttpError(422, 'invalid_input', 'That author no longer exists.', {
+          field: 'authorId',
+        });
       const ts = now();
 
       await db.transaction(async (trx) => {
@@ -562,7 +672,9 @@ export function createContentService({ db, dialect, audit, cache, settings, regi
           parent_id: parentId,
           status: st.status,
           publish_at: st.publish_at,
+          unpublish_at: st.unpublish_at,
           published_at: st.published_at,
+          author_id: author,
           data: JSON.stringify(data),
           version,
           updated_at: ts,
@@ -575,8 +687,10 @@ export function createContentService({ db, dialect, audit, cache, settings, regi
           trx,
           { id: row.id, version, title, slug, status: st.status, data: next.data },
           actor,
-          input.note ?? null,
+          autosave ? 'Autosave' : (input.note ?? null),
+          { coalesce: autosave },
         );
+        if (autosave) return; // not an event worth an audit line every few seconds
         const action =
           st.status !== before.status
             ? `content.${st.status === 'published' ? 'publish' : st.status === 'draft' ? 'unpublish' : st.status === 'scheduled' ? 'schedule' : 'archive'}`
@@ -661,6 +775,35 @@ export function createContentService({ db, dialect, audit, cache, settings, regi
       }));
     },
 
+    /** One revision with its fields, for the side-by-side compare. */
+    async revision(id, revisionId, actor = null) {
+      const e = await svc.get(id, actor);
+      const rev = await db('entry_revisions as r')
+        .leftJoin('users as u', 'u.id', 'r.saved_by')
+        .where({ 'r.id': Number(revisionId), 'r.entry_id': e.id })
+        .select('r.*', 'u.name as by')
+        .first();
+      if (!rev) throw notFound('Revision');
+      return {
+        id: Number(rev.id),
+        version: Number(rev.version),
+        title: rev.title,
+        slug: rev.slug,
+        status: rev.status,
+        note: rev.note,
+        by: rev.by,
+        at: Number(rev.created_at),
+        data: parseData(rev.data),
+      };
+    },
+
+    /** The people an entry can be attributed to: everyone who can sign in. Names only, so editors don't get an address book. */
+    async authors() {
+      return (
+        await db('users').where({ status: 'active' }).orderBy('name').select('id', 'name')
+      ).map((u) => ({ id: Number(u.id), name: u.name }));
+    },
+
     /** Copy a revision's title and fields onto the entry as a new revision. Status and address are left alone. */
     async restore(id, revisionId, actor = null) {
       const e = await svc.get(id);
@@ -703,6 +846,41 @@ export function createContentService({ db, dialect, audit, cache, settings, regi
           meta: { title: entry.title, scheduled: true },
         });
         await emit({ type: 'save', entry, before: { ...entry, status: 'scheduled' } });
+        n++;
+      }
+      return n;
+    },
+
+    /** Take down everything whose time has come. Claimed by status, like publishDue, so several nodes can run it. */
+    async unpublishDue() {
+      const due = await db('entries')
+        .whereIn('status', ['published', 'scheduled'])
+        .whereNotNull('unpublish_at')
+        .where('unpublish_at', '<=', now())
+        .select('id', 'status');
+      let n = 0;
+      for (const { id, status } of due) {
+        const ts = now();
+        const claimed = await db('entries')
+          .where({ id, status })
+          .whereNotNull('unpublish_at')
+          .where('unpublish_at', '<=', ts)
+          .update({
+            status: 'draft',
+            unpublish_at: null,
+            publish_at: null,
+            updated_at: ts,
+            version: db.raw('version + 1'),
+          });
+        if (!claimed) continue;
+        const entry = await svc.get(id);
+        await audit.log({
+          action: 'content.unpublish',
+          entity: entry.type,
+          entityId: id,
+          meta: { title: entry.title, automatic: true },
+        });
+        await emit({ type: 'save', entry, before: { ...entry, status } });
         n++;
       }
       return n;

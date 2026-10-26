@@ -920,6 +920,7 @@ export function createMediaService({
           mime: m.mime,
           kind: m.kind,
           filename: m.filename,
+          size: m.size,
           ...(m.kind === 'video'
             ? {
                 poster: poster ? `/media/${m.id}/${poster.file}` : '',

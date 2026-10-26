@@ -9,6 +9,7 @@ const KEBAB = {
   connectSrc: 'connect-src',
   objectSrc: 'object-src',
   workerSrc: 'worker-src',
+  frameSrc: 'frame-src',
   baseUri: 'base-uri',
   formAction: 'form-action',
   frameAncestors: 'frame-ancestors',
@@ -45,6 +46,8 @@ function directives(v, { https, nonce }) {
     formAction: ["'self'", ...x(v.csp_form_actions)],
     // Monaco (the page editor, D-105) starts its language workers from blob: URLs that wrap our own same-origin files.
     workerSrc: ["'self'", 'blob:'],
+    // The embed block (content/blocks.js) only ever produces these two players.
+    frameSrc: ["'self'", 'https://www.youtube-nocookie.com', 'https://player.vimeo.com'],
     frameAncestors: ["'none'"],
     ...(https ? { upgradeInsecureRequests: [] } : {}),
   };

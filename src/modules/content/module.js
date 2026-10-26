@@ -10,7 +10,7 @@ export default {
     permissions: ['content.terms.manage', 'content.activity'],
     settings: ['content'],
     events: ['content.published', 'content.updated', 'content.deleted'],
-    jobs: ['content.publish_due'],
+    jobs: ['content.publish_due', 'content.unpublish_due'],
     api: [
       {
         id: 'content.types',

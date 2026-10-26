@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { HttpError, forbidden, parse } from '../../core/http/errors.js';
 import { docs } from '../../core/http/docs.js';
 import { actorOf } from '../../core/http/middleware.js';
+import { runChecks } from './checks.js';
 
 const entryBody = z.object({
   title: z.string().optional(),
@@ -17,6 +18,18 @@ const entryBody = z.object({
   locale: z.string().optional(),
   translationOf: z.number().int().optional(),
   note: z.string().max(255).optional(),
+  authorId: z.number().int().positive().nullable().optional(),
+  unpublishAt: z.number().int().nullable().optional(),
+  // Autosave: a draft is kept as the editor goes along, without a revision or an audit line each time.
+  autosave: z.boolean().optional(),
+  // The address of a live entry is changing: also redirect the old one to the new one.
+  redirect: z.boolean().optional(),
+});
+const checksBody = z.object({
+  title: z.string().optional(),
+  slug: z.string().nullable().optional(),
+  data: z.record(z.string(), z.any()).optional(),
+  entryId: z.number().int().optional(),
 });
 const termBody = z.object({
   name: z.string().optional(),
@@ -81,11 +94,11 @@ export default function contentRoutes(ctx) {
   );
 
   r.get('/content/types/:type/entries', async (req, res) => {
-    const { status, q, parentId, termId, locale, limit, offset } = req.query;
+    const { status, q, parentId, termId, authorId, from, to, locale, limit, offset } = req.query;
     res.json(
       await content.list(
         req.params.type,
-        { status, q, parentId, termId, locale, limit, offset },
+        { status, q, parentId, termId, authorId, from, to, locale, limit, offset },
         actorOf(req),
       ),
     );
@@ -98,9 +111,25 @@ export default function contentRoutes(ctx) {
     res.json({ entry: await content.get(req.params.id, actorOf(req)) });
   });
   r.put('/content/entries/:id', docs({ body: entryBody }), async (req, res) => {
-    res.json({
-      entry: await content.update(req.params.id, parse(entryBody, req.body), actorOf(req)),
-    });
+    const body = parse(entryBody, req.body);
+    const before = body.redirect ? await content.get(req.params.id, actorOf(req)) : null;
+    const entry = await content.update(req.params.id, body, actorOf(req));
+    // Leaving the old address of a live page behind breaks every link to it, so offer to redirect it. The save has
+    // already succeeded; a redirect that can't be made (one exists already) is reported, not fatal.
+    let redirect = null;
+    if (before?.status === 'published') {
+      const from = ctx.site.urls.entry(before);
+      const to = ctx.site.urls.entry(entry);
+      if (from && to && from !== to) {
+        try {
+          await ctx.site.redirects.create({ from, to, status: 301 }, actorOf(req));
+          redirect = { from, to };
+        } catch (e) {
+          redirect = { from, to, error: e.message };
+        }
+      }
+    }
+    res.json({ entry, redirect });
   });
   r.delete('/content/entries/:id', async (req, res) => {
     await content.remove(req.params.id, actorOf(req));
@@ -109,6 +138,9 @@ export default function contentRoutes(ctx) {
   r.get('/content/entries/:id/revisions', async (req, res) => {
     res.json({ revisions: await content.revisions(req.params.id, actorOf(req)) });
   });
+  r.get('/content/entries/:id/revisions/:rid', async (req, res) => {
+    res.json({ revision: await content.revision(req.params.id, req.params.rid, actorOf(req)) });
+  });
   r.post(
     '/content/entries/:id/revisions/:rid/restore',
     docs({ noBody: true }),
@@ -116,6 +148,16 @@ export default function contentRoutes(ctx) {
       res.json({ entry: await content.restore(req.params.id, req.params.rid, actorOf(req)) });
     },
   );
+
+  r.get('/content/authors', async (_req, res) => {
+    res.json({ authors: await content.authors() });
+  });
+  r.post('/content/types/:type/checks', docs({ body: checksBody }), async (req, res) => {
+    if (!req.user.can(`content.${req.params.type}.write`))
+      throw forbidden("You can't edit this kind of content.");
+    const b = parse(checksBody, req.body);
+    res.json(await runChecks(ctx, req.params.type, b, b.entryId ?? null));
+  });
 
   r.get('/content/taxonomies/:tax/terms', async (req, res) => {
     res.json({ terms: await content.terms(req.params.tax) });

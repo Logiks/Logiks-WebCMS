@@ -16,14 +16,53 @@ import { HttpError } from '../../core/http/errors.js';
 export const MAX_BLOCKS = 1000;
 const MAX_JSON_BYTES = 900_000;
 
+const FONT_EM = {
+  1: '0.875em',
+  2: '0.875em',
+  3: '1em',
+  4: '1.25em',
+  5: '1.5em',
+  6: '2em',
+  7: '2em',
+};
+
 /** @type {import('sanitize-html').IOptions} */
 const INLINE = {
-  allowedTags: ['b', 'i', 'u', 's', 'em', 'strong', 'code', 'mark', 'a', 'br', 'sup', 'sub'],
-  allowedAttributes: { a: ['href', 'rel'] },
+  allowedTags: [
+    'b',
+    'i',
+    'u',
+    's',
+    'em',
+    'strong',
+    'code',
+    'mark',
+    'a',
+    'br',
+    'sup',
+    'sub',
+    'span',
+  ],
+  allowedAttributes: { a: ['href', 'rel'], span: ['style'] },
+  // Text colour and size are the only styles a span may carry, and only values we can vouch for (no url(), no expression()).
+  allowedStyles: {
+    span: {
+      color: [/^#[0-9a-f]{3,8}$/i, /^rgb\(\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*\d{1,3}\s*\)$/i],
+      'font-size': [/^(0\.875|1|1\.25|1\.5|2)em$/],
+    },
+  },
   allowedSchemes: ['http', 'https', 'mailto', 'tel'],
   allowProtocolRelative: false,
   disallowedTagsMode: 'discard',
   transformTags: {
+    // execCommand('foreColor' / 'fontSize') writes <font color size>; it becomes the span a style may live on.
+    font: (_tag, attribs) => {
+      const style = [];
+      if (attribs.color) style.push(`color:${attribs.color}`);
+      const em = FONT_EM[attribs.size];
+      if (em) style.push(`font-size:${em}`);
+      return { tagName: 'span', attribs: style.length ? { style: style.join(';') } : {} };
+    },
     // External links get the SEO-safe rel; internal ones (/page, #anchor, ?q) are our own pages and stay plain.
     a: (_tag, attribs) => {
       const href = attribs.href ?? '';
@@ -56,14 +95,21 @@ const plain = (s) =>
     .trim();
 
 const text = (max) => z.string().max(max).default('');
+const ALIGNS = ['left', 'center', 'right', 'justify'];
+const align = z.enum(ALIGNS).optional().catch(undefined);
+const CALLOUTS = ['info', 'success', 'warning', 'danger'];
 const SCHEMAS = {
-  paragraph: z.object({ text: text(20000) }),
-  header: z.object({ text: text(500), level: z.coerce.number().int().min(1).max(6).default(2) }),
+  paragraph: z.object({ text: text(20000), align }),
+  header: z.object({
+    text: text(500),
+    level: z.coerce.number().int().min(1).max(6).default(2),
+    align,
+  }),
   list: z.object({
     style: z.enum(['ordered', 'unordered']).default('unordered'),
     items: z.array(z.string().max(2000)).max(200).default([]),
   }),
-  quote: z.object({ text: text(5000), caption: text(500) }),
+  quote: z.object({ text: text(5000), caption: text(500), align }),
   code: z.object({ code: text(50000) }),
   delimiter: z.object({}),
   image: z.object({
@@ -71,7 +117,43 @@ const SCHEMAS = {
     caption: text(500),
     alt: text(500),
   }),
+  table: z.object({
+    header: z.boolean().default(true),
+    rows: z
+      .array(z.array(z.string().max(2000)).max(12))
+      .max(50)
+      .default([]),
+  }),
+  callout: z.object({ style: z.enum(CALLOUTS).default('info'), text: text(5000) }),
+  embed: z.object({ url: text(500), caption: text(500) }),
+  download: z.object({ mediaId: z.coerce.number().int().positive(), label: text(200) }),
 };
+
+/** Only these video hosts can be embedded; the page gets the provider's privacy-friendly player, never an arbitrary iframe. */
+export function embedSource(url) {
+  let u;
+  try {
+    u = new URL(String(url));
+  } catch {
+    return null;
+  }
+  if (u.protocol !== 'https:') return null;
+  const host = u.hostname.replace(/^www\./, '');
+  if (host === 'youtu.be') {
+    const id = u.pathname.slice(1);
+    return /^[\w-]{6,20}$/.test(id) ? `https://www.youtube-nocookie.com/embed/${id}` : null;
+  }
+  if (host === 'youtube.com' || host === 'm.youtube.com') {
+    const id = u.pathname.startsWith('/embed/') ? u.pathname.slice(7) : u.searchParams.get('v');
+    return id && /^[\w-]{6,20}$/.test(id) ? `https://www.youtube-nocookie.com/embed/${id}` : null;
+  }
+  if (host === 'vimeo.com' || host === 'player.vimeo.com') {
+    const id = u.pathname.split('/').filter(Boolean).pop();
+    return id && /^\d{4,12}$/.test(id) ? `https://player.vimeo.com/video/${id}` : null;
+  }
+  return null;
+}
+const withAlign = (data, a) => (a ? { ...data, align: a } : data);
 export const BLOCK_TYPES = Object.keys(SCHEMAS);
 
 /** @returns {{time: number, version: string, blocks: {type: string, data: any}[]}} */
@@ -99,17 +181,40 @@ export function sanitizeBlocks(input) {
     const d = r.data;
     switch (b.type) {
       case 'paragraph':
-        return { type: 'paragraph', data: { text: inline(d.text) } };
+        return { type: 'paragraph', data: withAlign({ text: inline(d.text) }, d.align) };
       case 'header':
-        return { type: 'header', data: { text: plain(d.text), level: d.level } };
+        return {
+          type: 'header',
+          data: withAlign({ text: plain(d.text), level: d.level }, d.align),
+        };
       case 'list':
         return { type: 'list', data: { style: d.style, items: d.items.map(inline) } };
       case 'quote':
-        return { type: 'quote', data: { text: inline(d.text), caption: plain(d.caption) } };
+        return {
+          type: 'quote',
+          data: withAlign({ text: inline(d.text), caption: plain(d.caption) }, d.align),
+        };
       case 'code':
         return { type: 'code', data: { code: d.code } };
       case 'delimiter':
         return { type: 'delimiter', data: {} };
+      case 'table':
+        return {
+          type: 'table',
+          data: { header: d.header, rows: d.rows.map((r) => r.map(inline)) },
+        };
+      case 'callout':
+        return { type: 'callout', data: { style: d.style, text: inline(d.text) } };
+      case 'embed':
+        if (d.url && !embedSource(d.url))
+          throw new HttpError(
+            422,
+            'invalid_input',
+            `Block ${i + 1}: only https YouTube and Vimeo links can be embedded. Use a link or a download block for anything else.`,
+          );
+        return { type: 'embed', data: { url: d.url.trim(), caption: plain(d.caption) } };
+      case 'download':
+        return { type: 'download', data: { mediaId: d.mediaId, label: plain(d.label) } };
       default:
         return {
           type: 'image',
@@ -132,7 +237,11 @@ function safeJson(s) {
 
 export function mediaIdsIn(doc) {
   return [
-    ...new Set((doc?.blocks ?? []).filter((b) => b.type === 'image').map((b) => b.data.mediaId)),
+    ...new Set(
+      (doc?.blocks ?? [])
+        .filter((b) => b.type === 'image' || b.type === 'download')
+        .map((b) => b.data.mediaId),
+    ),
   ];
 }
 
@@ -142,9 +251,13 @@ const esc = (s) =>
     (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c],
   );
 
+const alignAttr = (a) => (ALIGNS.includes(a) ? ` style="text-align:${a}"` : '');
+const fileSize = (n) =>
+  n >= 1_048_576 ? `${(n / 1_048_576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`;
+
 /**
  * @param {{blocks?: any[]}} doc  already sanitised
- * @param {{images?: Map<number, {src: string, srcset?: string, width?: number, height?: number, alt?: string}>}} [ctx]
+ * @param {{images?: Map<number, {src: string, srcset?: string, width?: number, height?: number, alt?: string, size?: number, filename?: string}>}} [ctx]
  */
 export function renderBlocks(doc, { images = new Map() } = {}) {
   const out = [];
@@ -153,11 +266,11 @@ export function renderBlocks(doc, { images = new Map() } = {}) {
     // Inline fields are sanitised again here: rendering must be safe even for documents that predate a rule change.
     switch (b.type) {
       case 'paragraph':
-        out.push(`<p>${inline(d.text)}</p>`);
+        out.push(`<p${alignAttr(d.align)}>${inline(d.text)}</p>`);
         break;
       case 'header': {
         const l = Math.min(6, Math.max(1, Number(d.level) || 2));
-        out.push(`<h${l}>${esc(d.text)}</h${l}>`);
+        out.push(`<h${l}${alignAttr(d.align)}>${esc(d.text)}</h${l}>`);
         break;
       }
       case 'list': {
@@ -169,7 +282,7 @@ export function renderBlocks(doc, { images = new Map() } = {}) {
       }
       case 'quote':
         out.push(
-          `<blockquote><p>${inline(d.text)}</p>${d.caption ? `<footer>${esc(d.caption)}</footer>` : ''}</blockquote>`,
+          `<blockquote${alignAttr(d.align)}><p>${inline(d.text)}</p>${d.caption ? `<footer>${esc(d.caption)}</footer>` : ''}</blockquote>`,
         );
         break;
       case 'code':
@@ -178,6 +291,40 @@ export function renderBlocks(doc, { images = new Map() } = {}) {
       case 'delimiter':
         out.push('<hr>');
         break;
+      case 'table': {
+        const rows = (d.rows ?? []).filter((r) => Array.isArray(r) && r.length);
+        if (!rows.length) break;
+        const cells = (r, tag) => r.map((c) => `<${tag}>${inline(c)}</${tag}>`).join('');
+        const [first, ...rest] = rows;
+        const head = d.header !== false ? `<thead><tr>${cells(first, 'th')}</tr></thead>` : '';
+        const body = (d.header !== false ? rest : rows).map((r) => `<tr>${cells(r, 'td')}</tr>`);
+        out.push(
+          `<div class="table-wrap"><table>${head}<tbody>${body.join('')}</tbody></table></div>`,
+        );
+        break;
+      }
+      case 'callout': {
+        const style = CALLOUTS.includes(d.style) ? d.style : 'info';
+        out.push(`<aside class="callout callout-${style}" role="note">${inline(d.text)}</aside>`);
+        break;
+      }
+      case 'embed': {
+        const src = embedSource(d.url);
+        if (!src) break;
+        out.push(
+          `<figure class="embed"><iframe src="${esc(src)}" title="${esc(d.caption || 'Embedded video')}" loading="lazy" allowfullscreen referrerpolicy="strict-origin-when-cross-origin"></iframe>${d.caption ? `<figcaption>${esc(d.caption)}</figcaption>` : ''}</figure>`,
+        );
+        break;
+      }
+      case 'download': {
+        const f = images.get(Number(d.mediaId));
+        if (!f) break;
+        const size = f.size ? ` <span class="download-size">(${fileSize(f.size)})</span>` : '';
+        out.push(
+          `<p class="download"><a href="${esc(f.src)}" download>${esc(d.label || f.filename || 'Download')}</a>${size}</p>`,
+        );
+        break;
+      }
       case 'image': {
         const img = images.get(Number(d.mediaId));
         if (!img) break; // deleted from the library: leave the gap rather than a broken image
@@ -204,6 +351,10 @@ export function blocksToText(doc) {
     if (b.type === 'list') parts.push((d.items ?? []).map(plain).join(' '));
     else if (b.type === 'code') continue;
     else if (b.type === 'image') parts.push(plain(d.caption));
+    else if (b.type === 'table')
+      parts.push((d.rows ?? []).map((r) => r.map(plain).join(' ')).join('\n'));
+    else if (b.type === 'download') parts.push(plain(d.label));
+    else if (b.type === 'embed') parts.push(plain(d.caption));
     else parts.push(plain(d.text) + (d.caption ? ' ' + plain(d.caption) : ''));
   }
   return parts.filter(Boolean).join('\n');
