@@ -22,3 +22,10 @@ test('the admin shell versions its own assets and tells the SPA the version', as
   // a versioned URL still resolves
   assert.equal((await request(node.app).get(`/admin/static/app.js?v=${v}`)).status, 200);
 });
+
+test('every API answer carries the same version, so an open tab can tell it is out of date', async () => {
+  const html = (await request(node.app).get('/admin')).text;
+  const v = /<meta name="admin-version" content="([0-9a-f]{10})">/.exec(html)?.[1];
+  const res = await request(node.app).get('/api/auth/me'); // 401 signed out: the header is still there
+  assert.equal(res.headers['x-admin-version'], v);
+});

@@ -14,6 +14,30 @@ let lastInput = Date.now();
 for (const ev of ['pointerdown', 'keydown', 'wheel', 'touchstart', 'hashchange'])
   window.addEventListener(ev, () => (lastInput = Date.now()), { passive: true, capture: true });
 
+/**
+ * A tab opened before an update keeps running the old app.js. The server stamps every API answer with the version of
+ * the admin files it serves; when it differs from the one this page loaded, say so, once, and offer a reload.
+ */
+let staleBannerShown = false;
+function checkAdminVersion(res) {
+  const now = res.headers.get('x-admin-version');
+  const loaded = document.querySelector('meta[name="admin-version"]')?.content;
+  if (!now || !loaded || now === loaded || staleBannerShown) return;
+  staleBannerShown = true;
+  const bar = document.createElement('div');
+  bar.className =
+    'alert alert-warning position-fixed bottom-0 start-0 m-3 shadow d-flex align-items-center gap-3';
+  bar.setAttribute('role', 'alert');
+  bar.style.zIndex = '2000';
+  bar.append('This admin was updated. Reload to get the latest screens. ');
+  const b = document.createElement('button');
+  b.className = 'btn btn-sm btn-primary';
+  b.textContent = 'Reload now';
+  b.onclick = () => location.reload();
+  bar.append(b);
+  document.body.append(bar);
+}
+
 async function api(method, path, body) {
   const send = async () => {
     const headers = {
@@ -47,6 +71,7 @@ async function api(method, path, body) {
       res = await send(); // one retry with a fresh token
     }
   }
+  checkAdminVersion(res);
   if (res.status === 204) return null;
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {

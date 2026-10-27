@@ -268,6 +268,11 @@ export function createApp(ctx) {
   admin.use(pluginDispatcher(ctx));
   api.use('/admin', admin);
   api.use(apiNotFound);
+  // Tells an admin tab that was opened before an update to reload (see `checkAdminVersion` in app.js).
+  app.use('/api', (_req, res, next) => {
+    res.setHeader('X-Admin-Version', adminVersion);
+    next();
+  });
   app.use('/api', api);
 
   // ── Public website: pages, blog, search, sitemap, theme assets (server-rendered with the active theme) ──
