@@ -15,7 +15,6 @@ ecosystem.config.js
 temp_message.txt
 temp_changelogs.txt
 .claude
-CLAUDE.md
 temp_notes.txt
 proposed_gaps.md
 ecosystem.config.cjs
