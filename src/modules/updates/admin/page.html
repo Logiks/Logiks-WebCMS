@@ -38,6 +38,18 @@
           </template>
         </div>
 
+        <div class="panel mb-3">
+          <div class="panel-h">Restore points</div>
+          <div class="small muted p-3 pb-0">Every update first records the version a server was on, so you can go back to it. The last 5 per server are kept. Going back restores the code only: your data and database tables stay as they are, and the older code works with them.</div>
+          <div class="empty" x-show="!points.length">None yet. One is recorded each time an update is applied.</div>
+          <table class="table" x-show="points.length"><tbody><template x-for="p in points" :key="p.id">
+            <tr>
+              <td><span class="mono" x-text="p.from.slice(0, 7)"></span> ← <span class="mono" x-text="p.to.slice(0, 7)"></span> <span class="muted" x-text="'· ' + p.host"></span><span class="tag" x-show="p.status === 'rolled_back'">rolled back</span><span class="tag" x-show="p.backupReady" x-text="'backup #' + p.backupId"></span><span class="tag warn" x-show="p.migrationsChanged">includes migrations</span></td>
+              <td class="muted text-nowrap" x-text="ago(p.createdAt)"></td>
+              <td class="text-end text-nowrap"><a class="btn btn-sm btn-outline-secondary" x-show="p.backupReady && can('backup.read')" href="#/backups">Backups</a> <button class="btn btn-sm btn-outline-danger" :disabled="!canRollBack(p)" @click="rollback(p)" x-text="'Roll back to ' + p.from.slice(0, 7)"></button></td>
+            </tr></template></tbody></table>
+        </div>
+
         <div class="panel">
           <div class="panel-h">Recent activity</div>
           <div class="empty" x-show="!history.length">Nothing yet. Checks, updates and restarts show up here.</div>

@@ -7,6 +7,11 @@ import { actorOf, requirePermission } from '../../core/http/middleware.js';
 
 const applyBody = z.object({ restart: z.boolean().default(false) });
 
+const rollbackBody = z.object({
+  pointId: z.number().int().positive(),
+  restart: z.boolean().default(false),
+});
+
 const sourceBody = z.object({
   url: z
     .string()
@@ -44,6 +49,10 @@ export default function updatesRoutes(ctx) {
     });
   });
 
+  r.get('/updates/restore-points', guard, async (_req, res) => {
+    res.json({ items: await ctx.updates.restorePoints(), self: ctx.updates.serverKey() });
+  });
+
   r.get('/updates/history', guard, async (_req, res) => {
     res.json({ entries: await ctx.audit.list({ limit: 15, action: 'updates.' }) });
   });
@@ -68,6 +77,21 @@ export default function updatesRoutes(ctx) {
     await ctx.updates.dispatch(req.params.nodeId, 'apply', { restart }, actorOf(req));
     res.status(202).json({ accepted: true });
   });
+
+  r.post(
+    '/updates/nodes/:nodeId/rollback',
+    docs({ body: rollbackBody }),
+    guard,
+    async (req, res) => {
+      const { pointId, restart } = parse(rollbackBody, req.body);
+      if (restart && !req.user.can('system.restart'))
+        throw forbidden(
+          'You can roll back, but restarting needs the “Restart servers” permission. Roll back without restarting instead.',
+        );
+      await ctx.updates.dispatch(req.params.nodeId, 'rollback', { restart, pointId }, actorOf(req));
+      res.status(202).json({ accepted: true });
+    },
+  );
 
   r.post(
     '/updates/nodes/:nodeId/restart',

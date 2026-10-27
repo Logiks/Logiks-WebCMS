@@ -567,6 +567,24 @@ export function defineCoreSettings(registry) {
         default: true,
         help: 'Production servers refuse to start with pending migrations, so leave this on unless your pipeline runs them.',
       },
+      backup_before_update: {
+        type: 'boolean',
+        label: 'Take a backup before every update',
+        default: false,
+        help: 'Makes a backup (Operations → Backups) just before new code is applied; if it fails, the update does not start. The last 5 are kept, together with the 5 restore points.',
+      },
+      backup_include_files: {
+        type: 'boolean',
+        label: 'Include uploaded files in that backup',
+        default: false,
+        help: 'Adds uploaded media and the changed plugin and site folders. Slower and larger; leave off if you only want the data tables.',
+      },
+      auto_rollback: {
+        type: 'boolean',
+        label: 'Roll back automatically if the new version will not start',
+        default: true,
+        help: 'After an update, if the server fails to stay up on the new code (it crashes twice while starting), the next start puts the previous version back first. Needs a supervisor that restarts the process.',
+      },
       restart_mode: {
         type: 'select',
         label: 'How a restart happens',

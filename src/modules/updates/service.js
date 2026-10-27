@@ -1,13 +1,23 @@
 import { spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { statSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { dialect } from '../../core/db/index.js';
 import { HttpError, notFound } from '../../core/http/errors.js';
+import {
+  HEALTHY_AFTER_MS,
+  clearPending,
+  markPending,
+  takeRolledBack,
+} from '../../core/update-guard.js';
 
 const CHANNEL = 'updates:cmd';
 /** Updates always come from the configured source URL, through this git remote that the app keeps pointed at it. */
 export const SOURCE_REMOTE = 'cms-source';
 const MAX_INCOMING = 20;
+/** Restore points kept per server (and the safety backups that went with them). */
+export const KEEP_RESTORE_POINTS = 5;
 
 /** Credentials that git or npm may echo back (https://user:token@host, npm auth tokens) never leave this module. */
 export const redact = (text) =>
@@ -35,11 +45,15 @@ const lastLine = (text) =>
  * so the admin picks which one to act on and the request is routed to it over the bus (`updates:cmd`). Progress and the
  * outcome are written into the server's heartbeat row, which is how any other server (and the admin page) can read them.
  *
+ * Before new code is applied the server records a restore point (the commit it was on), and can optionally take a backup; a
+ * rollback puts that commit back (code only: migrations only add, so older code runs on the newer database). If the new code
+ * will not even start, the update guard (core/update-guard.js) does the same before the app loads.
+ *
  * Safe by construction: fast-forward only, refuses a checkout with local changes, never discards anything, runs git and npm
  * without a shell, and refuses to restart a production server that has pending migrations (it would not come back up).
  *
  * @param {{env: import('../../core/env.js').Env, db: import('knex').Knex, settings: any, bus: any, audit: any, nodes: any,
- *   state: any, log: import('pino').Logger, appRoot: string}} deps
+ *   state: any, log: import('pino').Logger, appRoot: string, getBackup?: () => any}} deps
  */
 export function createUpdatesService({
   env,
@@ -51,10 +65,22 @@ export function createUpdatesService({
   state,
   log,
   appRoot,
+  getBackup = () => null,
 }) {
   let stopped = false;
   let bootCommit = null;
-  let st = { op: null, status: 'idle', step: null, message: null, at: null, git: null };
+  let healthyTimer = null;
+  // Names this checkout on this host: unlike the node id it survives restarts, so restore points stay with the server.
+  const serverKey = createHash('sha1').update(`${os.hostname()}|${appRoot}`).digest('hex');
+  let st = {
+    key: serverKey,
+    op: null,
+    status: 'idle',
+    step: null,
+    message: null,
+    at: null,
+    git: null,
+  };
 
   const set = (patch) => {
     if (stopped) return;
@@ -305,7 +331,10 @@ export function createUpdatesService({
       if (g.blocker) throw new StepError(blockerMessage(g));
 
       let pulled = false;
+      let point = null;
       if (g.behind > 0) {
+        alive();
+        const backupId = await safetyBackup(actor);
         alive();
         set({ step: `Applying ${g.behind} update${g.behind === 1 ? '' : 's'}` });
         const m = await git('merge', '--ff-only', `refs/remotes/${g.remote}/${g.sourceBranch}`);
@@ -315,6 +344,21 @@ export function createUpdatesService({
           );
         done('merge');
         pulled = true;
+        // Recorded right after the merge and before install/migrate: those are the steps that can fail, and the point is
+        // what lets an admin put the old code back afterwards.
+        point = await recordRestorePoint({ from, g, backupId }, actor);
+        if (point && settings.get('updates.auto_rollback'))
+          try {
+            markPending(appRoot, {
+              from,
+              to: (await readGit()).headFull,
+              installChanged: g.needsInstall,
+              autoRollback: true,
+              pointId: point.id,
+            });
+          } catch (e) {
+            log.warn({ err: e.message }, 'updates: could not arm the automatic rollback');
+          }
         const codeNow = `Code is now at the new version, but`;
 
         if (g.needsInstall && settings.get('updates.install_dependencies')) {
@@ -367,6 +411,8 @@ export function createUpdatesService({
           branch: after.branch,
           steps,
           restart: willRestart,
+          restore_point: point?.id ?? null,
+          backup: point?.backup_id ?? null,
         },
       });
       if (willRestart) {
@@ -376,6 +422,208 @@ export function createUpdatesService({
     } catch (e) {
       await fail('apply', actor, e);
     }
+  }
+
+  /** Optional: a backup just before new code lands. If it cannot be made, the update does not start. Returns its id. */
+  async function safetyBackup(actor) {
+    if (!settings.get('updates.backup_before_update')) return null;
+    const backup = getBackup();
+    if (!backup)
+      throw new StepError(
+        'Backups are switched off on this server, so the backup before the update cannot be made. Turn the Backups module on, or turn off "Take a backup before every update" in Settings → Updates.',
+      );
+    set({ step: 'Taking a backup first' });
+    try {
+      const files = settings.get('updates.backup_include_files');
+      const row = await backup.create(
+        {
+          name: `Before update ${new Date().toISOString().slice(0, 16).replace('T', ' ')}`,
+          source: 'update',
+          includeMedia: files,
+          folders: files ? undefined : [],
+        },
+        actor,
+      );
+      await backup.idle();
+      const done = await backup.get(row.id);
+      if (done.status !== 'ready')
+        throw new StepError(
+          `The backup before the update failed (${done.error || 'unknown error'}), so nothing was changed. Fix that in Operations → Backups, or turn off "Take a backup before every update".`,
+        );
+      return done.id;
+    } catch (e) {
+      if (e instanceof StepError) throw e;
+      throw new StepError(
+        `The backup before the update could not start (${e.message}), so nothing was changed. Try again once it is free.`,
+      );
+    }
+  }
+
+  async function recordRestorePoint({ from, g, backupId }, actor) {
+    try {
+      const id = await dialect(db).insertGetId(db('update_restore_points'), {
+        server_key: serverKey,
+        host: hostName().slice(0, 190),
+        branch: g.branch ?? null,
+        from_commit: from,
+        to_commit: (await readGit()).headFull,
+        install_changed: !!g.needsInstall,
+        migrations_changed: !!g.needsMigrate,
+        backup_id: backupId,
+        status: 'available',
+        created_by: actor?.id ?? null,
+        created_at: Date.now(),
+      });
+      await pruneRestorePoints();
+      return { id, backup_id: backupId };
+    } catch (e) {
+      // The update itself already happened; a missing restore point must not turn it into a failure.
+      log.warn({ err: e.message }, 'updates: could not record a restore point');
+      return null;
+    }
+  }
+
+  /** Keeps the newest KEEP_RESTORE_POINTS for this server, together with the backups that were made for the dropped ones. */
+  async function pruneRestorePoints() {
+    const old = (
+      await db('update_restore_points').where({ server_key: serverKey }).orderBy('id', 'desc')
+    ).slice(KEEP_RESTORE_POINTS);
+    const backup = getBackup();
+    for (const r of old) {
+      if (r.backup_id && backup)
+        try {
+          const b = await backup.get(r.backup_id);
+          if (b.source === 'update') await backup.remove(r.backup_id, null);
+        } catch {
+          /* already gone */
+        }
+      await db('update_restore_points').where({ id: r.id }).delete();
+    }
+  }
+
+  /**
+   * Puts this server's code back to the commit a restore point recorded. Code only: the database is not touched (migrations
+   * only add, so the older code runs on it). Refuses to run over local changes, since `reset --hard` would discard them.
+   */
+  async function rollback({ pointId, restart }, actor) {
+    let from;
+    try {
+      set({ op: 'rollback', status: 'running', step: 'Checking the checkout', message: null });
+      const g = await readGit();
+      if (!g.supported) throw new StepError(g.message);
+      if (['detached', 'dirty'].includes(g.blocker))
+        throw new StepError(
+          g.blocker === 'dirty'
+            ? 'This checkout has uncommitted changes to tracked files, and rolling back would discard them. Commit or stash them (git stash), then try again.'
+            : blockerMessage(g),
+        );
+      const point = await db('update_restore_points')
+        .where({ id: Number(pointId), server_key: serverKey })
+        .first();
+      if (!point) throw new StepError('That restore point is not on this server (or was removed).');
+      from = g.headFull;
+      const target = point.from_commit;
+      if ((await git('cat-file', '-e', `${target}^{commit}`)).code !== 0)
+        throw new StepError(
+          `This checkout no longer has commit ${target.slice(0, 7)} (it was cleaned up), so it cannot go back to it.`,
+        );
+      if (target === from)
+        throw new StepError(`Already on ${target.slice(0, 7)}. Nothing to roll back.`);
+      if ((await git('merge-base', '--is-ancestor', target, 'HEAD')).code !== 0)
+        throw new StepError(
+          `${target.slice(0, 7)} is not an earlier version of this checkout, so it cannot be rolled back to.`,
+        );
+      alive();
+      const changed = (await git('diff', '--name-only', '--relative', target, 'HEAD')).out
+        .split('\n')
+        .filter(Boolean);
+      const { needsInstall, needsMigrate } = classifyChanges(changed);
+
+      set({ step: `Putting back ${target.slice(0, 7)}` });
+      const reset = await git('reset', '--hard', target);
+      if (reset.code !== 0)
+        throw new StepError(`Git couldn't go back: ${lastLine(reset.out)}. Nothing was changed.`);
+      const steps = ['reset'];
+      // Whatever an update was waiting to verify is moot now.
+      clearPending(appRoot);
+
+      if (needsInstall && settings.get('updates.install_dependencies')) {
+        alive();
+        set({ step: 'Installing dependencies' });
+        const r = await run(
+          'npm',
+          ['ci', '--no-audit', '--no-fund', ...(env.isProd ? ['--omit=dev'] : [])],
+          { timeoutMs: 15 * 60_000 },
+        );
+        if (r.code !== 0)
+          throw new StepError(
+            `The code is back at ${target.slice(0, 7)}, but reinstalling dependencies failed: ${lastLine(r.out) || 'npm did not finish'}. Run "npm ci" in the app folder, then restart.`,
+          );
+        steps.push('install');
+      }
+
+      // This point and every later one describe updates that are now undone.
+      await db('update_restore_points')
+        .where({ server_key: serverKey })
+        .andWhere('id', '>=', point.id)
+        .update({ status: 'rolled_back' });
+      const after = await readGit();
+      const willRestart = restart;
+      await audit.log({
+        actor: actorInfo(actor),
+        action: 'updates.rollback',
+        entity: 'server',
+        entityId: env.nodeId,
+        meta: {
+          host: hostName(),
+          from: from.slice(0, 12),
+          to: target.slice(0, 12),
+          steps,
+          restart: willRestart,
+          restore_point: point.id,
+          database_kept: needsMigrate,
+        },
+      });
+      const note = needsMigrate
+        ? ' The database keeps the newer tables and columns, which the older code ignores.'
+        : '';
+      if (willRestart) {
+        set({ git: after });
+        await restartNow(actor, 'rollback');
+      } else
+        set({
+          status: 'done',
+          step: null,
+          git: after,
+          message: `Rolled back to ${target.slice(0, 7)}.${note} Restart this server to run it.`,
+        });
+    } catch (e) {
+      await fail('rollback', actor, e);
+    }
+  }
+
+  /** Newest first. `rolledBack` points describe updates that were already undone. */
+  async function listRestorePoints() {
+    const rows = await db('update_restore_points').orderBy('id', 'desc').limit(100);
+    const backups = new Map();
+    const backup = getBackup();
+    for (const r of rows)
+      if (r.backup_id && backup)
+        backups.set(r.backup_id, await backup.get(r.backup_id).catch(() => null));
+    return rows.map((r) => ({
+      id: Number(r.id),
+      serverKey: r.server_key,
+      host: r.host,
+      branch: r.branch,
+      from: r.from_commit,
+      to: r.to_commit,
+      installChanged: !!r.install_changed,
+      migrationsChanged: !!r.migrations_changed,
+      backupId: r.backup_id ?? null,
+      backupReady: r.backup_id ? backups.get(r.backup_id)?.status === 'ready' : false,
+      status: r.status,
+      createdAt: Number(r.created_at),
+    }));
   }
 
   /** Production refuses to boot with pending migrations, so restarting into them would take the server down. */
@@ -451,7 +699,7 @@ export function createUpdatesService({
 
   /** Validates and launches an action on THIS server; the work continues in the background. */
   function begin(action, opts, actor) {
-    if (!['check', 'apply', 'restart'].includes(action))
+    if (!['check', 'apply', 'restart', 'rollback'].includes(action))
       throw new HttpError(400, 'bad_action', 'Unknown update action.');
     // Every action flips the status to 'running' synchronously, so this is also the lock.
     if (st.status === 'running')
@@ -463,7 +711,40 @@ export function createUpdatesService({
     // Not awaited: the caller gets its 202 now and follows progress through the heartbeat. These never reject.
     if (action === 'check') void check(actor);
     else if (action === 'apply') void apply({ restart: opts?.restart === true }, actor);
+    else if (action === 'rollback')
+      void rollback({ pointId: opts?.pointId, restart: opts?.restart === true }, actor);
     else void restartNow(actor, 'manual');
+  }
+
+  /** The update guard may have put the old version back before this process loaded; record it now that there is an audit log. */
+  async function reportAutoRollback() {
+    try {
+      const note = takeRolledBack(appRoot);
+      if (!note) return;
+      if (note.pointId)
+        await db('update_restore_points')
+          .where({ server_key: serverKey })
+          .andWhere('id', '>=', note.pointId)
+          .update({ status: 'rolled_back' });
+      await audit.log({
+        actor: null,
+        action: 'updates.auto_rollback',
+        entity: 'server',
+        entityId: env.nodeId,
+        meta: {
+          host: hostName(),
+          from: String(note.to).slice(0, 12),
+          to: String(note.from).slice(0, 12),
+          message: 'The new version failed to start, so the previous one was put back.',
+        },
+      });
+      set({
+        status: 'failed',
+        message: `The update to ${String(note.to).slice(0, 7)} would not start, so this server went back to ${String(note.from).slice(0, 7)}. Look at the server log before updating again.`,
+      });
+    } catch (e) {
+      log.warn({ err: e.message }, 'updates: could not record the automatic rollback');
+    }
   }
 
   return {
@@ -478,6 +759,7 @@ export function createUpdatesService({
           log.warn({ err: e.message, action: msg.action }, 'updates: command ignored');
         }
       });
+      void reportAutoRollback();
       void readGit()
         .then((g) => {
           bootCommit = g.supported ? g.headFull : null;
@@ -485,9 +767,23 @@ export function createUpdatesService({
         })
         .catch((e) => log.warn({ err: e.message }, 'updates: could not read the git checkout'));
     },
+    /** Called once this process is serving: after it has stayed up a while, the update it started on counts as good. */
+    markHealthy() {
+      healthyTimer = setTimeout(() => {
+        try {
+          clearPending(appRoot);
+        } catch {
+          /* nothing was pending */
+        }
+      }, HEALTHY_AFTER_MS);
+      healthyTimer.unref();
+    },
     stop() {
       stopped = true;
+      clearTimeout(healthyTimer);
     },
+    restorePoints: listRestorePoints,
+    serverKey: () => serverKey,
     snapshot: () => st,
     setSource,
     bootCommit: () => bootCommit,
@@ -509,7 +805,7 @@ export function createUpdatesService({
       await bus.publish(CHANNEL, {
         nodeId,
         action,
-        opts: { restart: opts?.restart === true },
+        opts: { restart: opts?.restart === true, pointId: opts?.pointId },
         actor: actorInfo(actor),
       });
     },

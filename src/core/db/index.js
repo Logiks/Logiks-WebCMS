@@ -15,6 +15,9 @@ export function migrationConfig() {
     directory: path.join(ROOT, 'migrations'),
     loadExtensions: ['.js'],
     tableName: 'knex_migrations',
+    // After a rollback the database holds migrations this (older) code has no file for. They only ever add (expand/contract),
+    // so the older code runs fine on them; without this Knex refuses to even list migrations and the server would not start.
+    disableMigrationsListValidation: true,
   };
 }
 

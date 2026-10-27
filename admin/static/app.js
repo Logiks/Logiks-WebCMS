@@ -2079,6 +2079,7 @@ document.addEventListener('alpine:init', () => {
     ...H,
     data: null,
     history: [],
+    points: [],
     restartAfter: true,
     restarting: {}, // nodeId → { host, role, since } while a server is on its way down and back up
     timer: null,
@@ -2096,6 +2097,8 @@ document.addEventListener('alpine:init', () => {
         this.data = await api('GET', '/admin/updates');
         this.loadSource();
         this.trackRestarts();
+        // Restore points change when an action finishes, so they follow every refresh.
+        this.points = (await api('GET', '/admin/updates/restore-points')).items;
         // History changes rarely; read it on load, after an action, and every few ticks.
         if (withHistory || ++this.tick % 5 === 0)
           this.history = (await api('GET', '/admin/updates/history')).entries;
@@ -2255,10 +2258,34 @@ document.addEventListener('alpine:init', () => {
       if (!confirm(`Restart ${n.host}?` + tail)) return;
       return this.act(n, 'restart', undefined, `Restarting ${n.host}…`);
     },
+    /** The server a restore point belongs to, if it is reporting in (a point is bound to a host and folder, not a node id). */
+    nodeFor(p) {
+      return this.data?.nodes.find((n) => n.update?.key === p.serverKey) || null;
+    },
+    canRollBack(p) {
+      const n = this.nodeFor(p);
+      return !!n && p.status === 'available' && this.actionable(n);
+    },
+    rollback(p) {
+      const n = this.nodeFor(p);
+      if (!n) return;
+      const restart = this.restartAfter && this.can('system.restart');
+      const tail = restart
+        ? this.lastServer(n)
+          ? ' and restart it? This is the only web server, so the site is unavailable while it restarts.'
+          : ' and restart it? It leaves the load balancer while it restarts.'
+        : '? The older code runs after the next restart.';
+      if (!confirm(`Roll ${n.host} back to ${p.from.slice(0, 7)}` + tail)) return;
+      return this.act(n, 'rollback', { pointId: p.id, restart }, `Rolling ${n.host} back…`);
+    },
     describe(e) {
       const m = e.meta || {};
       const host = m.host || 'a server';
       switch (e.action) {
+        case 'updates.rollback':
+          return `${host} rolled back ${m.from} → ${m.to}${m.restart ? ' and restarted' : ''}`;
+        case 'updates.auto_rollback':
+          return `${host} could not start ${m.from} and went back to ${m.to} by itself`;
         case 'updates.apply':
           return m.from === m.to
             ? `${host} was already at ${m.to}${m.restart ? ' and was restarted' : ''}`

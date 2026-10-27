@@ -30,7 +30,9 @@ amber is behind and will catch up on its own (it also polls). A server marked **
 1. **Check for updates** compares the server's checkout with the remote.
 2. **Update** pulls the new code. A server with local changes is blocked and says so.
 3. **Restart** applies it. A restart stops accepting new requests, finishes the current ones, then starts again. In a cluster, update and restart one server at a time so the site stays up.
-4. Database changes (migrations) are a **deploy step**: the platform refuses to start while some are pending. Run the migration command before restarting, as described in the README.
+4. **Restore points** (below the servers): every update first records the version the server was on, and the last 5 are kept. **Roll back to …** puts that code back. It changes the code only; your data and database tables stay as they are, and the older code works with them. A server with local changes cannot roll back.
+5. In **Settings → Updates** you can also **take a backup before every update** (if it fails, the update does not start) and let a server **roll back automatically** if the new version crashes twice while starting (it needs a supervisor such as systemd, PM2 or Docker that restarts the process).
+6. Database changes (migrations) are a **deploy step**: the platform refuses to start while some are pending. Run the migration command before restarting, as described in the README.
 
 ## Database
 

@@ -61,6 +61,7 @@ test('Updates screen: check, see what is coming, update without restarting, then
     assert.match(rowText(), /this server/);
     assert.equal(b.$('.nav-sub-link.active').textContent.trim(), 'Updates');
 
+    const first = git(work, 'rev-parse', 'HEAD');
     fs.writeFileSync(path.join(work, 'src/new.js'), '// new\n');
     fs.mkdirSync(path.join(work, 'migrations'));
     fs.writeFileSync(path.join(work, 'migrations/002.js'), '// m\n');
@@ -102,6 +103,19 @@ test('Updates screen: check, see what is coming, update without restarting, then
       git(work, 'rev-parse', 'HEAD'),
       'the checkout moved to the new commit',
     );
+
+    // The update left a restore point; rolling back from the screen puts the previous commit back.
+    const rollBtn = () => b.button(`Roll back to ${first.slice(0, 7)}`);
+    await wait(() => rollBtn() && !rollBtn().disabled);
+    b.click(rollBtn());
+    await wait(() => /Rolled back to/.test(rowText()));
+    assert.equal(git(server, 'rev-parse', 'HEAD'), first);
+    await wait(() =>
+      b
+        .$$(`${section} table .tag`)
+        .some((t) => t.textContent.trim() === 'rolled back' && b.visible(t)),
+    );
+    assert.equal(restarts, 0);
 
     b.click(b.button('Restart'));
     await wait(() => /Restarting…/.test(rowText()));
