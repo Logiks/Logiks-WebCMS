@@ -257,6 +257,9 @@ export function createMediaService({
       };
     }
     const q = cfg().quality;
+    // Re-encoding alone saves little on an already-optimised photo; scaling an oversized one down is what shrinks the file.
+    const maxW = Number(cfg().max_width) || 0;
+    if (maxW > 0 && meta.width > maxW) img = img.resize({ width: maxW, withoutEnlargement: true });
     let out;
     switch (type.ext) {
       case 'jpg':
@@ -266,7 +269,10 @@ export function createMediaService({
           .toBuffer({ resolveWithObject: true });
         break;
       case 'png':
-        out = await img.clone().png().toBuffer({ resolveWithObject: true });
+        out = await img
+          .clone()
+          .png({ compressionLevel: 9, effort: 8 })
+          .toBuffer({ resolveWithObject: true });
         break;
       case 'webp':
         out = await img

@@ -619,3 +619,16 @@ test('a PDF can be framed by our own pages (no sandbox), while other files stay 
   const r2 = await request(node.url).get(img.url);
   assert.match(r2.headers['content-security-policy'], /sandbox/);
 });
+
+test('an upload wider than Settings → Media → "Widest stored image" is scaled down, not just re-encoded', async () => {
+  const wide = await sharp({
+    create: { width: 3200, height: 1800, channels: 3, background: '#3366aa' },
+  })
+    .jpeg({ quality: 90 })
+    .toBuffer();
+  const m = (await upload(admin, wide, 'wide.jpg')).body.item;
+  assert.equal(m.width, 2560, 'default cap');
+  assert.ok(m.size < wide.length);
+  const kept = (await upload(admin, wide, 'wide-raw.jpg', '&compress=false')).body.item;
+  assert.equal(kept.width, 3200, 'compress=false still keeps the original');
+});

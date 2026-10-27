@@ -730,6 +730,14 @@ export function defineCoreSettings(registry) {
             : 'Each width is a number between 64 and 4000.',
         help: 'One per line. Smaller copies are made only for widths below the original image.',
       },
+      max_width: {
+        type: 'number',
+        label: 'Widest stored image (pixels)',
+        default: 2560,
+        min: 0,
+        max: 8000,
+        help: 'Photos wider than this are scaled down when uploaded, which is the biggest saving in file size. 0 keeps the original size.',
+      },
       quality: {
         type: 'number',
         label: 'Quality of generated images (1–100)',

@@ -67,7 +67,7 @@ test('pasting from Google Docs and Word keeps headings, lists, links and bold as
   assert.deepEqual(plain(blocks()[0].data), { text: 'Getting started', level: 2 });
   assert.equal(
     blocks()[1].data.text,
-    'Read the <a href="https://example.com/guide">guide</a><b> now</b><i> please</i>.',
+    'Read the <a href="https://example.com/guide" target="_blank">guide</a><b> now</b><i> please</i>.',
   );
   assert.deepEqual(plain(blocks()[2].data.items), ['First', 'Second', 'Nested']);
   assert.equal(blocks()[3].data.style, 'ordered');

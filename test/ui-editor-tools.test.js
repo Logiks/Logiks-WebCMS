@@ -221,8 +221,7 @@ test('links: same tab or new tab, and a page of this site found by title', async
   await wait(() => data().linkDlg.open);
   setValue(b.$('#lk-url'), 'https://partner.example/');
   await wait(() => b.visible(ed().querySelector('#lk-tab').closest('.form-check')));
-  ed().querySelector('#lk-tab').click();
-  assert.equal(data().linkDlg.newTab, true);
+  assert.equal(data().linkDlg.newTab, true, 'a web address opens in a new tab unless unticked');
   b.click(btn('Add link'));
   await wait(() => /target="_blank"/.test(body()[0].data.text));
   assert.match(

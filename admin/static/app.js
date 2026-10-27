@@ -347,7 +347,9 @@ function pasteToBlocks(html) {
       if (tag === 'SUB' || st.verticalAlign === 'sub') inner = `<sub>${inner}</sub>`;
       if (tag === 'A') {
         const href = safeHref(n.getAttribute('href'));
-        if (href) inner = `<a href="${escHtml(href)}">${inner}</a>`;
+        // A web address pasted from Word/Docs opens in a new tab, like the link dialog's default; the editor can untick it.
+        if (href)
+          inner = `<a href="${escHtml(href)}"${/^https?:/i.test(href) ? ' target="_blank"' : ''}>${inner}</a>`;
       }
       s += inner;
     }
@@ -3135,7 +3137,7 @@ document.addEventListener('alpine:init', () => {
     },
     useLink(r) {
       this.linkDlg.url = r.url;
-      this.linkDlg.newTab = false;
+      this.linkDlg.newTab = false; // pages of this site always open in the same tab
       if (this.linkDlg.collapsed && !this.linkDlg.text) this.linkDlg.text = r.title;
     },
     applyLink() {
