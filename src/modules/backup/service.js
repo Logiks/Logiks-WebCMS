@@ -65,6 +65,11 @@ const SKIP = new Set([
 /** Tables people create (in System → Database, by the AI Assistant, by a plugin) are named with these prefixes. Their
  *  data is always backed up, whatever the scope, and no rule here may ever treat them as runtime state. */
 export const DATA_PREFIX = /^(do|sys|data)_/;
+/**
+ * The only tables, besides do_/sys_/data_, that a snapshot unpacked from a deployment repository (source 'deploy') may add
+ * records to: the media library's records, without which its files would be orphans. Add-only, like everything here.
+ */
+export const DEPLOY_TABLES = new Set(['media', 'media_folders']);
 const skipped = (name) =>
   !DATA_PREFIX.test(name) &&
   (SKIP.has(name) || name.startsWith('sqlite_') || name.startsWith('search_fts'));
@@ -790,8 +795,9 @@ export function createBackup(ctx) {
      * @param {string | Buffer} source
      * @param {string} name
      * @param {any} actor
+     * @param {{ source?: 'deploy' }} [opts] set only by the updater, for a deployment repository's snapshot
      */
-    async upload(source, name, actor) {
+    async upload(source, name, actor, { source: kind } = {}) {
       let file = typeof source === 'string' ? source : null;
       let temp = null;
       if (!file) {
@@ -811,7 +817,8 @@ export function createBackup(ctx) {
         const id = await dialect.insertGetId(db('backups'), {
           name: String(name || 'Uploaded backup').slice(0, 190),
           status: 'running',
-          source: 'uploaded',
+          // Only the updater, for the snapshot a deployment repository carries (Operations → Deploy), may say 'deploy'.
+          source: kind === 'deploy' ? 'deploy' : 'uploaded',
           secrets: manifest.secrets === 'remove' ? 'remove' : 'keep',
           size,
           manifest: JSON.stringify(manifest),
@@ -1056,7 +1063,11 @@ export function createBackup(ctx) {
       const creatable = defined.filter((t) => !here.has(t));
       // Data is only ever restored for the tables people create, even if a hand-made backup carries more.
       const wanted = Object.keys(manifest.tables).filter(
-        (t) => (trusted || DATA_PREFIX.test(t)) && (here.has(t) || creatable.includes(t)),
+        (t) =>
+          (trusted ||
+            DATA_PREFIX.test(t) ||
+            (backup.source === 'deploy' && DEPLOY_TABLES.has(t))) &&
+          (here.has(t) || creatable.includes(t)),
       );
       const folderEntries = Object.entries(manifest.folders ?? {})
         .filter(([id]) => FOLDER_IDS.includes(id))

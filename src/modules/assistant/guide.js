@@ -198,6 +198,14 @@ const SCREENS = [
     null,
     'access rights administrator editor',
   ],
+  [
+    'deploy',
+    'Operations',
+    'Deploy',
+    'deploy.read',
+    'deploy',
+    'push production release git repository ci',
+  ],
   ['cluster', 'Operations', 'Cluster', 'cluster.read', null, 'servers nodes health version drift'],
   [
     'system',

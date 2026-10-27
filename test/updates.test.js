@@ -633,3 +633,29 @@ test('the update source can be changed to another repository and branch, and upd
     repos.cleanup();
   }
 });
+
+test('code pulled by hand is finished by Update: dependencies are installed, and the message lists what ran', async () => {
+  const repos = makeRepos();
+  const node = await nodeFor(repos.server);
+  try {
+    repos.push({ 'package-lock.json': LOCK('1.5.0') }, 'Bump deps');
+    git(repos.server, 'pull', '--ff-only', 'origin', 'main'); // somebody ran git pull; the server never installed anything
+    await node.ctx.updates.dispatch(self(node), 'apply', {}, null);
+    await finished(node);
+    const snap = node.ctx.updates.snapshot();
+    assert.equal(snap.status, 'done', snap.message);
+    assert.match(snap.message, /installed dependencies/);
+    const [a] = await node.ctx.audit.list({ action: 'updates.apply' });
+    assert.ok(a.meta.steps.includes('install'));
+    assert.ok(!a.meta.steps.includes('merge'));
+
+    // A normal pull says what it did.
+    repos.push({ 'src/b.js': '// x\n' }, 'More code');
+    await node.ctx.updates.dispatch(self(node), 'apply', {}, null);
+    await finished(node);
+    assert.match(node.ctx.updates.snapshot().message, /Updated to .*ran database migrations/);
+  } finally {
+    await node.close();
+    repos.cleanup();
+  }
+});

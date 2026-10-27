@@ -525,6 +525,41 @@ export function defineCoreSettings(registry) {
     },
   });
 
+  registry.define('deploy', {
+    title: 'Deploy',
+    description:
+      'Where Operations → Deploy pushes this installation’s code, so a production server can run it. Changing it only affects the next deploy.',
+    order: 56,
+    fields: {
+      repo_url: {
+        type: 'string',
+        label: 'Deployment repository (git URL)',
+        default: '',
+        max: 300,
+        validate: (v) =>
+          v === ''
+            ? null
+            : !/^[^\s-]\S*$/.test(v)
+              ? 'Enter a git URL, like https://github.com/owner/project.git.'
+              : /^[a-z][a-z0-9+.-]*:\/\/[^/@\s]*:[^/@\s]*@/i.test(v)
+                ? 'Remove the password from the URL. Give this server an SSH key or a git credential helper instead; settings and logs would otherwise store it in plain text.'
+                : null,
+        help: 'The project repository production servers deploy from. This server needs push access already (an SSH key or stored credential).',
+      },
+      branch: {
+        type: 'string',
+        label: 'Deployment branch',
+        default: 'main',
+        max: 100,
+        validate: (v) =>
+          /^[A-Za-z0-9_][A-Za-z0-9._/-]*$/.test(v) && !v.includes('..')
+            ? null
+            : 'Use a branch name, like main (letters, numbers, dots, dashes, slashes).',
+        help: 'Created on the first deploy if it does not exist yet.',
+      },
+    },
+  });
+
   registry.define('updates', {
     title: 'Updates',
     description:
@@ -566,6 +601,18 @@ export function defineCoreSettings(registry) {
         label: 'Run database migrations after a pull',
         default: true,
         help: 'Production servers refuse to start with pending migrations, so leave this on unless your pipeline runs them.',
+      },
+      import_site: {
+        type: 'boolean',
+        label: 'Import site pages that came with an update',
+        default: true,
+        help: 'When the repository you update from carries a public/ folder (a deployment from another installation), the pages and components that changed in the update are saved into this site. Pages that changed only here are left alone.',
+      },
+      import_data: {
+        type: 'boolean',
+        label: 'Add the data that came with an update',
+        default: true,
+        help: 'When the repository carries a data snapshot (deploy-data/), records and files this server lacks are added. Existing records are never changed or deleted.',
       },
       backup_before_update: {
         type: 'boolean',

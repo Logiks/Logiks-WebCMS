@@ -18,6 +18,7 @@ import webhooks from './webhooks/module.js';
 import scheduler from './scheduler/module.js';
 import publish from './publish/module.js';
 import backup from './backup/module.js';
+import deploy from './deploy/module.js';
 import sitemap from './sitemap/module.js';
 import libraries from './libraries/module.js';
 import analytics from './analytics/module.js';
@@ -61,6 +62,7 @@ export const builtinModules = [
   scheduler,
   publish,
   backup,
+  deploy,
   sitemap,
   libraries,
   analytics,

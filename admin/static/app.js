@@ -1690,6 +1690,7 @@ document.addEventListener('alpine:init', () => {
             { id: 'cluster', label: 'Cluster', perm: 'cluster.read' },
             { id: 'system', label: 'System', perm: 'cluster.read' },
             { id: 'updates', label: 'Updates', perm: 'system.update' },
+            { id: 'deploy', label: 'Deploy', module: 'deploy', perm: 'deploy.read' },
             { id: 'backup', label: 'Backups', module: 'backup', perm: 'backup.read' },
             { id: 'log-manager', label: 'Log Manager', module: 'logs', perm: 'logs.manage' },
           ],
@@ -2299,6 +2300,97 @@ document.addEventListener('alpine:init', () => {
         default:
           return `${host}: ${e.action.replace('updates.', '').replace('_', ' ')} — ${m.message || ''}`;
       }
+    },
+  }));
+
+  // ───────── deploy: push this installation's code to the deployment repository (D-130) ─────────
+  Alpine.data('deployPage', () => ({
+    ...H,
+    data: null,
+    url: '',
+    branch: '',
+    loaded: false,
+    themes: [], // ids ticked for the next deploy
+    plugins: [],
+    siteTree: true,
+    withData: true,
+    withMedia: true,
+    timer: null,
+    async init() {
+      if (!(await this.mountFragment('deploy', 'page'))) return;
+      await this.refresh();
+      this.timer = setInterval(() => this.refresh(), 3000);
+    },
+    destroy() {
+      clearInterval(this.timer);
+    },
+    async refresh() {
+      try {
+        const d = await api('GET', '/admin/deploy');
+        if (!this.loaded) {
+          this.url = d.target.url;
+          this.branch = d.target.branch;
+          this.themes = d.available.themes.map((t) => t.id);
+          this.plugins = d.available.plugins.map((p) => p.slug);
+          this.loaded = true;
+        }
+        this.data = d;
+      } catch {
+        /* the next tick tries again */
+      }
+    },
+    get running() {
+      return !!this.data?.runs.some((r) => r.status === 'running');
+    },
+    targetDirty() {
+      return (
+        !!this.data &&
+        (this.url.trim() !== this.data.target.url || this.branch.trim() !== this.data.target.branch)
+      );
+    },
+    canDeploy() {
+      return !!this.data?.target.url && !this.running && !this.targetDirty();
+    },
+    async saveTarget() {
+      try {
+        await api('PUT', '/admin/deploy/target', {
+          url: this.url.trim(),
+          branch: this.branch.trim(),
+        });
+        toast('Deployment target saved.');
+        await this.refresh();
+      } catch (e) {
+        toast(e.message, 'error');
+      }
+    },
+    async deploy() {
+      const t = this.data.target;
+      if (
+        !confirm(
+          `Push this installation's code to ${t.url} (${t.branch})? Servers pull it from there; their own data is not touched.`,
+        )
+      )
+        return;
+      try {
+        await api('POST', '/admin/deploy/run', {
+          themes: this.themes,
+          plugins: this.plugins,
+          siteTree: this.siteTree,
+          data: this.withData && !!this.data.available.data,
+          media: this.withMedia,
+        });
+        toast('Deploying…');
+        await this.refresh();
+      } catch (e) {
+        toast(e.message, 'error');
+      }
+    },
+    tone(r) {
+      return r.status === 'done' ? 'ok' : r.status === 'failed' ? 'warn' : '';
+    },
+    summary(r) {
+      if (r.status === 'running') return r.step || 'Working…';
+      return r.message || (r.status === 'done' ? 'Done.' : 'Failed.');
     },
   }));
 
@@ -11103,7 +11195,7 @@ document.addEventListener('alpine:init', () => {
         ['AI', ['ai', 'assistant', 'prompts', 'research', 'visual', 'testing']],
         ['Security', ['security']],
         ['Messaging and automation', ['mail', 'automation', 'analytics', 'publish']],
-        ['System', ['system', 'updates', 'cache', 'modules', 'featureset', 'features']],
+        ['System', ['system', 'updates', 'deploy', 'cache', 'modules', 'featureset', 'features']],
       ];
       const placed = new Set(GROUPS.flatMap(([, ids]) => ids));
       const byName = (a, b) => a.title.localeCompare(b.title);

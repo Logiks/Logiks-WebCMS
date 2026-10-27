@@ -1,8 +1,12 @@
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { statSync } from 'node:fs';
+import { createWriteStream, statSync } from 'node:fs';
+import fsp from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { pipeline } from 'node:stream/promises';
+import yazl from 'yazl';
+import { DATA_DIR } from '../deploy/service.js';
 import { dialect } from '../../core/db/index.js';
 import { HttpError, notFound } from '../../core/http/errors.js';
 import {
@@ -53,7 +57,7 @@ const lastLine = (text) =>
  * without a shell, and refuses to restart a production server that has pending migrations (it would not come back up).
  *
  * @param {{env: import('../../core/env.js').Env, db: import('knex').Knex, settings: any, bus: any, audit: any, nodes: any,
- *   state: any, log: import('pino').Logger, appRoot: string, getBackup?: () => any}} deps
+ *   state: any, log: import('pino').Logger, appRoot: string, getBackup?: () => any, getSiteFiles?: () => any}} deps
  */
 export function createUpdatesService({
   env,
@@ -66,6 +70,7 @@ export function createUpdatesService({
   log,
   appRoot,
   getBackup = () => null,
+  getSiteFiles = () => null,
 }) {
   let stopped = false;
   let bootCommit = null;
@@ -130,6 +135,12 @@ export function createUpdatesService({
   }
   const git = (...args) => run('git', args);
 
+  /** The site mirror (SITE_DIR) as a git pathspec to leave out, when it sits inside this checkout. */
+  function mirrorPathspec() {
+    const rel = path.relative(appRoot, path.resolve(env.SITE_DIR)).split(path.sep).join('/');
+    return rel && !rel.startsWith('..') && !path.isAbsolute(rel) ? [`:(exclude)${rel}`] : [];
+  }
+
   /** Reads the checkout. `git` is fast and local here; nothing touches the network. */
   async function readGit() {
     const top = await git('rev-parse', '--show-toplevel');
@@ -162,7 +173,11 @@ export function createUpdatesService({
     const branch = branchRes.code === 0 ? branchRes.out : null;
     const [meta] = (await git('log', '-1', '--format=%h%x1f%s%x1f%an%x1f%at')).out.split('\n');
     const [short, subject, author, at] = (meta ?? '').split('\x1f');
-    const dirty = (await git('status', '--porcelain', '--untracked-files=no')).out !== '';
+    // A deployed checkout tracks the site mirror (Operations → Deploy). The app rewrites it whenever the site is edited, which
+    // is not a change anyone made to the code, so it never counts as "local changes".
+    const mirror = mirrorPathspec();
+    const dirty =
+      (await git('status', '--porcelain', '--untracked-files=no', '--', '.', ...mirror)).out !== '';
     const url = { code: 0, out: redact(sourceUrl) };
 
     const info = {
@@ -313,6 +328,149 @@ export function createUpdatesService({
       );
   }
 
+  /**
+   * The steps that complete an update once the code is in place: reinstall dependencies when the lockfile changed, then
+   * run the database migrations the new code brings. `onlyIfPending` skips the migration run when there is nothing to do.
+   */
+  async function finishInstall({ needsInstall, onlyIfPending = false }, done) {
+    const codeNow = `Code is now at the new version, but`;
+    if (needsInstall && settings.get('updates.install_dependencies')) {
+      alive();
+      set({ step: 'Installing dependencies' });
+      const r = await run(
+        'npm',
+        ['ci', '--no-audit', '--no-fund', ...(env.isProd ? ['--omit=dev'] : [])],
+        { timeoutMs: 15 * 60_000 },
+      );
+      if (r.code !== 0)
+        throw new StepError(
+          `${codeNow} installing dependencies failed: ${lastLine(r.out) || 'npm did not finish'}. Run "npm ci" in the app folder, then restart.`,
+        );
+      done('install');
+    }
+    if (settings.get('updates.run_migrations')) {
+      if (onlyIfPending) {
+        const pending = await db.migrate.list().then(
+          ([, p]) => p.length,
+          () => 0,
+        );
+        if (!pending) return;
+      }
+      alive();
+      set({ step: 'Running database migrations' });
+      const r = await run(process.execPath, ['src/cli/index.js', 'migrate'], {
+        timeoutMs: 10 * 60_000,
+      });
+      if (r.code !== 0)
+        throw new StepError(
+          `${codeNow} the database migration failed: ${lastLine(r.out) || 'no output'}. Fix it and run "npm run migrate" before restarting.`,
+        );
+      done('migrate');
+    }
+  }
+
+  /** Every file under a folder, as paths relative to it (forward slashes), sorted. */
+  async function listFiles(root, rel = '') {
+    const out = [];
+    for (const e of await fsp.readdir(path.join(root, rel), { withFileTypes: true })) {
+      const r = rel ? `${rel}/${e.name}` : e.name;
+      if (e.isDirectory()) out.push(...(await listFiles(root, r)));
+      else if (e.isFile()) out.push(r);
+    }
+    return out.sort();
+  }
+
+  /** Packs the unpacked data snapshot (deploy-data/) back into a backup zip; the manifest goes last, as Backups expects. */
+  async function zipSnapshot(dir, file) {
+    const zip = new yazl.ZipFile();
+    const names = await listFiles(dir);
+    for (const n of names.filter((x) => x !== 'manifest.json')) zip.addFile(path.join(dir, n), n);
+    zip.addFile(path.join(dir, 'manifest.json'), 'manifest.json');
+    zip.end();
+    await pipeline(zip.outputStream, createWriteStream(file));
+  }
+
+  /**
+   * After a pull from a deployment repository (Operations → Deploy), bring in what the repository carries besides code:
+   * (1) the site pages and components that CHANGED between the old and the new commit, written to this server's site tree
+   * (the change history can revert them); pages only edited here are left alone; (2) the data snapshot, which only ADDS
+   * what this server lacks. Nothing here deletes or overwrites a record. Problems are returned, not thrown: the code is
+   * already updated and the admin should see exactly what did not come across.
+   */
+  async function importDeployment(from, actor) {
+    const out = { pages: null, data: null, problems: [] };
+    const diff = await git(
+      'diff',
+      '--name-status',
+      '--no-renames',
+      from,
+      'HEAD',
+      '--',
+      'public',
+      DATA_DIR,
+    );
+    if (diff.code !== 0) return out;
+    const changes = diff.out
+      .split('\n')
+      .filter(Boolean)
+      .map((l) => {
+        const [status, file] = l.split('\t');
+        return { status: status[0], file };
+      });
+
+    const siteFiles = getSiteFiles();
+    if (settings.get('updates.import_site') && siteFiles) {
+      const res = { written: 0, removed: 0 };
+      for (const c of changes.filter((x) => x.file.startsWith('public/'))) {
+        const rel = c.file.slice('public/'.length);
+        if (rel === '.site-mirror.json' || rel.endsWith('.local')) continue;
+        try {
+          if (c.status === 'D') {
+            if (siteFiles.list().some((f) => f.path === rel)) {
+              await siteFiles.remove(rel, actor);
+              res.removed++;
+            }
+          } else {
+            await siteFiles.put(rel, await fsp.readFile(path.join(appRoot, c.file), 'utf8'), actor);
+            res.written++;
+          }
+        } catch (e) {
+          out.problems.push(`${rel}: ${e.message}`);
+        }
+      }
+      if (res.written || res.removed) out.pages = res;
+    }
+
+    const backup = getBackup();
+    if (
+      settings.get('updates.import_data') &&
+      changes.some((c) => c.file.startsWith(`${DATA_DIR}/`) && c.status !== 'D')
+    ) {
+      if (!backup)
+        out.problems.push('data: Backups is switched off here, so the data was not added.');
+      else {
+        const tmp = path.join(os.tmpdir(), `deploy-import-${process.pid}-${Date.now()}.zip`);
+        let id = null;
+        try {
+          set({ step: 'Adding the data that came with the update' });
+          await zipSnapshot(path.join(appRoot, DATA_DIR), tmp);
+          id = (await backup.upload(tmp, 'Deployed data', actor, { source: 'deploy' })).id;
+          await backup.restore(id, { confirm: 'RESTORE' }, actor);
+          await backup.idle();
+          const status = await backup.status();
+          if (status.error) throw new Error(status.error);
+          out.data = status.result ?? { restored: true };
+        } catch (e) {
+          out.problems.push(`data: ${e.message}`);
+        } finally {
+          await fsp.rm(tmp, { force: true });
+          if (id) await backup.remove(id, null).catch(() => {});
+        }
+      }
+    }
+    return out;
+  }
+
   async function apply({ restart }, actor) {
     const steps = [];
     const done = (name) => steps.push(name);
@@ -332,10 +490,14 @@ export function createUpdatesService({
 
       let pulled = false;
       let point = null;
+      let imported = null;
       if (g.behind > 0) {
         alive();
         const backupId = await safetyBackup(actor);
         alive();
+        // The mirror is derived from the database and rewritten after the merge, so a stale copy must not block it.
+        for (const spec of mirrorPathspec())
+          await git('checkout', '--', spec.replace(':(exclude)', ''));
         set({ step: `Applying ${g.behind} update${g.behind === 1 ? '' : 's'}` });
         const m = await git('merge', '--ff-only', `refs/remotes/${g.remote}/${g.sourceBranch}`);
         if (m.code !== 0)
@@ -359,45 +521,43 @@ export function createUpdatesService({
           } catch (e) {
             log.warn({ err: e.message }, 'updates: could not arm the automatic rollback');
           }
-        const codeNow = `Code is now at the new version, but`;
-
-        if (g.needsInstall && settings.get('updates.install_dependencies')) {
-          alive();
-          set({ step: 'Installing dependencies' });
-          const r = await run(
-            'npm',
-            ['ci', '--no-audit', '--no-fund', ...(env.isProd ? ['--omit=dev'] : [])],
-            {
-              timeoutMs: 15 * 60_000,
-            },
-          );
-          if (r.code !== 0)
-            throw new StepError(
-              `${codeNow} installing dependencies failed: ${lastLine(r.out) || 'npm did not finish'}. Run "npm ci" in the app folder, then restart.`,
-            );
-          done('install');
-        }
-        if (settings.get('updates.run_migrations')) {
-          alive();
-          set({ step: 'Running database migrations' });
-          const r = await run(process.execPath, ['src/cli/index.js', 'migrate'], {
-            timeoutMs: 10 * 60_000,
-          });
-          if (r.code !== 0)
-            throw new StepError(
-              `${codeNow} the database migration failed: ${lastLine(r.out) || 'no output'}. Fix it and run "npm run migrate" before restarting.`,
-            );
-          done('migrate');
-        }
+        await finishInstall({ needsInstall: g.needsInstall }, done);
+        imported = await importDeployment(from, actor);
+        if (imported.pages) done('site');
+        if (imported.data) done('data');
+      } else {
+        // The code may already be at the new version without this server having installed or migrated it (a manual
+        // `git pull`, or a pipeline that stopped halfway), so finish that here instead of leaving it to someone.
+        const head = (await git('rev-parse', 'HEAD')).out;
+        const needsInstall =
+          !!bootCommit &&
+          head !== bootCommit &&
+          classifyChanges(
+            (await git('diff', '--name-only', '--relative', bootCommit, head)).out
+              .split('\n')
+              .filter(Boolean),
+          ).needsInstall;
+        await finishInstall({ needsInstall, onlyIfPending: true }, done);
       }
 
       const after = await readGit();
       const runningOld = bootCommit && after.headFull !== bootCommit;
       const willRestart = restart && (pulled || runningOld);
+      const did = [
+        steps.includes('install') && 'installed dependencies',
+        steps.includes('migrate') && 'ran database migrations',
+        imported?.pages &&
+          `imported ${imported.pages.written} page file${imported.pages.written === 1 ? '' : 's'}${imported.pages.removed ? ` and removed ${imported.pages.removed}` : ''}`,
+        imported?.data && 'added the data that came with it',
+      ].filter(Boolean);
+      const detail = did.length ? ` (${did.join(' and ')})` : '';
+      const problems = imported?.problems.length
+        ? ` Not everything came across: ${imported.problems.slice(0, 3).join('; ')}${imported.problems.length > 3 ? ` (and ${imported.problems.length - 3} more)` : ''}.`
+        : '';
       const message = pulled
-        ? `Updated to ${after.head}.${willRestart ? '' : ' Restart this server to run it.'}`
+        ? `Updated to ${after.head}${detail}.${problems}${willRestart ? '' : ' Restart this server to run it.'}`
         : runningOld
-          ? `Already at ${after.head}, but this server is still running an older version.${willRestart ? '' : ' Restart it.'}`
+          ? `Already at ${after.head}${detail}, but this server is still running an older version.${willRestart ? '' : ' Restart it.'}`
           : 'Already up to date.';
       await audit.log({
         actor: actorInfo(actor),
@@ -413,6 +573,9 @@ export function createUpdatesService({
           restart: willRestart,
           restore_point: point?.id ?? null,
           backup: point?.backup_id ?? null,
+          imported: imported
+            ? { pages: imported.pages, data: !!imported.data, problems: imported.problems.length }
+            : null,
         },
       });
       if (willRestart) {

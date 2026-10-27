@@ -186,6 +186,7 @@ export async function createContext({ env, bus: busOverride, log: logOverride, a
     appRoot: appRoot ?? fileURLToPath(new URL('..', import.meta.url)),
     // The backup module is optional and built after this service; looked up when needed.
     getBackup: () => ctx.backup ?? null,
+    getSiteFiles: () => siteFiles,
   });
   await updates.start();
 

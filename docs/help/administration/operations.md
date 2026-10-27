@@ -28,11 +28,21 @@ amber is behind and will catch up on its own (it also polls). A server marked **
 **Operations → Updates** (for sites installed from git) shows, per server, whether new code is available.
 
 1. **Check for updates** compares the server's checkout with the remote.
-2. **Update** pulls the new code. A server with local changes is blocked and says so.
+2. **Update** pulls the new code, then finishes the installation: it runs `npm ci` when the dependencies changed and applies the new database migrations, and the result says which of those ran. If the code was already pulled by hand, Update still installs dependencies and migrations that were missed. A server with local changes is blocked and says so. (Both steps can be switched off in Settings → Updates.)
 3. **Restart** applies it. A restart stops accepting new requests, finishes the current ones, then starts again. In a cluster, update and restart one server at a time so the site stays up.
 4. **Restore points** (below the servers): every update first records the version the server was on, and the last 5 are kept. **Roll back to …** puts that code back. It changes the code only; your data and database tables stay as they are, and the older code works with them. A server with local changes cannot roll back.
 5. In **Settings → Updates** you can also **take a backup before every update** (if it fails, the update does not start) and let a server **roll back automatically** if the new version crashes twice while starting (it needs a supervisor such as systemd, PM2 or Docker that restarts the process).
 6. Database changes (migrations) are a **deploy step**: the platform refuses to start while some are pending. Run the migration command before restarting, as described in the README.
+
+## Deploy
+
+**Operations → Deploy** (just below Updates) pushes this installation to the git repository your production servers run from.
+
+1. Enter the repository URL and branch and **Save**. This server needs push access already (an SSH key or a stored git credential); a password in the URL is refused. The branch is created on the first deploy.
+2. Tick what to add besides the code: the site pages and components, themes you installed or cloned, and plugins you uploaded. These live in the database, so a copy of the folder would miss them.
+3. **Deploy**. Everything in the application folder is pushed except `node_modules`, `data` (uploaded media, libraries, the local database), `.env` and logs. `plugins/` and `public/` are included. Each deploy is one commit on top of the branch; nothing is ever force-pushed.
+4. On production, pull it with **Update** in Operations → Updates. It installs dependencies and runs migrations, then brings in what dev built: the pages and components that **changed** since the last deploy (a page edited only on production is left alone; if both changed it, the deploy wins and History can revert it), and the data. Data and media are **added only**: production gets records and files it lacks, and never has an existing record changed or deleted. Production keeps its own database, `data` folder and `.env`.
+5. Not carried: content entries, users, roles and settings. Their ids and relations cannot be merged safely, so create those on production. Media goes into git, so the repository grows with each upload; untick **Uploaded media** if you move files another way. Settings → Updates can switch the page and data import off.
 
 ## Database
 

@@ -138,10 +138,17 @@ test('signing in shows the shell with navigation for an administrator', async ()
   assert.deepEqual(subLinks(), ['Users', 'Roles and permissions']);
   assert.equal(button('Security').getAttribute('aria-expanded'), 'true');
   click(button('Operations'));
-  await until(() => subLinks().length === 7);
-  assert.deepEqual(subLinks().slice(2), ['Cluster', 'System', 'Updates', 'Backups', 'Log Manager']);
+  await until(() => subLinks().length === 8);
+  assert.deepEqual(subLinks().slice(2), [
+    'Cluster',
+    'System',
+    'Updates',
+    'Deploy',
+    'Backups',
+    'Log Manager',
+  ]);
   click(button('Security'));
-  await until(() => subLinks().length === 5);
+  await until(() => subLinks().length === 6);
   assert.equal(button('Security').getAttribute('aria-expanded'), 'false');
   await until(() => /Config version/.test(text()));
 });

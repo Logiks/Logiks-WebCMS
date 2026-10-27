@@ -279,6 +279,11 @@
       <section x-data="updatesPage"></section>
     </template>
 
+    <!-- Deploy -->
+    <template x-if="route === 'deploy'">
+      <section x-data="deployPage"></section>
+    </template>
+
     <!-- System: API -->
     <template x-if="route === 'api'">
       <section x-data="apiPage"></section>

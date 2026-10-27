@@ -188,6 +188,9 @@ export function defineCorePermissions(permissions) {
     'jobs.manage': 'Retry or discard failed background jobs',
     'system.update': 'Check for and install application updates (git pull)',
     'system.restart': 'Restart servers',
+    'deploy.read': 'See the deployment repository and past deploys',
+    'deploy.run':
+      'Choose the deployment repository and push this installation’s code to it (anyone who can read the repository then has the code)',
     'libraries.read': 'View installed libraries (npm packages)',
     // A library's files are served on the site's own address and can be added to every page: administrator-level.
     'libraries.manage': 'Install, configure and remove libraries (npm packages)',
