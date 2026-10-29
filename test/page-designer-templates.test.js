@@ -163,6 +163,6 @@ describe('startup templates', () => {
     const use = msgs[1].content.find((b) => b.type === 'tool_use');
     assert.equal(msgs[2].content[0].tool_use_id, use.id);
     assert.match(use.input.body, /We are a team that cares about the details/);
-    assert.equal(msgs[4].content, 'Make the headline shorter.');
+    assert.equal(msgs[4].content[0].text, 'Make the headline shorter.'); // a block: it carries the cache marker
   });
 });

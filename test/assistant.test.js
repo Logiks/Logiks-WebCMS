@@ -262,7 +262,7 @@ describe('replies that run out of room', () => {
     const out = await svc.sendMessage(s.id, 'explain', adm);
     assert.equal(client.calls.length, 2);
     const last = client.calls[1].messages;
-    assert.match(last.at(-1).content, /^\[auto\] Your reply was cut off/);
+    assert.match(last.at(-1).content[0].text, /^\[auto\] Your reply was cut off/);
     assert.equal(last.at(-2).content[0].text, 'First half of the answer');
     const all = JSON.stringify(out.messages);
     assert.ok(!all.includes('cut short'), 'the person is not asked to do anything');
@@ -280,7 +280,7 @@ describe('replies that run out of room', () => {
     ]);
     const s = await svc.create(adm);
     await svc.sendMessage(s.id, 'build a big page', adm);
-    const nudge = client.calls[1].messages.at(-1).content;
+    const nudge = client.calls[1].messages.at(-1).content[0].text; // a block, because it carries the cache marker
     assert.match(nudge, /cut off before it finished, so it changed nothing/);
     assert.match(nudge, /smaller steps/);
     // The broken call is not in what is sent back (it could never be answered), so the conversation stays valid.

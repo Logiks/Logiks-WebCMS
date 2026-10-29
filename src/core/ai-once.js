@@ -1,3 +1,4 @@
+import { cachedSystem } from './ai-cache.js';
 import Anthropic from '@anthropic-ai/sdk';
 import { HttpError } from './http/errors.js';
 
@@ -37,7 +38,7 @@ export function createAiOnce(ctx, { client: injected } = {}) {
         const res = await client.messages.create({
           model: model || MODEL_DEFAULT,
           max_tokens: maxTokens,
-          system,
+          system: typeof system === 'string' ? cachedSystem(system) : system,
           messages,
         });
         return res.content?.find((b) => b.type === 'text')?.text ?? '';

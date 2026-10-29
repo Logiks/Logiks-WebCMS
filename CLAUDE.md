@@ -13,6 +13,7 @@ Public site is server-rendered with **LiquidJS** (Phase 2). Most configuration l
 - **Tests:** 495 green on SQLite, PostgreSQL 16 and MySQL 8.4 (each with Redis) at last full run. Known flake: `ui-content.test.js` tour,
   `form is not defined`, MySQL only (~25–50 %), unfixed. Newer additions (D-129..D-131) were SQLite-only.
 - **Open:** MySQL 8.4 as primary prod DB is _proposed_ (D-023, BKM to confirm); `.github/workflows/ci.yml` never run; Safari / real phone untested.
+- **Fewer tokens for help questions (D-132, 2026-10-29):** `core/ai-cache.js` puts cache markers on tools, system and the last message in the Assistant, Page Designer, Plugin Editor and one-shot builders. A plain "how do I…" question (`isHelpQuestion`) goes to `assistant.help_model` (Haiku) with a short prompt and only the 3 help tools (`assistant.route_help`). `read_help` returns an outline + ~3 KB (was 9 KB), reads by `##`/`###` heading. `token-savings.test.js` (10), SQLite only, stand-in client; real cache hit rates unmeasured.
 - **Next:** customer accounts (+ public-site cache-safety fix) and Services customer-role scoping, then page manager upgrades
   (duplicate/templates → drag-and-drop → layout regions), then menu manager. Vision: `../notes.txt` / `../notes1.txt`.
 - When state changes, append a dated entry to `docs/STATUS.md` and touch this block only if a headline above changed.

@@ -75,6 +75,7 @@ For "how do I…" questions the assistant searches the Help guides and the promp
 - Pick a smaller model for routine edits (the picker beside _Send_) and a larger one for building a whole site.
 - Start a **new chat** when the topic changes: long chats cost more, though older turns are folded into a short summary.
 - Attach pictures only when they help; they are shrunk and sent for that turn only.
+- A plain question about using the CMS ("How do I reset a password?") is answered from these guides by a smaller, cheaper model that cannot change your site. Turn that off, or pick the model, under Settings → Assistant. A message that asks for a change always goes to your main model.
 - Budgets stop a runaway chat. If you hit one, the message says which.
 
 ## What it cannot do

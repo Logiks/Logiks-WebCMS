@@ -1,3 +1,4 @@
+import { cachedSystem, cachedTools, withHistoryCache } from '../../core/ai-cache.js';
 import Anthropic from '@anthropic-ai/sdk';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -568,9 +569,9 @@ export function createPluginEditor(ctx, { pluginsDir, client: injectedClient }) 
           max_tokens: 16000,
           thinking: { type: 'adaptive' },
           output_config: { effort: 'high' },
-          system: buildSystemPrompt(session),
-          tools: TOOLS,
-          messages,
+          system: cachedSystem(buildSystemPrompt(session)),
+          tools: cachedTools(TOOLS),
+          messages: withHistoryCache(messages),
         });
         messages.push({ role: 'assistant', content: response.content });
         newRows.push({ role: 'assistant', content: response.content });

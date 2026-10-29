@@ -46,6 +46,13 @@ export const SECTIONS = [
 ];
 const SECTION_IDS = new Set([...SECTIONS.map((s) => s.id), 'prompts']);
 const SLUG = /^[a-z0-9][a-z0-9-]{0,80}$/;
+const HEADING_SPLIT = /^(?=#{2,3} )/m;
+const HEADING = /^#{2,3} /;
+const headingOf = (part) =>
+  part
+    .replace(/^#{2,3} /, '')
+    .split('\n')[0]
+    .trim();
 /** `[[Business name]]` inside a prompt: a blank the person fills in before copying. */
 const BLANK = /\[\[([^\][\n]{1,60})\]\]/g;
 
@@ -323,27 +330,25 @@ export function createHelp(ctx) {
     },
 
     /**
-     * A guide (or one prompt) as markdown text for the assistant. Long guides come back as an outline plus the start;
-     * ask again with a `heading` to get one section whole.
-     * @param {string} section @param {string} slug @param {string} [heading] @param {number} [max]
+     * A guide (or one prompt) as markdown text for the assistant. A guide longer than `intro` characters comes back as
+     * its outline plus the start; ask again with a `heading` to get one section whole. The default is small on purpose:
+     * what the assistant reads stays in the chat and is resent on every later turn (D-132).
+     * @param {string} section @param {string} slug @param {string} [heading] @param {number} [max] cap for one section
+     * @param {number} [intro]
      */
-    read(section, slug, heading, max = 9000) {
+    read(section, slug, heading, max = 9000, intro = 3000) {
       if (!SECTION_IDS.has(section) || !SLUG.test(slug)) throw notFound('Guide');
       const e = load().find((x) => x.section === section && x.slug === slug);
       if (!e) throw notFound('Guide');
       const title = e.d.front.title ?? slug;
       const link = `[${title}](#/help/${section}${section === 'prompts' ? '' : `/${slug}`})`;
       const body = e.d.body.trim();
-      // Split before each "## " heading, so a section is returned whole.
-      const parts = body.split(/^(?=## )/m);
-      const headings = parts
-        .filter((p) => p.startsWith('## '))
-        .map((p) => p.slice(3, p.indexOf('\n')).trim());
+      // Split before each "## " and "### " heading, so a section (or a long section's sub-part) is returned whole.
+      const parts = body.split(HEADING_SPLIT);
+      const headings = parts.filter((p) => HEADING.test(p)).map(headingOf);
       if (heading) {
         const want = String(heading).toLowerCase();
-        const hit = parts.find(
-          (p) => p.startsWith('## ') && p.slice(3, p.indexOf('\n')).toLowerCase().includes(want),
-        );
+        const hit = parts.find((p) => HEADING.test(p) && headingOf(p).toLowerCase().includes(want));
         if (!hit)
           return {
             title,
@@ -352,15 +357,46 @@ export function createHelp(ctx) {
             text: '',
             note: 'No section has that heading; pick one of `headings`.',
           };
+        // A "## " section takes its "### " parts with it, unless that is long: then its own text comes back with the
+        // names of the parts, and the next call reads the one that is needed.
+        let text = hit;
+        let note;
+        if (hit.startsWith('## ')) {
+          const at = parts.indexOf(hit);
+          const subs = [];
+          for (let i = at + 1; i < parts.length && parts[i].startsWith('### '); i++)
+            subs.push(parts[i]);
+          const whole = hit + subs.join('');
+          if (whole.length <= intro) text = whole;
+          else if (subs.length) {
+            note = `This section has parts: ${subs.map(headingOf).join('; ')}. Call again with \`heading\` set to one of them.`;
+          }
+        }
         return {
           title,
           link,
           headings,
-          text: hit.slice(0, max * 2),
-          truncated: hit.length > max * 2,
+          text: text.slice(0, max * 2),
+          truncated: text.length > max * 2,
+          ...(note ? { note } : {}),
         };
       }
-      return { title, link, headings, text: body.slice(0, max), truncated: body.length > max };
+      if (body.length <= intro) return { title, link, headings, text: body, truncated: false };
+      // Cut at a section boundary where one exists, so the intro never ends mid-sentence.
+      let text = '';
+      for (const p of parts) {
+        if (text && text.length + p.length > intro) break;
+        text += p;
+      }
+      text = text.slice(0, Math.max(intro, 0) || text.length);
+      return {
+        title,
+        link,
+        headings,
+        text,
+        truncated: true,
+        note: 'Only the start is shown. Call again with `heading` to read one section.',
+      };
     },
 
     /** Words in titles, summaries and text of the guides and prompts, best matches first. */
@@ -392,13 +428,25 @@ export function createHelp(ctx) {
         }
         if (!ok) continue;
         const at = low.indexOf(words[0]);
+        // The section that mentions the most of the words, so the next call can read just that part.
+        let heading = '';
+        let best = 0;
+        for (const part of e.d.body.split(HEADING_SPLIT)) {
+          if (!HEADING.test(part)) continue;
+          const pl = part.toLowerCase();
+          const n = words.filter((w) => pl.includes(w)).length;
+          if (n > best) {
+            best = n;
+            heading = headingOf(part);
+          }
+        }
         const snippet =
           at < 0
             ? ''
             : (at > 60 ? '…' : '') +
               text.slice(Math.max(0, at - 60), at + 140).trim() +
               (text.length > at + 140 ? '…' : '');
-        hits.push({ ...cardOf(e), snippet, score });
+        hits.push({ ...cardOf(e), snippet, heading, score });
       }
       return hits.sort((a, b) => b.score - a.score).slice(0, 30);
     },

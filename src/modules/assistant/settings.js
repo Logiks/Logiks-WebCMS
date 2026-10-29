@@ -35,6 +35,20 @@ export function defineAssistantSettings(registry) {
         dynamicOptions: true,
         help: 'Used only to summarise older parts of a long chat so they cost a few lines instead of being forgotten. Your main model does the real work.',
       },
+      route_help: {
+        type: 'boolean',
+        label: 'Answer “how do I…” questions with the cheaper help model',
+        default: true,
+        help: 'A plain question about using the CMS is answered from the Help guides by the model below, with a short prompt and no tools that change the site. Anything that sounds like a request to change something stays with your main model.',
+      },
+      help_model: {
+        type: 'select',
+        label: 'Model for help questions',
+        default: 'claude-haiku-4-5',
+        options: BUILTIN_MODELS,
+        dynamicOptions: true,
+        help: 'Used only when the option above is on.',
+      },
       effort: {
         type: 'select',
         label: 'Thinking effort',

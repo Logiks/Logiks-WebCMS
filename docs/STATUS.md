@@ -11,7 +11,7 @@ Full history moved out of CLAUDE.md (2026-10-28) so it is not loaded into every 
   write is a genuine round trip, giving the event loop room to interleave); effectively never on SQLite, whose
   synchronous driver runs the whole loop before anything else gets a turn — exactly why it only ever showed up
   against MySQL. Fixed by wrapping the whole rebuild in one transaction (`src/modules/search/service.js`); the
-  read side (`content.eachPublished`) now runs *before* the transaction opens rather than inside it — doing it
+  read side (`content.eachPublished`) now runs _before_ the transaction opens rather than inside it — doing it
   inside deadlocked on SQLite, whose connection pool is one connection, which the transaction was already holding.
   New regression test in `test/search.test.js` (fails on the old code, confirmed by reverting it locally). **Found
   while verifying this, unrelated and NOT fixed:** a genuine pre-existing flake in `ui-content.test.js`'s tour —
@@ -96,148 +96,148 @@ Full history moved out of CLAUDE.md (2026-10-28) so it is not loaded into every 
   **Appearance menu is back + theme editor + customizer** (D-052): Appearance = Themes, Customize, Theme editor, Menus
   (System keeps Translations, Redirects, Messages, Sitemap, Libraries, Database). Theme editor edits one file of an
   installed theme, re-running the zip installer's exact checks on every save (shared `checkThemeFile`/`checkThemeFiles`
-  + dry run); built-in themes are read-only → Duplicate (copies files + options); Export .zip. Customize edits
-  `theme_<id>` (every theme now has `custom_css`, printed last in `<head>`) with a live draft preview
-  (`POST /themes/:id/preview`, `sitePages.render`'s `customCss`). New perms `themes.edit`, `themes.customize`.
-  **System → Sitemap** (D-053): `src/modules/sitemap/` owns `/sitemap.xml` (+ `/sitemap-<n>.xml` index parts), shaped by
-  the `sitemap` settings namespace (sources, excluded types, first-match rules, extra URLs, featured images, per-file
-  limit); cached, never on disk. **System → Libraries** (D-054): npm packages fetched from the registry (Settings →
-  Libraries), integrity-checked, tarball stored in the `libraries` table, unpacked lazily per server into `LIBRARY_DIR`,
-  served at `/lib/<name>@<version>/…`; "load on every page" and `{{ 'pkg/path' | library_url }}`; scripts off by
-  default (`libraries.allow_scripts`); JSON list export/import that refuses a changed hash. Found and fixed a real cache
-  gap while testing: a `libraries` settings change didn't refresh cached pages (added to the page-cache-busting list in
-  context.js). New tests: `theme-editor.test.js` (9), `sitemap.test.js` (10), `libraries.test.js` (13),
-  `ui-appearance.test.js` (5), all passing on SQLite; 16 existing suites touched by the render/menu/settings changes
-  (191 tests) rerun clean. Full three-database suite not run for this addition yet; not tried in a real browser yet.
-  **A component's own `<script>` is now allowed** (D-055; a page's body still isn't — that half of D-037 stands):
-  `compileComponent` auto-adds `nonce="{{ csp_nonce }}"` to every `<script>` it compiles (author writes plain
-  `<script>`, never a nonce), `sitepages.js` mints one nonce per render and returns it alongside `html` so it rides
-  along in the page cache entry — a cache HIT repeats the exact CSP header the original render sent, never a fresh
-  nonce, since the nonce is already baked into that cached markup (found and fixed for real: the first version of
-  this only stored `{status, html, etag}` in `cache.set`, silently dropping the nonce, caught by a new HIT-vs-MISS
-  test in `site-pages.test.js` before it shipped). `securityHeaders.js` now exports `cspHeader()` so the per-render
-  override in `public.js`'s `send()` shares one directive list with the generic middleware. Applies uniformly to
-  theme components too (same `compileComponent` path). **Every code-like textarea in the admin got a real code
-  editor** in the same change — Components' Template/CSS, Services' SQL/script code, DBMS console, SEO's extra
-  JSON-LD, Events/Webhooks payloads, the theme file editor (mode follows the file's extension), Customize's custom
-  CSS — one Alpine directive (`x-codejar`, `app.js`), first built on CodeMirror 5, then **replaced with CodeJar +
-  Prism.js** once real problems showed up in the browser: CM5 shipped ~600 KB in every page's `<head>` regardless
-  of need, and its own character-measurement broke visibly (gutter overlapping text) inside a hidden tab. CodeJar
-  is contenteditable-based (the browser does the text layout, so that bug class can't happen), ~56 KB total, and
-  genuinely lazy — nothing loads until a screen shows its first code field. `pkgDir()` (`app.js`) had to stop
-  using `require.resolve(name + '/package.json')`: codejar's own `exports` map doesn't whitelist that subpath the
-  way bootstrap/alpine/the fontsource fonts do, so Node refused to resolve it; it's a plain `node_modules` join
-  now. `test/themes.test.js` and `test/site-component.test.js` updated (a component script used to be a refused
-  case, now an accepted one); full suite rerun clean on SQLite (494 tests, 17 skipped without Redis) after both
-  the security and the editor-library change. Full three-database suite not run for this addition yet; not tried
-  in a real browser yet.
-  **Login page branding, a completed audit log, and Activity/Analytics are built** (D-056). Settings → Login page:
-  logo, favicon (sign-in screens only), background color/image, welcome heading/text, custom CSS — rides the
-  existing unauthenticated `/api/public/info` bootstrap call, the only channel the sign-in SPA has pre-session; the
-  Settings screen's field renderer gained a real media picker (`media: true` hint on a `type:'number'` field,
-  reusing the same `pick-media` event the content editor already uses). Audit log: date-range + actor filters and
-  a CSV/JSON export (`GET /admin/audit/export`, same `audit.read` permission); a mechanical gap-scan (every
-  `requirePermission`-guarded mutating route cross-checked against a paired `audit.log` call) found one real gap —
-  firing a test event (D-050) was never audited despite being exactly as risky as webhooks' already-audited
-  `webhook.test_sent` — fixed with a new `events.fired` entry. **Automation → Analytics**: two new tables,
-  `analytics_sessions` (one row per visitor/admin session) and `activity_log` (the raw pageview/click/dwell
-  stream), `surface` (`public`|`admin`) keeping the public site and the admin panel tracked separately as asked.
-  Page views are recorded server-side (`public.js`'s one request choke-point, on both a cache HIT and a MISS —
-  the same D-032/D-038 exception) so ad-blockers and JS-off visits still count; a client beacon
-  (`POST /analytics/beacon`, a nonced `<script data-cms="analytics">` injected in `sitepages.js`'s `finish()`,
-  reusing D-055's per-render CSP nonce unmodified) exists only for clicks (`[data-track]`) and time-on-page
-  (`pagehide`) — deliberately not page views, to avoid double-counting. A new `cms_vid` cookie identifies a public
-  visitor (opaque random id, explicitly not an `express-session` — no server-side store entry, cluster-safe by
-  construction); the admin surface needs no new cookie — `req.sessionID` + `req.session.userId` already identify a
-  screen view, reported by the SPA on every hash change. Every `record()` call is queued (`ctx.jobs.enqueue`),
-  never inline — including the beacon route, which answers 202 before the queued write starts — protecting the
-  cached-page p95 target. One flat `analytics.read` permission; both new tables added to both independent
-  `SENSITIVE_TABLES` blocklists (dbms/services, kept separate per D-046/D-047). New "Analytics" nav group
-  (Overview, Page Analytics, Sessions, User-wise Analytics) placed near Content/Media, before Audit Logs, per the
-  owner's own `../menu.txt`. New `analytics.test.js` (13 tests) + `ui-analytics.test.js` (5 tests) + settings.test.js/
-  http.test.js/events.test.js/dbms.test.js/services.test.js/ui.test.js extensions, all passing on SQLite —
-  full suite (518 tests, 17 skipped without Redis) rerun clean, including a real fix found along the way: a
-  3-node-cluster demo test's "identical HTML from every server" assertion had been silently relying on no page
-  content ever varying per independent render — true only because nothing on that page used the D-055 nonce
-  before; the test now normalises the nonce before comparing, since a random per-render value was always the
-  correct behaviour, never a bug. "User-wise" analytics is fully real today only for the **admin** surface — on
-  **public** it stays null until customer accounts exist (see Next), same caveat as Services' customer scoping.
-  **Analytics Overview is now a real dashboard** (D-057): 6 KPI tiles (added avg. pages/visitor, clicks tracked),
-  a daily trend line chart (page views + visitors, hover crosshair/tooltip), a device-mix donut and a top-referrers
-  bar list — built via the dataviz skill's procedure, hand-rolled inline SVG (no new chart dependency), a
-  separately-validated `--chart-1..4`/`--chart-other` palette (`admin.css`) rather than reusing `--moss` etc., and
-  a new `dialect(db).dayBucket()` helper (`src/core/db/index.js`) for the one new per-dialect SQL expression this
-  needed. **Verified on real MySQL 8.4 and PostgreSQL 16 containers, not just SQLite** — caught and fixed a real
-  MySQL-only bug first (`date()` returns a JS `Date` object via the driver, not a string; switched to
-  `date_format()`). **Verified in an actual Chromium browser** (throwaway instance + seeded 14 days of synthetic
-  traffic, screenshotted) — caught and fixed a real, invisible-in-jsdom bug: `<template x-for>`/`x-if` nested
-  inside inline `<svg>` never binds in a real browser (parsed as foreign content), so the axis labels, hover
-  dots/tooltip and donut segments were silently broken for every real user despite every jsdom test passing;
-  fixed by computing the dynamic SVG content as a markup string (`trendSvgInner`/`donutSvgInner` getters) and
-  setting it via `x-html` instead. Full three-database suite (rest of the suite, beyond this feature) not rerun;
-  the rest of the admin not tried in a real browser yet.
-  **Content → Activity is built** (D-058): a content-team-facing view of who created/edited/published/restored/
-  deleted a page, entry, translation, menu, redirect or SEO rule — reusing the **same** `audit_logs` data as the
-  general Audit log, not a second logging system (investigating first showed every action was already captured;
-  the real gaps were access and readability, not data). New flat `content.activity` permission, deliberately
-  independent of `audit.read` (an Editor/Author preset can safely get this without seeing security events);
-  `GET /admin/audit/content` (+ `/export`) reuses `ctx.audit.list()`/`export()` with a new `actions: string[]`
-  OR'd-prefix param (`content.`, `term.`, `site.file_`, `media.`, `menu.`, `redirect.`, `seo.rule_`); a shared
-  `contentActivityDetail()` renderer is now used by **both** this screen and the general Audit log's own
-  `detail()`, so content rows read the same way everywhere instead of showing blank. Two small real gaps fixed
-  along the way: a revision **restore** was indistinguishable from a plain edit (both `content.update` with no
-  marker) — `note` now rides in the audit `meta` whenever the caller passes one, which `restore()` already did;
-  and SEO rule audit entries had no `meta` at all (just a numeric id) — now carry `pattern`. New
-  `content-activity.test.js` (3 tests) + `ui-content-activity.test.js` (2 tests) + `content.test.js`/`ui.test.js`/
-  `ui-content.test.js` extensions, all passing on SQLite. No backend schema change — purely routing, permissions
-  and rendering. Full three-database suite and a real-browser pass not done for this addition yet.
-  **Analytics → Active Now is built**: a live snapshot ("how many active users, right now, on which page") over
-  the existing `analytics_sessions` table — no new schema. `activeReport({surface, windowMs})`
-  (`src/modules/analytics/service.js`) counts sessions whose `last_seen` falls inside a caller-chosen window
-  (default 5 min, clamped 30s–60min at the route), grouped by `exit_path`; `GET /analytics/active` reuses
-  `analytics.read`. The admin screen (`analyticsActivePage`, `admin/static/app.js`) polls every 15s the same way
-  `clusterPage` polls the cluster screen — no date range, since this is a snapshot, not a report. "Active" is
-  approximate by the same rule the rest of `analytics_sessions` already accepts: a visitor reading with no
-  click/dwell ping since the window closed just drops off. New tests in `analytics.test.js` (3) and
-  `ui-analytics.test.js` (1, plus the five-screens nav count updated), all passing on SQLite; lint/typecheck clean.
-  Full three-database suite and a real-browser pass not done for this addition yet.
-  **A new "Logs" nav group (D-059)** pulls every read-only "who did what, when" screen out of its previous
-  group into one place: Audit log (was Security), Activity (was Content), Events (was Automation) — Webhooks
-  and Scheduler stayed in Automation (CRUD, not logs). Only menu placement changed; `audit.read`/
-  `content.activity`/`events.read` are untouched, so a role's actual access is identical. Real consequence found
-  while updating tests: a role holding only `audit.read` (no `users.read`/`roles.read`) now sees an empty,
-  hidden Security group — Logs is the only place Audit log appears for them
-  (`test/ui-account.test.js`'s auditor-only-role case updated accordingly). Nav/menu tests updated across
-  `ui.test.js`, `ui-content.test.js`, `ui-content-activity.test.js`, `ui-account.test.js`, `ui-events.test.js`
-  (all passing on SQLite); lint/typecheck clean. Full three-database suite and a real-browser pass not done for
-  this addition yet.
-  **The Overview dashboard got real KPI tiles** instead of only cluster health + recent audit (both permission-gated
-  panels that showed nothing for most non-admin roles): Content (published/draft counts + created this week, new
-  `content.dashboardSummary(actor)` + `GET /content/summary`, one aggregate query over whichever types the actor can
-  read, not a per-type loop), Traffic last 24h + active now (reuses the existing Analytics Overview/Active Now
-  endpoints), Media count, Users total + signed in this week, and Failed jobs (folded into the existing cluster row,
-  same `cluster.read` gate). Each tile is gated by the same permission that already protects that data elsewhere, so
-  a role sees only what it could already open the full screen for. Verified in a real Chromium browser (throwaway
-  instance, seeded content/media/traffic via the real HTTP API), which caught two real bugs invisible in jsdom/unit
-  tests: (1) the Content tile initially stayed empty right after an in-SPA sign-in (not a fresh page load) — mounting
-  can beat `loadTypes()` to the punch because `ready` is already `true` from the login screen, so `setUser()` alone
-  flips the view straight to the shell; fixed by dropping the client-side `contentTypes.length` pre-check (the
-  `/content/summary` route already 403s with nothing readable, which `.catch()` turns into the same hidden-tile
-  outcome) rather than trying to win the race. (2) That exposed a second, pre-existing latent race in `signIn()`
-  itself — `setUser()` ran before `await loadTypes()` resolved, so the nav's own Content group could momentarily
-  render without Pages/Posts; my tile's extra concurrent fetch added just enough load to flip this from "always
-  wins by luck" to "reliably loses," breaking `ui.test.js`'s and `ui-content.test.js`'s existing nav assertions.
-  Fixed at the root by reordering `signIn()` to `loadTypes()` then `setUser()`. Also found and fixed a genuinely
-  flawed test assertion this surfaced: `ui-content.test.js` waited for 'Pages' text to *exist*, not to be *visible*
-  — jsdom's `textContent` includes text hidden by `x-show` (the documented gotcha above), so the wait could resolve
-  before the nav group actually opened; fixed to wait on the same visible-wrapper computation the assertion itself
-  uses. New `content.test.js` test (1) + touched `ui.test.js`/`ui-content.test.js`, all passing on SQLite (100 tests
-  across the touched suites, rerun 3× serially for stability). Full three-database suite not run for this addition.
+  - dry run); built-in themes are read-only → Duplicate (copies files + options); Export .zip. Customize edits
+    `theme_<id>` (every theme now has `custom_css`, printed last in `<head>`) with a live draft preview
+    (`POST /themes/:id/preview`, `sitePages.render`'s `customCss`). New perms `themes.edit`, `themes.customize`.
+    **System → Sitemap** (D-053): `src/modules/sitemap/` owns `/sitemap.xml` (+ `/sitemap-<n>.xml` index parts), shaped by
+    the `sitemap` settings namespace (sources, excluded types, first-match rules, extra URLs, featured images, per-file
+    limit); cached, never on disk. **System → Libraries** (D-054): npm packages fetched from the registry (Settings →
+    Libraries), integrity-checked, tarball stored in the `libraries` table, unpacked lazily per server into `LIBRARY_DIR`,
+    served at `/lib/<name>@<version>/…`; "load on every page" and `{{ 'pkg/path' | library_url }}`; scripts off by
+    default (`libraries.allow_scripts`); JSON list export/import that refuses a changed hash. Found and fixed a real cache
+    gap while testing: a `libraries` settings change didn't refresh cached pages (added to the page-cache-busting list in
+    context.js). New tests: `theme-editor.test.js` (9), `sitemap.test.js` (10), `libraries.test.js` (13),
+    `ui-appearance.test.js` (5), all passing on SQLite; 16 existing suites touched by the render/menu/settings changes
+    (191 tests) rerun clean. Full three-database suite not run for this addition yet; not tried in a real browser yet.
+    **A component's own `<script>` is now allowed** (D-055; a page's body still isn't — that half of D-037 stands):
+    `compileComponent` auto-adds `nonce="{{ csp_nonce }}"` to every `<script>` it compiles (author writes plain
+    `<script>`, never a nonce), `sitepages.js` mints one nonce per render and returns it alongside `html` so it rides
+    along in the page cache entry — a cache HIT repeats the exact CSP header the original render sent, never a fresh
+    nonce, since the nonce is already baked into that cached markup (found and fixed for real: the first version of
+    this only stored `{status, html, etag}` in `cache.set`, silently dropping the nonce, caught by a new HIT-vs-MISS
+    test in `site-pages.test.js` before it shipped). `securityHeaders.js` now exports `cspHeader()` so the per-render
+    override in `public.js`'s `send()` shares one directive list with the generic middleware. Applies uniformly to
+    theme components too (same `compileComponent` path). **Every code-like textarea in the admin got a real code
+    editor** in the same change — Components' Template/CSS, Services' SQL/script code, DBMS console, SEO's extra
+    JSON-LD, Events/Webhooks payloads, the theme file editor (mode follows the file's extension), Customize's custom
+    CSS — one Alpine directive (`x-codejar`, `app.js`), first built on CodeMirror 5, then **replaced with CodeJar +
+    Prism.js** once real problems showed up in the browser: CM5 shipped ~600 KB in every page's `<head>` regardless
+    of need, and its own character-measurement broke visibly (gutter overlapping text) inside a hidden tab. CodeJar
+    is contenteditable-based (the browser does the text layout, so that bug class can't happen), ~56 KB total, and
+    genuinely lazy — nothing loads until a screen shows its first code field. `pkgDir()` (`app.js`) had to stop
+    using `require.resolve(name + '/package.json')`: codejar's own `exports` map doesn't whitelist that subpath the
+    way bootstrap/alpine/the fontsource fonts do, so Node refused to resolve it; it's a plain `node_modules` join
+    now. `test/themes.test.js` and `test/site-component.test.js` updated (a component script used to be a refused
+    case, now an accepted one); full suite rerun clean on SQLite (494 tests, 17 skipped without Redis) after both
+    the security and the editor-library change. Full three-database suite not run for this addition yet; not tried
+    in a real browser yet.
+    **Login page branding, a completed audit log, and Activity/Analytics are built** (D-056). Settings → Login page:
+    logo, favicon (sign-in screens only), background color/image, welcome heading/text, custom CSS — rides the
+    existing unauthenticated `/api/public/info` bootstrap call, the only channel the sign-in SPA has pre-session; the
+    Settings screen's field renderer gained a real media picker (`media: true` hint on a `type:'number'` field,
+    reusing the same `pick-media` event the content editor already uses). Audit log: date-range + actor filters and
+    a CSV/JSON export (`GET /admin/audit/export`, same `audit.read` permission); a mechanical gap-scan (every
+    `requirePermission`-guarded mutating route cross-checked against a paired `audit.log` call) found one real gap —
+    firing a test event (D-050) was never audited despite being exactly as risky as webhooks' already-audited
+    `webhook.test_sent` — fixed with a new `events.fired` entry. **Automation → Analytics**: two new tables,
+    `analytics_sessions` (one row per visitor/admin session) and `activity_log` (the raw pageview/click/dwell
+    stream), `surface` (`public`|`admin`) keeping the public site and the admin panel tracked separately as asked.
+    Page views are recorded server-side (`public.js`'s one request choke-point, on both a cache HIT and a MISS —
+    the same D-032/D-038 exception) so ad-blockers and JS-off visits still count; a client beacon
+    (`POST /analytics/beacon`, a nonced `<script data-cms="analytics">` injected in `sitepages.js`'s `finish()`,
+    reusing D-055's per-render CSP nonce unmodified) exists only for clicks (`[data-track]`) and time-on-page
+    (`pagehide`) — deliberately not page views, to avoid double-counting. A new `cms_vid` cookie identifies a public
+    visitor (opaque random id, explicitly not an `express-session` — no server-side store entry, cluster-safe by
+    construction); the admin surface needs no new cookie — `req.sessionID` + `req.session.userId` already identify a
+    screen view, reported by the SPA on every hash change. Every `record()` call is queued (`ctx.jobs.enqueue`),
+    never inline — including the beacon route, which answers 202 before the queued write starts — protecting the
+    cached-page p95 target. One flat `analytics.read` permission; both new tables added to both independent
+    `SENSITIVE_TABLES` blocklists (dbms/services, kept separate per D-046/D-047). New "Analytics" nav group
+    (Overview, Page Analytics, Sessions, User-wise Analytics) placed near Content/Media, before Audit Logs, per the
+    owner's own `../menu.txt`. New `analytics.test.js` (13 tests) + `ui-analytics.test.js` (5 tests) + settings.test.js/
+    http.test.js/events.test.js/dbms.test.js/services.test.js/ui.test.js extensions, all passing on SQLite —
+    full suite (518 tests, 17 skipped without Redis) rerun clean, including a real fix found along the way: a
+    3-node-cluster demo test's "identical HTML from every server" assertion had been silently relying on no page
+    content ever varying per independent render — true only because nothing on that page used the D-055 nonce
+    before; the test now normalises the nonce before comparing, since a random per-render value was always the
+    correct behaviour, never a bug. "User-wise" analytics is fully real today only for the **admin** surface — on
+    **public** it stays null until customer accounts exist (see Next), same caveat as Services' customer scoping.
+    **Analytics Overview is now a real dashboard** (D-057): 6 KPI tiles (added avg. pages/visitor, clicks tracked),
+    a daily trend line chart (page views + visitors, hover crosshair/tooltip), a device-mix donut and a top-referrers
+    bar list — built via the dataviz skill's procedure, hand-rolled inline SVG (no new chart dependency), a
+    separately-validated `--chart-1..4`/`--chart-other` palette (`admin.css`) rather than reusing `--moss` etc., and
+    a new `dialect(db).dayBucket()` helper (`src/core/db/index.js`) for the one new per-dialect SQL expression this
+    needed. **Verified on real MySQL 8.4 and PostgreSQL 16 containers, not just SQLite** — caught and fixed a real
+    MySQL-only bug first (`date()` returns a JS `Date` object via the driver, not a string; switched to
+    `date_format()`). **Verified in an actual Chromium browser** (throwaway instance + seeded 14 days of synthetic
+    traffic, screenshotted) — caught and fixed a real, invisible-in-jsdom bug: `<template x-for>`/`x-if` nested
+    inside inline `<svg>` never binds in a real browser (parsed as foreign content), so the axis labels, hover
+    dots/tooltip and donut segments were silently broken for every real user despite every jsdom test passing;
+    fixed by computing the dynamic SVG content as a markup string (`trendSvgInner`/`donutSvgInner` getters) and
+    setting it via `x-html` instead. Full three-database suite (rest of the suite, beyond this feature) not rerun;
+    the rest of the admin not tried in a real browser yet.
+    **Content → Activity is built** (D-058): a content-team-facing view of who created/edited/published/restored/
+    deleted a page, entry, translation, menu, redirect or SEO rule — reusing the **same** `audit_logs` data as the
+    general Audit log, not a second logging system (investigating first showed every action was already captured;
+    the real gaps were access and readability, not data). New flat `content.activity` permission, deliberately
+    independent of `audit.read` (an Editor/Author preset can safely get this without seeing security events);
+    `GET /admin/audit/content` (+ `/export`) reuses `ctx.audit.list()`/`export()` with a new `actions: string[]`
+    OR'd-prefix param (`content.`, `term.`, `site.file_`, `media.`, `menu.`, `redirect.`, `seo.rule_`); a shared
+    `contentActivityDetail()` renderer is now used by **both** this screen and the general Audit log's own
+    `detail()`, so content rows read the same way everywhere instead of showing blank. Two small real gaps fixed
+    along the way: a revision **restore** was indistinguishable from a plain edit (both `content.update` with no
+    marker) — `note` now rides in the audit `meta` whenever the caller passes one, which `restore()` already did;
+    and SEO rule audit entries had no `meta` at all (just a numeric id) — now carry `pattern`. New
+    `content-activity.test.js` (3 tests) + `ui-content-activity.test.js` (2 tests) + `content.test.js`/`ui.test.js`/
+    `ui-content.test.js` extensions, all passing on SQLite. No backend schema change — purely routing, permissions
+    and rendering. Full three-database suite and a real-browser pass not done for this addition yet.
+    **Analytics → Active Now is built**: a live snapshot ("how many active users, right now, on which page") over
+    the existing `analytics_sessions` table — no new schema. `activeReport({surface, windowMs})`
+    (`src/modules/analytics/service.js`) counts sessions whose `last_seen` falls inside a caller-chosen window
+    (default 5 min, clamped 30s–60min at the route), grouped by `exit_path`; `GET /analytics/active` reuses
+    `analytics.read`. The admin screen (`analyticsActivePage`, `admin/static/app.js`) polls every 15s the same way
+    `clusterPage` polls the cluster screen — no date range, since this is a snapshot, not a report. "Active" is
+    approximate by the same rule the rest of `analytics_sessions` already accepts: a visitor reading with no
+    click/dwell ping since the window closed just drops off. New tests in `analytics.test.js` (3) and
+    `ui-analytics.test.js` (1, plus the five-screens nav count updated), all passing on SQLite; lint/typecheck clean.
+    Full three-database suite and a real-browser pass not done for this addition yet.
+    **A new "Logs" nav group (D-059)** pulls every read-only "who did what, when" screen out of its previous
+    group into one place: Audit log (was Security), Activity (was Content), Events (was Automation) — Webhooks
+    and Scheduler stayed in Automation (CRUD, not logs). Only menu placement changed; `audit.read`/
+    `content.activity`/`events.read` are untouched, so a role's actual access is identical. Real consequence found
+    while updating tests: a role holding only `audit.read` (no `users.read`/`roles.read`) now sees an empty,
+    hidden Security group — Logs is the only place Audit log appears for them
+    (`test/ui-account.test.js`'s auditor-only-role case updated accordingly). Nav/menu tests updated across
+    `ui.test.js`, `ui-content.test.js`, `ui-content-activity.test.js`, `ui-account.test.js`, `ui-events.test.js`
+    (all passing on SQLite); lint/typecheck clean. Full three-database suite and a real-browser pass not done for
+    this addition yet.
+    **The Overview dashboard got real KPI tiles** instead of only cluster health + recent audit (both permission-gated
+    panels that showed nothing for most non-admin roles): Content (published/draft counts + created this week, new
+    `content.dashboardSummary(actor)` + `GET /content/summary`, one aggregate query over whichever types the actor can
+    read, not a per-type loop), Traffic last 24h + active now (reuses the existing Analytics Overview/Active Now
+    endpoints), Media count, Users total + signed in this week, and Failed jobs (folded into the existing cluster row,
+    same `cluster.read` gate). Each tile is gated by the same permission that already protects that data elsewhere, so
+    a role sees only what it could already open the full screen for. Verified in a real Chromium browser (throwaway
+    instance, seeded content/media/traffic via the real HTTP API), which caught two real bugs invisible in jsdom/unit
+    tests: (1) the Content tile initially stayed empty right after an in-SPA sign-in (not a fresh page load) — mounting
+    can beat `loadTypes()` to the punch because `ready` is already `true` from the login screen, so `setUser()` alone
+    flips the view straight to the shell; fixed by dropping the client-side `contentTypes.length` pre-check (the
+    `/content/summary` route already 403s with nothing readable, which `.catch()` turns into the same hidden-tile
+    outcome) rather than trying to win the race. (2) That exposed a second, pre-existing latent race in `signIn()`
+    itself — `setUser()` ran before `await loadTypes()` resolved, so the nav's own Content group could momentarily
+    render without Pages/Posts; my tile's extra concurrent fetch added just enough load to flip this from "always
+    wins by luck" to "reliably loses," breaking `ui.test.js`'s and `ui-content.test.js`'s existing nav assertions.
+    Fixed at the root by reordering `signIn()` to `loadTypes()` then `setUser()`. Also found and fixed a genuinely
+    flawed test assertion this surfaced: `ui-content.test.js` waited for 'Pages' text to _exist_, not to be _visible_
+    — jsdom's `textContent` includes text hidden by `x-show` (the documented gotcha above), so the wait could resolve
+    before the nav group actually opened; fixed to wait on the same visible-wrapper computation the assertion itself
+    uses. New `content.test.js` test (1) + touched `ui.test.js`/`ui-content.test.js`, all passing on SQLite (100 tests
+    across the touched suites, rerun 3× serially for stability). Full three-database suite not run for this addition.
 - **Admin SPA broken into per-module fragments.** `admin/static/index.html` was one 2,436-line file holding all 42
   page components; each now ships as plain HTML under its owning module's own `src/modules/<name>/admin/*.html`
   (e.g. `src/modules/webhooks/admin/list.html`/`edit.html`), fetched lazily and mounted the first time that screen
   is visited (`H.mountFragment` in `app.js`, memoized per URL, same lazy idiom as D-055's CodeJar loader; `Alpine.
-  initTree()` is called per injected child, never on the already-initialized `<section>` root itself). Modules are
+initTree()` is called per injected child, never on the already-initialized `<section>` root itself). Modules are
   auto-discovered and served at `/admin/modules/<name>/*` by a boot-time loop in `app.js` (plain `express.static`
   per module's `admin/` folder if one exists — no per-module wiring needed). `index.html` is now 467 lines; only
   `overviewPage` stays in the shell (it aggregates content/analytics/media/users/cluster with no single owner).
@@ -388,11 +388,11 @@ Full history moved out of CLAUDE.md (2026-10-28) so it is not loaded into every 
   provider key (every HTTP/SDK call is stubbed, same rule as D-063/D-064). Full three-database suite and a
   real-browser pass not done for this addition yet.
   **Follow-up fix, found the same day on a real session:** `preview_draft`'s live-preview overlay renders an
-  *approved* component proposal even before `create_component` has actually been called, so a drafted page could
+  _approved_ component proposal even before `create_component` has actually been called, so a drafted page could
   be saved while depending on a component that only existed in the preview's illusion, not for real — the model
   proposed and got approval for one, drafted the page around it, and the owner clicked Save, but the model never
   separately called `create_component`. Symptom: the page rendered fine inside the Designer, then threw `Failed to
-  lookup "..." in "components"` the moment it was opened in Site Pages' own preview or by a real visitor, since
+lookup "..." in "components"` the moment it was opened in Site Pages' own preview or by a real visitor, since
   nothing outside the Designer's session applies that overlay. Fixed by moving the guarantee into `save()` itself:
   it now materializes any approved-but-not-yet-built component a draft depends on (reusing `create_component`'s
   own write path, factored into `materializeComponent()`), and refuses to save — naming the component and what to
@@ -446,7 +446,7 @@ Full history moved out of CLAUDE.md (2026-10-28) so it is not loaded into every 
   `flex-wrap`; every data table's action column already relies on the deliberate "the panel scrolls, not the page"
   rule, `.panel { overflow-x: auto }`). **Verified in a real Chromium browser** (throwaway instance) at 375px, 768px
   and 1280px: signed in, opened and closed the drawer, navigated through it, confirmed zero `document.documentElement.
-  scrollWidth` overflow across every nav destination (~30 routes checked) and measured the three fixed rows'
+scrollWidth` overflow across every nav destination (~30 routes checked) and measured the three fixed rows'
   actual computed grid columns and button-wrap behavior at 375px. `ui.test.js`/`ui-content.test.js`/`ui-updates.test.js`
   (118 tests) rerun clean on SQLite; the one `ui-content.test.js` media-picker failure is pre-existing and
   unrelated — confirmed by reproducing it identically on the unmodified code before this change. lint/typecheck/
@@ -465,7 +465,7 @@ Full history moved out of CLAUDE.md (2026-10-28) so it is not loaded into every 
   Secure", did not reproduce in 5 reruns on PostgreSQL and is in code this work did not touch — treat it as an unexplained flake, not fixed); SQLite
   647/647 earlier (17 Redis tests skipped). Fixed on the way: plugin migrations stored epoch-ms in a 32-bit `batch` column (failed on PostgreSQL),
   and the admin now ignores Alpine expression errors from elements that already left the page (the intermittent MySQL-only "form is not defined"
-  in the content-editor tour; 6/6 clean on a fresh MySQL container afterwards, was about 1 in 2). Lint, typecheck and Prettier are clean.   **Also built (D-070):** optional modules can be switched off at System → Modules (`modules.disabled` setting; `requires` = logical need, enforced
+  in the content-editor tour; 6/6 clean on a fresh MySQL container afterwards, was about 1 in 2). Lint, typecheck and Prettier are clean. **Also built (D-070):** optional modules can be switched off at System → Modules (`modules.disabled` setting; `requires` = logical need, enforced
   both ways; core can't be switched off; off = routes/API/menu/jobs stop, services stay built); plugins are registry modules (`plugin-<slug>`,
   `requires`/`depends` in `plugin.json` now enforced); public API writes on `/api/v1` only (keys need `<module>:write`, `*` never includes it; create
   draft / edit own draft / anonymous contact form); admin routes declare `docs({...})` schemas feeding the admin OpenAPI (every POST/PUT route says what
@@ -519,21 +519,21 @@ Full history moved out of CLAUDE.md (2026-10-28) so it is not loaded into every 
   never run against a real Anthropic key, so **whether the output actually improves is untested**. The confirm step is
   prompt-enforced, not a structural gate. Full three-database suite not run for this addition.
 - **Visual self-check, reference capture and the plan gate are built** (D-083): module `visual` (headless Chromium via the
-  *optional* `playwright-core`; Settings → Visual check) gives the assistant `screenshot_page` and the Page Designer
+  _optional_ `playwright-core`; Settings → Visual check) gives the assistant `screenshot_page` and the Page Designer
   `screenshot_draft` (picture + mechanical findings; pictures are never stored in the chat), the assistant `capture_reference(url)`
   (palette, type scale, layout and outline of another site written into the requirements as `Reference: <host>`; JS off, every request
   SSRF-checked), and `propose_plan` with an Approve / Request changes / Reject card in the chat. Until a person approves a plan the
-  assistant's writes are refused once a turn would change 4 documents (`PLAN_GATE_FILES`; every change under *Always confirm*; never under
-  *Never ask*). New `plan-gate.test.js` (7), `visual.test.js` (9, the real-browser ones skip without Chrome), `ui-plan.test.js` (1).
+  assistant's writes are refused once a turn would change 4 documents (`PLAN_GATE_FILES`; every change under _Always confirm_; never under
+  _Never ask_). New `plan-gate.test.js` (7), `visual.test.js` (9, the real-browser ones skip without Chrome), `ui-plan.test.js` (1).
   **Each web server needs Chrome/Chromium** for screenshots. Never run against a real Anthropic key, so whether the model actually
   uses the screenshots well is unverified. Full three-database suite not run for this addition.
 - **The assistant creates and edits plugins** (D-084): `plugins/<slug>/<file>` is an assistant document kind (via
   `ctx.pluginEditor.files`, same validation as the Plugin Editor; history/revert/plan gate apply; cannot enable a plugin; zip-installed
-  plugins read-only). Tools `plugin_guide`, `list_plugin_files`. The chat shows kind + path on every tool line and a *Working on* chip
+  plugins read-only). Tools `plugin_guide`, `list_plugin_files`. The chat shows kind + path on every tool line and a _Working on_ chip
   strip. New `assistant-plugins.test.js` (5) + `ui-working-on.test.js` (1) pass on SQLite; full suite not rerun on MySQL/PostgreSQL.
-- **Chats can be pinned to a page, component or plugin** (D-085): *Ask the assistant* buttons on the Pages/Components editors and
+- **Chats can be pinned to a page, component or plugin** (D-085): _Ask the assistant_ buttons on the Pages/Components editors and
   lists and on each disk plugin set `assistant_sessions.focus`; the model gets a second, uncached system block and the chat shows a
-  *Focused on* chip. New `assistant-focus.test.js` (7, one in the jsdom browser) passes on SQLite.
+  _Focused on_ chip. New `assistant-focus.test.js` (7, one in the jsdom browser) passes on SQLite.
 - **Automation → Testing is built** (D-086): `src/modules/testing/` crawls the sitemap's pages in the headless browser at phone/tablet/desktop
   widths and stores a report (layout, responsiveness, contrast and other accessibility, SEO, placeholder text, console/CSP/failed requests,
   broken internal links, robots/sitemap/soft-404, spelling via optional `nspell`), with new-vs-fixed against the previous run, kept pictures,
@@ -612,7 +612,7 @@ Full history moved out of CLAUDE.md (2026-10-28) so it is not loaded into every 
   **The assistant reads the guides too**: tools `search_help` / `read_help` (assistant/tools.js, handlers in assistant/service.js, `help.read()` returns an outline + start, or one `## ` section by heading); its rules tell it to use them for "how do I…" questions. Test in `research.test.js`.
   **Written from the code and these docs, not from running every screen: re-read a guide when you change the screen it describes. Not run in a real browser; MySQL/PostgreSQL not rerun (no database code).**
 - **Media got folders, uncompressed uploads, bulk upload, video thumbnails and many more formats** (D-116): `?compress=false` keeps an image as uploaded and the
-  detail panel offers *Compress in place* / *Save a compressed copy*; folders are a path on each file (+ `media_folders` for empty ones); the Media screen uploads many
+  detail panel offers _Compress in place_ / _Save a compressed copy_; folders are a path on each file (+ `media_folders` for empty ones); the Media screen uploads many
   files or a whole folder three at a time; the assistant files everything it uploads in `assistant`; video stills + a 128 px icon come from `ffmpeg` on PATH (optional) and
   the public route serves byte ranges; byte-sniffed allow-list of images/videos/documents (HTML, scripts, executables, audio refused on purpose). New migration
   `20261112000001_media_folders.js`, `src/modules/media/video.js`, 7 tests in `media.test.js`, 1 in `ui-content.test.js`, assertions in `assistant-changes.test.js`; lint/typecheck/prettier clean,
@@ -622,7 +622,7 @@ Full history moved out of CLAUDE.md (2026-10-28) so it is not loaded into every 
   swaps the live documents, recorded and revertible), **restore a release**, and **automatic commits** (Settings → Publish: on by default, every 30 min, optional auto-push).
   Cache busting: `publish.version` + `X-Site-Version` header + Liquid filter `{{ '/x.css' | versioned }}`, events `site.published` / `site.cache_busted` (a webhook can purge a CDN). New module `src/modules/publish/`,
   migration `20261113000001_publish.js`, git layer extended in `assistant/git.js` (fetch, branches, merge, per-server replay marker in `.git/cms-replayed`). `publish.test.js` (9, real git + bare remote)
-  + `ui-publish.test.js` (1) pass on SQLite; lint/typecheck clean. Not run on MySQL/PostgreSQL, a real cluster or a real browser; other servers replay a pull/branch switch as an ordinary commit (see D-117).
+  - `ui-publish.test.js` (1) pass on SQLite; lint/typecheck clean. Not run on MySQL/PostgreSQL, a real cluster or a real browser; other servers replay a pull/branch switch as an ordinary commit (see D-117).
 - **Admin cache buster:** `/admin` serves index.html with `?v=<fingerprint>` on every `/admin/static/*` asset and an `admin-version` meta tag that `loadFragment` (app.js) appends to fragment fetches; fingerprint = hash of admin file paths/sizes/mtimes, computed at boot (`adminFingerprint`, `src/app.js`). `test/admin-cache-buster.test.js` (1) passes on SQLite. System → Requirement (menu) opens the **Project Requirement** page: the assistant still fills it in as you chat (`update_requirements`), and a **Rebuild** button (limited to once per `assistant.requirement_rebuild_hours`, default 3, 0 = no limit; checked against the last "Rebuilt the Project Requirement" history entry; 429 otherwise) (`POST /admin/assistant/requirements/rebuild`, `assistant.rebuildRequirements`) has the model write a fresh version from the current text, the site inventory and the person's own chat messages, recorded as a history entry so the old version is one Revert away. Every save (manual too, via `assistant.saveRequirements`) is a version: a **Version dropdown** on the page lists them (`GET /assistant/requirements/versions[/:id]`), shows one read-only and can **Restore** it (`POST …/versions/:id/restore`). `test/requirements-rebuild.test.js` (2) + a `ui-assistant.test.js` assertion pass on SQLite; never run against a real Anthropic key.
 - **Fixes, 2026-10-23:** AI Usage date ranges threw `SQLITE_ERROR` (unqualified `created_at` was ambiguous once `users` is joined; now table-qualified).
   AI Usage also gained two SEPARATE reports, _Text usage by user_ and _Media usage by user_ (never merged; `aiUsageUsersPage(kind)`, fragment `ai-usage/admin/users.html`): tokens/images per user per day/week/month plus a Messages table (first 500 chars of each prompt + every call it caused, summed; the Media Generator now records user and prompt too;
@@ -635,9 +635,9 @@ Full history moved out of CLAUDE.md (2026-10-28) so it is not loaded into every 
   designer and the assistant. The assistant got `db_*` tools (list/read/create table/add column+index/write row) running as the person
   under `dbms.read|write`, and **every deletion needs two separate person clicks** (`assistant_confirmations`; a table also needs its
   name typed); new `dbms.addColumn/dropColumn/createIndex/dropIndex`. New `assistant-db.test.js` (8) + rules tests in `prompts.test.js` (4)
-  + `ui-prompts`/`ui-assistant` additions, passing on SQLite; DB changes are not revertible. Full SQLite suite: 1092/1094 — the 2 failures (`ui-appearance`: menu
-  order lists Change history/Modules differently; preview-frame titles now include "Template preview") are in tests I did not
-  touch and look stale from earlier work, not from this. MySQL/PostgreSQL not rerun for this addition.
+  - `ui-prompts`/`ui-assistant` additions, passing on SQLite; DB changes are not revertible. Full SQLite suite: 1092/1094 — the 2 failures (`ui-appearance`: menu
+    order lists Change history/Modules differently; preview-frame titles now include "Template preview") are in tests I did not
+    touch and look stale from earlier work, not from this. MySQL/PostgreSQL not rerun for this addition.
 - **Operations → Backups is built** (D-120, `src/modules/backup/`): one streamed zip (`yazl`/`yauzl`, nothing held in memory) with the **definition of every table**,
   the **records of `do_`/`sys_`/`data_` tables only**, optionally media files and the `public/`, `plugins/` and `site/` folders (plugins/site: only what differs from git). A
   restore **only adds**: missing tables are created, existing tables get missing columns with `ALTER TABLE ADD COLUMN`, missing records are added by primary key
@@ -684,9 +684,9 @@ Full history moved out of CLAUDE.md (2026-10-28) so it is not loaded into every 
   mirror when judging "local changes". `deploy.test.js` (8, incl. a second node pulling the deploy) + `ui-deploy.test.js`, SQLite only; real
   GitHub/SSH remote, MySQL/PostgreSQL and a real browser not tried. Target DBs get pages only via a deliberate `site:push`.
 - **Deploy now carries pages, data and media (D-131, 2026-10-28):** Deploy adds `deploy-data/` (Backups-format snapshot of `do_/sys_/data_` tables
-  + media records/files, secrets removed, unpacked). Updates, after merge/install/migrate, imports the `public/` files that changed (`siteFiles.put`) and
-  restores the snapshot add-only (`source: 'deploy'` backups may also add `media`/`media_folders` rows). NOT carried: content entries, users, roles,
-  settings (id collisions). `deploy.test.js` now 9 tests incl. dev→prod end to end (SQLite). Also fixed `ui.test.js` (hard-coded Operations menu).
+  - media records/files, secrets removed, unpacked). Updates, after merge/install/migrate, imports the `public/` files that changed (`siteFiles.put`) and
+    restores the snapshot add-only (`source: 'deploy'` backups may also add `media`/`media_folders` rows). NOT carried: content entries, users, roles,
+    settings (id collisions). `deploy.test.js` now 9 tests incl. dev→prod end to end (SQLite). Also fixed `ui.test.js` (hard-coded Operations menu).
 - **Next:** customer accounts (lightweight site-visitor login, landed atomically with the public-site cache-safety
   fix) and Services customer-role scoping, then page manager upgrades (duplicate/templates → drag-and-drop → layout
   regions as a new Liquid tag; the AI Page Designer above already covers much of the "build a whole page" half of
