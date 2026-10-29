@@ -18,7 +18,6 @@ Public site is server-rendered with **LiquidJS** (Phase 2). Most configuration l
   (duplicate/templates → drag-and-drop → layout regions), then menu manager. Vision: `../notes.txt` / `../notes1.txt`.
 - When state changes, append a dated entry to `docs/STATUS.md` and touch this block only if a headline above changed.
 
-
 Read `docs/PLAN.md` before starting any new feature, `docs/ARCHITECTURE.md` before touching core, and
 `docs/DECISIONS.md` before changing a decision (add a new entry rather than silently reversing one).
 

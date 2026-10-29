@@ -646,6 +646,10 @@ describe('manual commit', () => {
 });
 
 describe('summaries of long chats', () => {
+  // These pin the fixed "last 8 turns" mode (context_tokens 0); the token budget has its own tests below.
+  before(() => node.ctx.settings.update('assistant', { values: { context_tokens: 0 } }));
+  after(() => node.ctx.settings.update('assistant', { values: { context_tokens: 100000 } }));
+
   test('turns that stop being sent are folded into a running summary made by the cheaper model', async () => {
     const responses = [];
     for (let i = 0; i < 9; i++) responses.push(say(`answer ${i}`));
@@ -853,5 +857,37 @@ describe('compaction with pictures', () => {
     ];
     const out = compactHistory(msgs, 2);
     assert.match(JSON.stringify(out[0]), /picture attached earlier/);
+  });
+});
+
+describe('summaries follow the token budget', () => {
+  before(() => node.ctx.settings.update('assistant', { values: { context_tokens: 30000 } }));
+  after(() => node.ctx.settings.update('assistant', { values: { context_tokens: 100000 } }));
+
+  test('short turns are never summarised away, however many there are', async () => {
+    const responses = Array.from({ length: 14 }, (_, i) => say(`answer ${i}`));
+    const { svc, client } = withClient(responses);
+    const s = await svc.create(adm);
+    for (let i = 0; i < 14; i++) await svc.sendMessage(s.id, `question ${i}`, adm);
+    assert.equal(client.calls.length, 14, 'no summariser call');
+    assert.match(JSON.stringify(client.calls[13].messages), /question 0/);
+  });
+
+  test('long turns are summarised once they no longer fit', async () => {
+    const big = 'x'.repeat(15000);
+    const responses = [];
+    for (let i = 0; i < 6; i++) responses.push(say(`answer ${i}`));
+    const { svc, client } = withClient([...responses, ...responses, say('S'), say('S'), say('S')]);
+    const s = await svc.create(adm);
+    for (let i = 0; i < 6; i++) await svc.sendMessage(s.id, `question ${i} ${big}`, adm);
+    assert.ok(
+      client.calls.some((c) => c.model === 'claude-haiku-4-5'),
+      'older turns were summarised',
+    );
+    const last = client.calls.filter((c) => c.model !== 'claude-haiku-4-5').at(-1);
+    assert.ok(
+      !JSON.stringify(last.messages).includes('question 0 '),
+      'the oldest turn is not resent',
+    );
   });
 });

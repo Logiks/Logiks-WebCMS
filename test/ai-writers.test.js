@@ -45,7 +45,11 @@ test('Pages: the AI writes a page that renders existing components; it is saved 
   assert.equal(r.status, 201, JSON.stringify(r.body));
   assert.equal(r.body.address, 'about');
   assert.match(node.ctx.siteFiles.get('pages/about.html').content, /title: About the bakery/);
-  assert.match(JSON.stringify(seen.at(-1).system), /- cta/, 'the AI is told which components exist');
+  assert.match(
+    JSON.stringify(seen.at(-1).system),
+    /- cta/,
+    'the AI is told which components exist',
+  );
   assert.equal((await admin.get('/about')).status, 200);
 });
 

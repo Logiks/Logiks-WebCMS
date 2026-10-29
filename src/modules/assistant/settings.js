@@ -66,6 +66,13 @@ export function defineAssistantSettings(registry) {
         min: 0,
         help: 'Rebuild on the Project Requirement page can run once in this many hours, for everyone (each one costs AI tokens). 0 means no limit.',
       },
+      context_tokens: {
+        type: 'number',
+        label: 'Context size per request (tokens)',
+        default: 100000,
+        min: 0,
+        help: 'How much of a chat is sent with each request. Earlier turns are kept while they fit and folded into a short summary when they do not; long tool results from the current task are shortened when it grows too big. Lower is cheaper, higher remembers more. 0 keeps the last 8 turns whatever their size.',
+      },
       chat_token_limit: {
         type: 'number',
         label: 'Token limit per chat',

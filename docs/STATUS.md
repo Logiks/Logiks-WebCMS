@@ -690,3 +690,4 @@ scrollWidth` overflow across every nav destination (~30 routes checked) and meas
 - **Next:** customer accounts (lightweight site-visitor login, landed atomically with the public-site cache-safety
   fix) and Services customer-role scoping, then page manager upgrades (duplicate/templates → drag-and-drop → layout
   regions as a new Liquid tag; the AI Page Designer above already covers much of the "build a whole page" half of
+- **Assistant context sized by tokens (D-133, 2026-10-29):** `assistant/context.js` + `assistant.context_tokens` (default 100k). Earlier turns are kept by size with a rarely-moving summary cut; long tasks stub old tool results; API usage calibrates the estimate; one retry on "prompt too long". `assistant-context.test.js` (5) + 2 budget tests in `assistant-changes.test.js`; 126 assistant/settings tests pass on SQLite. MySQL/PostgreSQL, a real API run and real token-count accuracy not tried.

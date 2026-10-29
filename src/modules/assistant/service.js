@@ -12,6 +12,13 @@ import { createConfirmations } from './confirmations.js';
 import { problemsOf, referenceMarkdown } from '../visual/service.js';
 import { PLUGIN_CONVENTIONS } from '../plugin-editor/service.js';
 import { TOOLS } from './tools.js';
+import {
+  charsOf,
+  historyAllowance,
+  relaxedAllowance,
+  shrinkCurrentTurn,
+  tokensOf,
+} from './context.js';
 import { localizeAssets } from './localize.js';
 import { BLOCKED_HINT, blockedAssets, createValidator } from './validate.js';
 
@@ -136,10 +143,45 @@ const isTurnStart = (m) =>
   ((typeof m.content === 'string' && !m.content.startsWith(AUTO)) ||
     (Array.isArray(m.content) && !m.content.some((b) => b.type === 'tool_result')));
 
-/** Index of the first message that is still sent: the start of the Nth most recent earlier turn. */
-export function keptFrom(messages, currentStart) {
+/** What one earlier message costs once old tool results are trimmed and pictures are notes (the same view `compactHistory` sends). */
+const sentChars = (m) =>
+  charsOf([
+    Array.isArray(m.content)
+      ? {
+          ...m,
+          content: m.content.map((b) =>
+            b.type === 'tool_result' && typeof b.content === 'string'
+              ? { ...b, content: b.content.slice(0, OLD_RESULT_CHARS) }
+              : b,
+          ),
+        }
+      : m,
+  ]);
+
+/**
+ * Index of the first message that is still sent. Without a budget: the start of the Nth most recent earlier turn.
+ * With one (D-133): every earlier turn that fits. `floor` is where the last summary stopped; while the turns after it
+ * fit, the cut stays put (so the cached prefix stays valid), and once they don't it moves forward to a relaxed
+ * target, so it jumps rarely instead of creeping on every turn. The newest earlier turn is always kept.
+ * @param {{role: string, content: any}[]} messages
+ * @param {number} currentStart
+ * @param {number} [budget] token budget of the whole request; 0 = fixed turn count
+ * @param {number} [floor] first message index not yet folded into the summary
+ */
+export function keptFrom(messages, currentStart, budget = 0, floor = 0) {
   const starts = messages.flatMap((m, i) => (isTurnStart(m) && i < currentStart ? [i] : []));
-  return starts.length > KEEP_TURNS ? starts[starts.length - KEEP_TURNS] : 0;
+  if (!budget) return starts.length > KEEP_TURNS ? starts[starts.length - KEEP_TURNS] : 0;
+  if (!starts.length) return 0;
+  let k = Math.max(
+    0,
+    starts.findIndex((i) => i >= floor),
+  );
+  if (starts.every((i) => i < floor)) k = starts.length - 1;
+  const size = (from) =>
+    tokensOf(messages.slice(from, currentStart).reduce((n, m) => n + sentChars(m), 0));
+  if (size(starts[k]) <= historyAllowance(budget)) return starts[k];
+  while (k < starts.length - 1 && size(starts[k]) > relaxedAllowance(budget)) k++;
+  return starts[k];
 }
 
 /**
@@ -153,11 +195,16 @@ export function keptFrom(messages, currentStart) {
  * @param {{role: string, content: any}[]} messages
  * @param {number} currentStart index of this turn's user message
  * @param {Map<number, any>} [images] media id → image block for the current turn
+ * @param {string} [summary]
+ * @param {{budget?: number, floor?: number, overhead?: number, ratio?: number, stats?: any}} [fit] D-133: keep the
+ *   request inside `budget` tokens. `overhead` is the system prompt and tools (tokens), `ratio` corrects the
+ *   estimate by what the API last reported, `stats` receives `{tokens, stubbed}`.
  */
-export function compactHistory(messages, currentStart, images = new Map(), summary = '') {
-  const from = keptFrom(messages, currentStart);
+export function compactHistory(messages, currentStart, images = new Map(), summary = '', fit = {}) {
+  const budget = fit.budget || 0;
+  const from = keptFrom(messages, currentStart, budget, fit.floor || 0);
   const note = summary ? `[Summary of the earlier part of this chat: ${summary}]` : '';
-  return messages.slice(from).map((m, i) => {
+  const out = messages.slice(from).map((m, i) => {
     if (i === 0 && note) {
       // The summary rides on the first kept turn, so the conversation still starts with the person speaking.
       m = {
@@ -191,6 +238,17 @@ export function compactHistory(messages, currentStart, images = new Map(), summa
       }),
     };
   });
+  if (!budget) return out;
+  // The current turn grows with every tool round; when the whole request would not fit, old results in it become stubs.
+  const total = () => (tokensOf(charsOf(out)) + (fit.overhead || 0)) * (fit.ratio || 1);
+  const stubbed = shrinkCurrentTurn(
+    out,
+    Math.max(0, currentStart - from),
+    () => total() <= budget,
+    OLD_RESULT_CHARS,
+  );
+  if (fit.stats) Object.assign(fit.stats, { tokens: Math.round(total()), stubbed });
+  return out;
 }
 
 /**
@@ -1328,8 +1386,10 @@ export function createAssistant(ctx, { client: injectedClient } = {}) {
         ctx.aiUsage?.wrap(rawClient, { feature: 'assistant', userId: actor?.id }) ?? rawClient;
       const usage = { input: 0, output: 0, cacheRead: 0 };
       // Older turns that are about to stop being sent are folded into the running summary first (cheaper model).
+      const budget = Number(settings.get('assistant.context_tokens') || 0);
+      const floor = priorRows.filter((r) => Number(r.id) <= Number(row.summary_upto || 0)).length;
       try {
-        const cut = keptFrom(messages, currentStart);
+        const cut = keptFrom(messages, currentStart, budget, floor);
         const fresh = priorRows
           .slice(0, cut)
           .filter((r) => Number(r.id) > Number(row.summary_upto || 0));
@@ -1384,6 +1444,14 @@ export function createAssistant(ctx, { client: injectedClient } = {}) {
         ? Object.fromEntries(HELP_TOOLS.map((n) => [n, allTools[n]]))
         : allTools;
       const chatLimit = Number(settings.get('assistant.chat_token_limit') || 0);
+      // Tools and system prompt are part of every request; the API's own count of the last call corrects my estimate.
+      const overhead = tokensOf(
+        JSON.stringify(helpRoute ? TOOLS.filter((t) => HELP_TOOLS.includes(t.name)) : TOOLS)
+          .length + system.length,
+      );
+      let ratio = 1;
+      let squeeze = 1; // lowered when the API says a request was too long
+      const fitStats = { tokens: 0, stubbed: 0 };
       let commit = null;
       let warnings = [];
       try {
@@ -1405,28 +1473,49 @@ export function createAssistant(ctx, { client: injectedClient } = {}) {
             break;
           }
           let response;
-          try {
-            response = await complete(client, {
-              model: helpRoute ? helpModel : row.model || defaultModel || MODEL_DEFAULT,
-              max_tokens: helpRoute ? HELP_MAX_OUTPUT : MAX_OUTPUT_TOKENS,
-              // The help model (Haiku) does not take an effort setting.
-              ...(helpRoute ? {} : { output_config: { effort } }),
-              system: [
-                { type: 'text', text: system, cache_control: { type: 'ephemeral' } },
-                ...(focusNote ? [{ type: 'text', text: focusNote }] : []),
-              ],
-              tools: helpRoute ? TOOLS.filter((t) => HELP_TOOLS.includes(t.name)) : TOOLS,
-              messages: withHistoryCache(
-                compactHistory(messages, currentStart, imageBlocks, summary),
-              ),
-            });
-          } catch (e) {
-            throw new HttpError(502, 'ai_failed', `The AI service did not answer: ${e.message}`);
+          for (let attempt = 0; ; attempt++) {
+            try {
+              response = await complete(client, {
+                model: helpRoute ? helpModel : row.model || defaultModel || MODEL_DEFAULT,
+                max_tokens: helpRoute ? HELP_MAX_OUTPUT : MAX_OUTPUT_TOKENS,
+                // The help model (Haiku) does not take an effort setting.
+                ...(helpRoute ? {} : { output_config: { effort } }),
+                system: [
+                  { type: 'text', text: system, cache_control: { type: 'ephemeral' } },
+                  ...(focusNote ? [{ type: 'text', text: focusNote }] : []),
+                ],
+                tools: helpRoute ? TOOLS.filter((t) => HELP_TOOLS.includes(t.name)) : TOOLS,
+                messages: withHistoryCache(
+                  compactHistory(messages, currentStart, imageBlocks, summary, {
+                    budget: Math.floor(budget * squeeze),
+                    floor,
+                    overhead,
+                    ratio,
+                    stats: fitStats,
+                  }),
+                ),
+              });
+              break;
+            } catch (e) {
+              // The estimate was too low for this request: shrink harder and try once more before giving up.
+              if (budget && attempt === 0 && /too long|too large|context/i.test(e.message)) {
+                squeeze = 0.6;
+                continue;
+              }
+              throw new HttpError(502, 'ai_failed', `The AI service did not answer: ${e.message}`);
+            }
           }
           const u = response.usage ?? {};
           usage.input += (u.input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0);
           usage.output += u.output_tokens ?? 0;
           usage.cacheRead += u.cache_read_input_tokens ?? 0;
+          // What the API counted for this request against what I estimated: the next estimate is scaled by it.
+          const sent =
+            (u.input_tokens ?? 0) +
+            (u.cache_creation_input_tokens ?? 0) +
+            (u.cache_read_input_tokens ?? 0);
+          if (sent && fitStats.tokens)
+            ratio = Math.min(2, Math.max(0.6, ratio * (sent / fitStats.tokens)));
           // A reply cut off by the token limit may end in a half-written tool call, which could never be answered;
           // keep only its text and say so.
           if (response.stop_reason === 'max_tokens') {
