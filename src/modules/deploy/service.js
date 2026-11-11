@@ -11,6 +11,17 @@ import { HttpError } from '../../core/http/errors.js';
 import { THEME_ID } from '../themes/package.js';
 import { redact } from '../updates/service.js';
 import {
+  PACKAGES_DIR,
+  PACKAGE_NAME,
+  diffHashes,
+  hashTree,
+  listTree,
+  makeManifest,
+  readJsonFile,
+  workDir,
+  writeZip,
+} from './package.js';
+import {
   BUMPS,
   buildRelease,
   bumpVersion,
@@ -308,6 +319,174 @@ export function createDeploy(ctx) {
     }
   }
 
+  /** Offline packages only: adds what the database holds besides code to the folder being zipped (a git deploy does the same inline in `execute`, left as it was). */
+  async function addExtras(dir, include, step) {
+    const added = { siteTree: false, themes: [], plugins: [], data: null };
+    if (include.siteTree) {
+      await step('Writing the site pages and components');
+      await fs.rm(path.join(dir, 'public'), { recursive: true, force: true });
+      await siteFiles.exportTo(path.join(dir, 'public'));
+      added.siteTree = true;
+    }
+    if (include.themes.length) {
+      await step('Adding installed themes');
+      added.themes = await addThemes(dir, include.themes);
+    }
+    if (include.plugins.length) {
+      await step('Adding installed plugins');
+      added.plugins = await addPlugins(dir, include.plugins);
+    }
+    if (include.data) {
+      await step(
+        include.media ? 'Taking a snapshot of the data and media' : 'Taking a snapshot of the data',
+      );
+      added.data = await addData(dir, { media: include.media });
+    }
+    return added;
+  }
+
+  /**
+   * Builds an offline package (D-145): the same folder a git deploy would push, zipped, for a server that cannot reach git.
+   * Release notes and the version bump work as in a deploy; what changed is found by comparing file hashes with the last
+   * package built here, since there is no repository to diff against. Nothing is pushed anywhere.
+   */
+  async function executePackage(runId, { include, actor }) {
+    const dir = workDir();
+    const step = (s) => setStep(runId, s);
+    try {
+      await step('Preparing the package folder');
+      await fs.rm(dir, { recursive: true, force: true });
+      await fs.mkdir(dir, { recursive: true });
+      await step('Copying the code');
+      await copyCode(dir);
+      // `.env.*` is never copied (real settings live there), but the template is not secret and a new server's
+      // `npm run setup` needs it to create its own .env.
+      await fs
+        .copyFile(path.join(ctx.appRoot, '.env.example'), path.join(dir, '.env.example'))
+        .catch(() => {});
+
+      const stored = await ctx.deployReleases.allBodies();
+      const codeVer = await codeVersion(dir);
+      const baseVersion = currentVersion(stored.at(-1)?.appVersion, codeVer);
+      if (baseVersion !== codeVer) await writeVersion(dir, baseVersion);
+      // The notes of earlier releases are part of every package, so they must be there when this one is compared with the last.
+      if (stored.length) await writeReleases(dir, stored);
+      const added = await addExtras(dir, include, step);
+
+      await step('Comparing with the last package');
+      const lastFile = path.join(ctx.appRoot, PACKAGES_DIR, 'last-built.json');
+      const last = await readJsonFile(lastFile);
+      const before = await hashTree(dir);
+      const changedFiles = diffHashes(last?.files ?? null, before);
+      if (!changedFiles.length) {
+        await db('deploy_runs')
+          .where({ id: runId })
+          .update({
+            status: 'done',
+            step: null,
+            message: `Nothing changed since the last package (v${last?.version ?? baseVersion}).`,
+            finished_at: now(),
+          });
+        return;
+      }
+
+      const version = bumpVersion(baseVersion, include.bump);
+      await writeVersion(dir, version);
+      await step('Writing the release notes');
+      const prevMigrations = last
+        ? Object.keys(last.files)
+            .filter((f) => f.startsWith('migrations/'))
+            .map((f) => f.slice('migrations/'.length))
+        : null;
+      const dev = await run('git', ['rev-parse', 'HEAD'], ctx.appRoot);
+      const release = buildRelease({
+        prev: {
+          releases: stored,
+          schema: null,
+          libraries: null,
+          plan: null,
+          plugins: null,
+          migrations: prevMigrations,
+          manifest: null,
+        },
+        next: await readState(dir),
+        changed: changedFiles,
+        migrationsNew: await newMigrations(ctx.appRoot, prevMigrations),
+        title: include.title,
+        notes: include.notes,
+        devCommit: dev.code === 0 ? dev.out.slice(0, 40) : null,
+        commits: [],
+        by: actor?.email ?? null,
+        added,
+        version,
+        bump: include.bump,
+      });
+      await writeReleases(dir, [...stored, release]);
+
+      await step('Writing the manifest');
+      const files = await hashTree(dir);
+      const manifest = makeManifest({
+        version,
+        seq: release.seq,
+        name: JSON.parse(await fs.readFile(path.join(dir, 'package.json'), 'utf8')).name,
+        by: actor?.email ?? null,
+        nodeModules: include.nodeModules,
+        files,
+      });
+
+      await step(
+        include.nodeModules ? 'Zipping (with node_modules, this takes a while)' : 'Zipping',
+      );
+      const entries = (await listTree(dir)).map((f) => [f, path.join(dir, f)]);
+      if (include.nodeModules) {
+        const nm = path.join(ctx.appRoot, 'node_modules');
+        const wanted = await listTree(
+          nm,
+          '',
+          (r) => r.startsWith('.bin') || r.startsWith('.cache'),
+        ).catch(() => {
+          throw new Error(
+            'This installation has no node_modules folder to include. Run npm ci first.',
+          );
+        });
+        for (const f of wanted) entries.push([`node_modules/${f}`, path.join(nm, f)]);
+      }
+      const out = path.join(ctx.appRoot, PACKAGES_DIR, `cms-${version}.zip`);
+      await writeZip(out, JSON.stringify(manifest), entries);
+      await fs.writeFile(lastFile, JSON.stringify({ version, files }));
+      await ctx.deployReleases
+        .store(release, { source: 'dev' })
+        .catch((e) => log.warn({ err: e.message }, 'deploy: release notes could not be stored'));
+      const size = (await fs.stat(out)).size;
+      await audit.log({
+        actor,
+        action: 'deploy.package',
+        entity: 'deploy',
+        meta: {
+          version,
+          bump: include.bump,
+          files: entries.length,
+          nodeModules: !!include.nodeModules,
+        },
+      });
+      await db('deploy_runs')
+        .where({ id: runId })
+        .update({
+          status: 'done',
+          step: null,
+          message: `Built cms-${version}.zip (${(size / 1048576).toFixed(1)} MB, ${entries.length} files).`,
+          finished_at: now(),
+        });
+    } catch (e) {
+      log.warn({ err: e.message }, 'deploy: package failed');
+      await db('deploy_runs')
+        .where({ id: runId })
+        .update({ status: 'failed', step: null, message: e.message, finished_at: now() });
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true }).catch(() => {});
+    }
+  }
+
   async function execute(runId, { include, actor }) {
     const dir = path.join(os.tmpdir(), 'deploy');
     const url = settings.get('deploy.repo_url');
@@ -543,6 +722,27 @@ export function createDeploy(ctx) {
     }
   }
 
+  /** Packages built on THIS server (the file lives where it was built), newest first. */
+  async function listPackages() {
+    const dir = path.join(ctx.appRoot, PACKAGES_DIR);
+    const out = [];
+    for (const name of await fs.readdir(dir).catch(() => []))
+      if (PACKAGE_NAME.test(name)) {
+        const st = await fs.stat(path.join(dir, name));
+        out.push({ name, size: st.size, createdAt: Math.round(st.mtimeMs) });
+      }
+    return out.sort((a, b) => b.createdAt - a.createdAt);
+  }
+  function packagePath(name) {
+    if (!PACKAGE_NAME.test(String(name)))
+      throw new HttpError(404, 'not_found', 'That package was not found.');
+    return path.join(ctx.appRoot, PACKAGES_DIR, name);
+  }
+  async function removePackage(name, actor) {
+    await fs.rm(packagePath(name), { force: true });
+    await audit.log({ actor, action: 'deploy.package_removed', entity: 'deploy', meta: { name } });
+  }
+
   /** What the next deploy would make, for each kind of release (shown before anyone chooses). */
   async function versionInfo() {
     const current = currentVersion(await ctx.deployReleases.latestVersion(), ctx.version);
@@ -560,6 +760,10 @@ export function createDeploy(ctx) {
 
     target,
 
+    packages: listPackages,
+    packagePath,
+    removePackage,
+
     async overview() {
       const runs = (await db('deploy_runs').orderBy('id', 'desc').limit(15)).map(toRow);
       return {
@@ -568,6 +772,7 @@ export function createDeploy(ctx) {
         available: await available(),
         conflicts: await ctx.deploySync.openConflictCount(),
         version: await versionInfo(),
+        packages: await listPackages(),
         notes: {
           count: (await ctx.deployReleases.list()).length,
           unread: await ctx.deployReleases.unread(),
@@ -588,11 +793,12 @@ export function createDeploy(ctx) {
 
     /**
      * Starts a deploy. Returns the new run at once; the work continues in the background and the row turns done or failed.
-     * @param {{ themes?: string[], plugins?: string[], siteTree?: boolean, data?: boolean, media?: boolean, title?: string, notes?: string, bump?: string }} include
+     * @param {{ themes?: string[], plugins?: string[], siteTree?: boolean, data?: boolean, media?: boolean, title?: string, notes?: string, bump?: string, package?: boolean, nodeModules?: boolean }} include
      */
     async start(include, actor) {
       const url = settings.get('deploy.repo_url');
-      if (!url)
+      const asPackage = include.package === true;
+      if (!url && !asPackage)
         throw new HttpError(
           409,
           'no_target',
@@ -619,18 +825,19 @@ export function createDeploy(ctx) {
         notes: String(include.notes ?? '').slice(0, 4000),
         // A deploy nobody classified (the scheduler, an old client) is an issue fix: the smallest claim.
         bump: BUMPS.includes(include.bump ?? '') ? include.bump : 'fix',
+        nodeModules: asPackage && include.nodeModules === true,
       };
       const id = await insertGetId(db('deploy_runs'), {
         status: 'running',
         step: 'Starting',
-        repo: redact(url),
-        branch: settings.get('deploy.branch'),
+        repo: asPackage ? 'Offline package (zip)' : redact(url),
+        branch: asPackage ? '-' : settings.get('deploy.branch'),
         node_id: env.nodeId,
         host: os.hostname().slice(0, 190),
         created_by: actor?.id ?? null,
         created_at: now(),
       });
-      const job = execute(id, { include: chosen, actor });
+      const job = (asPackage ? executePackage : execute)(id, { include: chosen, actor });
       pending.add(job);
       job.finally(() => pending.delete(job));
       return toRow(await db('deploy_runs').where({ id }).first());

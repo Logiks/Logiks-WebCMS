@@ -2371,6 +2371,7 @@ document.addEventListener('alpine:init', () => {
     title: '', // release title and notes for the next deploy
     notes: '',
     bump: 'fix', // major | minor | fix: decides the next version number
+    withNodeModules: false, // offline package only
     releases: [], // release notes, newest first
     unread: 0,
     openId: null,
@@ -2583,6 +2584,42 @@ document.addEventListener('alpine:init', () => {
         !!this.data &&
         (this.url.trim() !== this.data.target.url || this.branch.trim() !== this.data.target.branch)
       );
+    },
+    async buildPackage() {
+      if (
+        !confirm(
+          `Build an offline package as ${this.nextVersion(this.bump)}? It takes the same choices as a deploy and does not push anywhere.`,
+        )
+      )
+        return;
+      if (this.selDirty() && !(await this.saveSelection())) return;
+      try {
+        await api('POST', '/admin/deploy/run', {
+          package: true,
+          nodeModules: this.withNodeModules,
+          themes: this.themes,
+          plugins: this.plugins,
+          siteTree: this.siteTree,
+          data: this.withData && !!this.data.available.data,
+          media: this.withMedia,
+          title: this.title.trim(),
+          notes: this.notes.trim(),
+          bump: this.bump,
+        });
+        toast('Building the package…');
+        await this.refresh();
+      } catch (e) {
+        toast(e.message, 'error');
+      }
+    },
+    async removePackage(p) {
+      if (!confirm(`Delete ${p.name} from this server?`)) return;
+      try {
+        await api('DELETE', `/admin/deploy/packages/${encodeURIComponent(p.name)}`);
+        await this.refresh();
+      } catch (e) {
+        toast(e.message, 'error');
+      }
     },
     nextVersion(kind) {
       return this.data?.version ? 'v' + this.data.version.next[kind] : '';

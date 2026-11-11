@@ -39,7 +39,44 @@
               <textarea class="form-control form-control-sm" id="dep-notes" x-model="notes" rows="3" maxlength="4000" placeholder="Anything to check or do after updating"></textarea>
               <div class="small muted mt-1">Every deploy also writes release notes into the repository: what changed, and what you may want to remove by hand, because a deploy never removes or renames anything.</div>
             </div>
+            <div class="form-check mt-3" data-nm><input class="form-check-input" type="checkbox" id="dep-nm" x-model="withNodeModules"><label class="form-check-label" for="dep-nm">Offline package: include <span class="mono">node_modules</span> <span class="muted small">(for a server with no internet; much bigger, and only runs on the same operating system and CPU as this server)</span></label></div>
             <div class="mt-3"><button class="btn btn-primary" :disabled="!canDeploy()" @click="deploy()">Deploy</button> <span class="small muted ms-2" x-show="targetDirty()">Save the repository first.</span><span class="small muted ms-2" x-show="!data?.target.url">Set a repository first.</span><span class="small muted ms-2" x-show="running">A deploy is running…</span></div>
+            <div class="mt-2"><button class="btn btn-outline-primary" :disabled="running" @click="buildPackage()" data-build-package>Build offline package (zip)</button> <span class="small muted ms-2">Same choices as above, no git needed. See "Offline packages" below.</span></div>
+          </div>
+        </div>
+
+        <div class="panel mb-3" x-show="data && can('deploy.run')" data-packages>
+          <div class="panel-h">Offline packages</div>
+          <div class="p-3">
+            <p class="small muted mb-2">For servers that cannot reach git or the internet: build a zip here, carry it over (USB, file share), and install it there. Every file is checked against a hash before anything changes, and what an update replaces is saved first. The file stays on this server until you delete it.</p>
+            <div class="empty" x-show="data && !data.packages.length">None built yet. Use "Build offline package" above.</div>
+            <table class="table table-sm" x-show="data && data.packages.length"><tbody>
+              <template x-for="p in (data ? data.packages : [])" :key="p.name">
+                <tr>
+                  <td class="mono"><a :href="'/api/admin/deploy/packages/' + encodeURIComponent(p.name)" x-text="p.name"></a></td>
+                  <td class="muted small text-nowrap" x-text="(p.size / 1048576).toFixed(1) + ' MB'"></td>
+                  <td class="muted small text-nowrap" x-text="ago(p.createdAt)"></td>
+                  <td class="text-end"><button class="btn btn-sm btn-outline-danger" @click="removePackage(p)" :aria-label="'Delete ' + p.name">Delete</button></td>
+                </tr>
+              </template>
+            </tbody></table>
+            <details>
+              <summary class="small fw-semibold">How to install a package on the other server</summary>
+              <div class="small mt-2">
+                <div class="fw-semibold">Update a server that already runs this application</div>
+                <pre class="mono mb-2 p-2 border rounded">cd /path/to/the/application
+npm run cli -- package:apply /path/to/cms-1.2.0.zip
+# then restart the server (systemd, PM2, docker restart …)</pre>
+                <div class="fw-semibold">Install on a new server</div>
+                <pre class="mono mb-2 p-2 border rounded">unzip cms-1.2.0.zip -d /path/to/the/application
+cd /path/to/the/application
+npm ci --omit=dev        # skip this if the package included node_modules
+npm run setup -- --email you@example.com
+npm run cli -- package:import
+npm start</pre>
+                <div class="muted">An update never touches <span class="mono">.env</span>, <span class="mono">data/</span> or your own records, and it needs Node 24. If dependencies changed and the server has no internet, build the package with node_modules included.</div>
+              </div>
+            </details>
           </div>
         </div>
 

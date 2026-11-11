@@ -32,6 +32,12 @@ CMS command line
                                              turn every .html snippet in a folder (a clone of HyperUI, PrebuiltUI…) into a
                                              component: Tailwind compiled to scoped CSS, name = prefix + file path
 
+  package:build [--bump fix|minor|major] [--with-node-modules] [--title "..."] [--notes "..."] [--no-data] [--no-media]
+                                             build an offline package (zip) in data/packages/ for a server with no git or internet
+  package:apply <file.zip> [--force]         update THIS server from an offline package: checks it, saves what it replaces, replaces
+                                             the code, installs, migrates, imports pages/data/notes. Then restart the server.
+  package:import [dir] [--label x]           import pages, data and release notes from an unzipped package (a new server, after setup)
+
   user:create --email a@b.com --name "A B" --role Administrator [--password ...]
   user:reset-password <email> [--password ...]
   user:unlock <email>
@@ -98,6 +104,36 @@ async function main() {
       console.log(
         `${id.padEnd(16)} ${m.label}${m.requires.length ? `  (needs ${m.requires.join(', ')})` : ''}`,
       );
+    }
+    return;
+  }
+
+  // Offline update (D-145): runs before anything else loads, in the code that is about to be replaced, and starts the new
+  // code as separate processes for migrations and the import. It needs no database of its own.
+  if (cmd === 'package:apply') {
+    if (!pos[0]) throw new Error('Give the package: npm run cli -- package:apply <file.zip>');
+    const { applyPackage } = await import('../modules/deploy/package.js');
+    const mine = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
+    try {
+      const r = await applyPackage({
+        root: ROOT,
+        zip: path.resolve(pos[0]),
+        force: Boolean(flags.force),
+        currentVersion: mine.version,
+        log: (l) => console.log(l),
+      });
+      if (r.importOut) console.log(r.importOut);
+      console.log(
+        `\nUpdated v${r.from} → v${r.version} (${r.files} files replaced${r.removed ? `, ${r.removed} removed` : ''}).\n` +
+          `The files it replaced are saved in ${path.relative(ROOT, r.snapshot)}.\nRestart the server to run the new version.`,
+      );
+    } catch (e) {
+      if (e?.name === 'PackageError' || e instanceof Error) {
+        console.error(`\n✖ ${e.message}`);
+        process.exitCode = 1;
+        return;
+      }
+      throw e;
     }
     return;
   }
@@ -180,6 +216,50 @@ async function main() {
         const dir = path.resolve(pos[0] || ctx.env.SITE_DIR);
         const r = await ctx.siteFiles.exportTo(dir);
         console.log(`Wrote ${r.files} file(s) to ${dir}`);
+        break;
+      }
+      case 'package:build': {
+        const bump = String(flags.bump || 'fix');
+        const run = await ctx.deploy.start(
+          {
+            package: true,
+            nodeModules: Boolean(flags['with-node-modules']),
+            bump,
+            title: flags.title === true ? '' : String(flags.title ?? ''),
+            notes: flags.notes === true ? '' : String(flags.notes ?? ''),
+            data: !flags['no-data'],
+            media: !flags['no-media'],
+          },
+          null,
+        );
+        await ctx.deploy.idle();
+        const row = (await ctx.deploy.overview()).runs.find((r) => r.id === run.id);
+        console.log(row?.message ?? 'Done.');
+        if (row?.status !== 'done') process.exitCode = 1;
+        else if (/^Built /.test(row.message))
+          console.log(`Folder: ${path.join(ctx.appRoot, 'data/packages')}`);
+        break;
+      }
+      case 'package:import': {
+        const dir = path.resolve(String(pos[0] || ROOT));
+        const label = flags.label === true || !flags.label ? 'package' : String(flags.label);
+        const r = await ctx.updates.importFolder(dir, label, null);
+        const bits = [
+          r.pages && `${r.pages.written} page file(s) written`,
+          r.data && 'data added',
+          r.sync &&
+            `records: ${r.sync.added} new, ${r.sync.updated} updated, ${r.sync.conflicts} waiting`,
+          r.notes && `${r.notes} release note(s)`,
+        ].filter(Boolean);
+        console.log(`Imported: ${bits.join(', ') || 'nothing new'}.`);
+        for (const p of r.problems) console.log(`  ✖ ${p}`);
+        if (r.problems.length) process.exitCode = 1;
+        // A freshly unzipped package remembers what it installed, so a later package can remove files it no longer has.
+        const mf = path.join(dir, 'package-manifest.json');
+        if (dir === ROOT && fs.existsSync(mf)) {
+          const { parseManifest, writeApplied } = await import('../modules/deploy/package.js');
+          await writeApplied(ROOT, parseManifest(fs.readFileSync(mf, 'utf8')));
+        }
         break;
       }
       case 'site:push': {

@@ -77,6 +77,24 @@ export async function writeVersion(dir, version) {
   });
 }
 
+/**
+ * A package.json or lockfile that differs ONLY in its own version needs no `npm ci`: every deploy bumps that line (D-144),
+ * and reinstalling on each update would be slow for nothing. Anything else in either file still means install.
+ */
+export function sameWithoutVersion(a, b) {
+  try {
+    const strip = (text) => {
+      const j = JSON.parse(text);
+      delete j.version;
+      if (j.packages?.['']) delete j.packages[''].version;
+      return JSON.stringify(j);
+    };
+    return strip(a) === strip(b);
+  } catch {
+    return false;
+  }
+}
+
 // ───────────────────────────── reading a deployment checkout ─────────────────────────────
 
 /** What a deployment checkout says about the previous (or the new) state. Everything is optional: an old one has none of it. */
@@ -531,6 +549,13 @@ export function createDeployReleases(ctx) {
       return (
         await db('deploy_releases').orderBy('created_at', 'desc').orderBy('id', 'desc').limit(100)
       ).map(row);
+    },
+
+    /** Every release this server has, oldest first, as written (what a new package carries forward). */
+    async allBodies() {
+      return (await db('deploy_releases').orderBy('seq', 'asc').orderBy('id', 'asc')).map((r) =>
+        JSON.parse(r.body),
+      );
     },
 
     /** The version of the newest release this server has (made here or received), or null before any carried one. */

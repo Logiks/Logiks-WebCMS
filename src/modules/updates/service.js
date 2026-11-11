@@ -7,6 +7,9 @@ import path from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import yazl from 'yazl';
 import { DATA_DIR } from '../deploy/service.js';
+import { sameWithoutVersion } from '../deploy/release.js';
+
+export { sameWithoutVersion };
 import { scanMigration } from '../../core/migration-guard.js';
 import { dialect } from '../../core/db/index.js';
 import { HttpError, notFound } from '../../core/http/errors.js';
@@ -40,24 +43,6 @@ export function classifyChanges(files) {
     needsInstall: files.some((f) => f === 'package.json' || f === 'package-lock.json'),
     needsMigrate: files.some((f) => f.startsWith('migrations/')),
   };
-}
-
-/**
- * A package.json or lockfile that differs ONLY in its own version needs no `npm ci`: every deploy bumps that line (D-144),
- * and reinstalling on each update would be slow for nothing. Anything else in either file still means install.
- */
-export function sameWithoutVersion(a, b) {
-  try {
-    const strip = (text) => {
-      const j = JSON.parse(text);
-      delete j.version;
-      if (j.packages?.['']) delete j.packages[''].version;
-      return JSON.stringify(j);
-    };
-    return strip(a) === strip(b);
-  } catch {
-    return false;
-  }
 }
 
 const lastLine = (text) =>
@@ -496,7 +481,22 @@ export function createUpdatesService({
         const [status, file] = l.split('\t');
         return { status: status[0], file };
       });
+    return importChanges(
+      changes,
+      appRoot,
+      (await git('rev-parse', 'HEAD')).out.slice(0, 40),
+      actor,
+    );
+  }
 
+  /**
+   * Brings in what a deployment carries besides code, from files under `root`: pages (`public/`), the data snapshot
+   * (`deploy-data/`) and the release notes (`deploy-notes/`). `changes` says which of them to read, as `git diff --name-status`
+   * would: a git update passes what changed between two commits, an offline package passes everything it holds.
+   * @param {{status: string, file: string}[]} changes @param {string} root @param {string} label names this deployment in the records step
+   */
+  async function importChanges(changes, root, label, actor) {
+    const out = { pages: null, data: null, sync: null, notes: 0, problems: [] };
     const siteFiles = getSiteFiles();
     if (settings.get('updates.import_site') && siteFiles) {
       const res = { written: 0, removed: 0 };
@@ -510,7 +510,7 @@ export function createUpdatesService({
               res.removed++;
             }
           } else {
-            await siteFiles.put(rel, await fsp.readFile(path.join(appRoot, c.file), 'utf8'), actor);
+            await siteFiles.put(rel, await fsp.readFile(path.join(root, c.file), 'utf8'), actor);
             res.written++;
           }
         } catch (e) {
@@ -532,7 +532,7 @@ export function createUpdatesService({
         let id = null;
         try {
           set({ step: 'Adding the data that came with the update' });
-          await zipSnapshot(path.join(appRoot, DATA_DIR), tmp);
+          await zipSnapshot(path.join(root, DATA_DIR), tmp);
           id = (await backup.upload(tmp, 'Deployed data', actor, { source: 'deploy' })).id;
           await backup.restore(id, { confirm: 'RESTORE' }, actor);
           await backup.idle();
@@ -557,8 +557,7 @@ export function createUpdatesService({
     ) {
       try {
         set({ step: 'Bringing in the chosen records' });
-        const head = (await git('rev-parse', 'HEAD')).out.slice(0, 40);
-        const r = await sync.importFrom(path.join(appRoot, DATA_DIR), actor, head);
+        const r = await sync.importFrom(path.join(root, DATA_DIR), actor, label);
         const tot = Object.values(r.tables).reduce(
           (a, t) => ({ added: a.added + t.added, updated: a.updated + t.updated }),
           { added: 0, updated: 0 },
@@ -588,7 +587,7 @@ export function createUpdatesService({
       };
       for (const f of noteFiles)
         try {
-          const release = JSON.parse(await fsp.readFile(path.join(appRoot, f), 'utf8'));
+          const release = JSON.parse(await fsp.readFile(path.join(root, f), 'utf8'));
           await releases.store(release, {
             source: 'deploy',
             result: f === noteFiles.at(-1) ? result : null,
@@ -1101,6 +1100,18 @@ export function createUpdatesService({
       clearTimeout(healthyTimer);
     },
     restorePoints: listRestorePoints,
+    /**
+     * Imports pages, data and release notes from a folder that holds `public/`, `deploy-data/` and `deploy-notes/`
+     * (an unpacked offline package), the same way an update does after a pull. Returns what it did and what went wrong.
+     * @param {string} root @param {string} label @param {any} actor
+     */
+    async importFolder(root, label, actor = null) {
+      const changes = [];
+      for (const top of ['public', DATA_DIR, 'deploy-notes'])
+        for (const f of await listFiles(root, top).catch(() => []))
+          changes.push({ status: 'A', file: f });
+      return importChanges(changes, root, label, actor);
+    },
     serverKey: () => serverKey,
     snapshot: () => st,
     setSource,

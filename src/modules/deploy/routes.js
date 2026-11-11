@@ -24,6 +24,8 @@ const runBody = z.object({
   title: z.string().max(200).optional(),
   notes: z.string().max(4000).optional(),
   bump: z.enum(['major', 'minor', 'fix']).optional(),
+  package: z.boolean().optional(),
+  nodeModules: z.boolean().optional(),
 });
 
 /** Operations → Deploy: choose a repository and branch, push this installation's code to it, see past deploys. */
@@ -55,6 +57,19 @@ export default function deployRoutes(ctx) {
       res.status(202).json({ run: await deploy.start(include, actorOf(req)) });
     },
   );
+
+  // Offline packages (D-145): zips built on this server, to carry to a server with no access to git or the internet.
+  r.get('/deploy/packages', requirePermission('deploy.read'), async (_req, res) => {
+    res.json({ packages: await deploy.packages() });
+  });
+  r.get('/deploy/packages/:name', requirePermission('deploy.run'), async (req, res) => {
+    const file = deploy.packagePath(req.params.name);
+    res.download(file, req.params.name);
+  });
+  r.delete('/deploy/packages/:name', requirePermission('deploy.run'), async (req, res) => {
+    await deploy.removePackage(req.params.name, actorOf(req));
+    res.json({ ok: true });
+  });
 
   // Which data a deploy carries (saved as a setting, so it is the same next time and on every server).
   r.get('/deploy/data', requirePermission('deploy.read'), async (_req, res) => {
