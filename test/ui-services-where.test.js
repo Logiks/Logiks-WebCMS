@@ -67,14 +67,13 @@ test('Services → Database table: build the where logic with conditions and a g
   const row = (i) => ({
     column: () => ed().querySelectorAll('select[aria-label="Column"]')[i],
     op: () => ed().querySelectorAll('select[aria-label="Condition"]')[i],
-    source: () => ed().querySelectorAll('select[aria-label="Compare with"]')[i],
+    choice: () => ed().querySelectorAll('select[aria-label="Compare with"]')[i],
     value: () => ed().querySelectorAll('input[aria-label="Fixed value"]')[i],
-    param: () => ed().querySelectorAll('select[aria-label="Parameter"]')[i],
-    skip: () => ed().querySelectorAll('.form-check-input[id^="wi-"]')[i],
+    skip: () => ed().querySelectorAll('input[aria-label="Skip if not given"]')[i],
   });
   setValue(row(0).column(), 'price');
   setValue(row(0).op(), '>=');
-  setValue(row(0).source(), 'value');
+  setValue(row(0).choice(), '__value__');
   setValue(row(0).value(), '20');
 
   // A group: name contains the parameter OR color is green. (Two rows inside the group.)
@@ -86,18 +85,20 @@ test('Services → Database table: build the where logic with conditions and a g
   await wait(() => ed().querySelectorAll('select[aria-label="Condition"]').length === 3);
   setValue(row(1).column(), 'name');
   setValue(row(1).op(), 'contains');
-  setValue(row(1).param(), 'q');
+  setValue(row(1).choice(), 'q');
   check(row(1).skip());
   setValue(row(2).column(), 'color');
   setValue(row(2).op(), '=');
-  setValue(row(2).source(), 'value');
+  setValue(row(2).choice(), '__value__');
   setValue(row(2).value(), 'green');
   setValue(ed().querySelector('select[aria-label="Group matches all or any"]'), 'any');
 
-  await wait(() =>
-    /price is at least “20” AND \(name contains ‹q› OR color is “green”\)/.test(
-      ed().querySelector('[data-where-summary]')?.textContent ?? '',
-    ),
+  const summary = () => ed().querySelector('[data-where-summary]')?.textContent ?? '';
+  await wait(() => /OR color is/.test(summary())).catch(() => {});
+  assert.match(
+    summary(),
+    /price at least “20” AND \(name contains ‹q› OR color is “green”\)/,
+    'the summary reads the logic back',
   );
 
   const save = () =>
@@ -133,7 +134,7 @@ test('Services → Database table: build the where logic with conditions and a g
   await wait(() => ed() && ed().querySelectorAll('select[aria-label="Condition"]').length === 3);
   assert.equal(row(0).op().value, '>=');
   assert.equal(row(0).value().value, '20');
-  assert.equal(row(1).param().value, 'q');
+  assert.equal(row(1).choice().value, 'q');
   assert.equal(row(2).value().value, 'green');
   assert.equal(b.$('select[aria-label="Group matches all or any"]').value, 'any');
   assert.deepEqual(b.errors, []);

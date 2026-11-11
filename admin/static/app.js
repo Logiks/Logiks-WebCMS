@@ -6712,18 +6712,19 @@ document.addEventListener('alpine:init', () => {
     whereOps: [
       ['=', 'is'],
       ['!=', 'is not'],
-      ['>', 'is greater than'],
-      ['>=', 'is at least'],
-      ['<', 'is less than'],
-      ['<=', 'is at most'],
+      ['>', 'greater than'],
+      ['>=', 'at least'],
+      ['<', 'less than'],
+      ['<=', 'at most'],
       ['contains', 'contains'],
       ['starts_with', 'starts with'],
       ['ends_with', 'ends with'],
-      ['in', 'is one of (comma list)'],
-      ['not_in', 'is none of (comma list)'],
+      ['in', 'is one of'],
+      ['not_in', 'is none of'],
       ['is_null', 'is empty'],
       ['not_null', 'is not empty'],
     ],
+    FIXED: '__value__',
     opNeedsValue(op) {
       return op !== 'is_null' && op !== 'not_null';
     },
@@ -6733,8 +6734,7 @@ document.addEventListener('alpine:init', () => {
         kind: 'c',
         column: '',
         op: '=',
-        source: 'param',
-        param: '',
+        choice: '', // a parameter's name, or FIXED for a value typed here
         value: '',
         ignoreIfMissing: false,
       };
@@ -6767,8 +6767,7 @@ document.addEventListener('alpine:init', () => {
         kind: 'c',
         column: w.column,
         op: w.op || '=',
-        source: w.value !== undefined ? 'value' : 'param',
-        param: w.param ?? '',
+        choice: w.value !== undefined ? this.FIXED : (w.param ?? ''),
         value: w.value === undefined ? '' : String(w.value),
         ignoreIfMissing: !!w.ignoreIfMissing,
       };
@@ -6778,9 +6777,9 @@ document.addEventListener('alpine:init', () => {
       if (!c.column) return null;
       const out = { column: c.column, op: c.op };
       if (!this.opNeedsValue(c.op)) return out;
-      if (c.source === 'param') {
-        if (!c.param) return null;
-        out.param = c.param;
+      if (c.choice !== this.FIXED) {
+        if (!c.choice) return null;
+        out.param = c.choice;
         if (c.ignoreIfMissing) out.ignoreIfMissing = true;
         return out;
       }
@@ -6807,9 +6806,9 @@ document.addEventListener('alpine:init', () => {
         if (!c.column) return '…';
         const right = !this.opNeedsValue(c.op)
           ? ''
-          : c.source === 'param'
-            ? ` ‹${c.param || '…'}›`
-            : ` “${c.value}”`;
+          : c.choice === this.FIXED
+            ? ` “${c.value}”`
+            : ` ‹${c.choice || '…'}›`;
         return `${c.column} ${label(c.op)}${right}`;
       };
       const join = (m) => (m === 'any' ? ' OR ' : ' AND ');
