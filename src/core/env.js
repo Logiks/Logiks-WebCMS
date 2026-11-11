@@ -32,7 +32,10 @@ const schema = z.object({
   SHUTDOWN_DELAY_MS: z.coerce.number().int().min(0).default(0),
   KEEP_ALIVE_TIMEOUT_MS: z.coerce.number().int().min(1000).default(65000),
   JOB_BACKOFF_MS: z.coerce.number().int().min(1).default(2000),
+  // CMS users' media library. Travels with the project (Deploy carries it), so developers can commit media and move it to production.
   MEDIA_DIR: z.string().default('./data/media'),
+  // Files uploaded by site visitors (frontend). Stays on the server it was uploaded to: never committed, never deployed.
+  UPLOAD_DIR: z.string().default('./uploads'),
   // Where each server mirrors the site tree (pages/, components/). A derived copy: the database is the source of truth.
   SITE_DIR: z.string().default('./public'),
   // Where each server unpacks the npm packages of System → Libraries. Also a derived copy (the tarballs are in the database).

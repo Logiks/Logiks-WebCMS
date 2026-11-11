@@ -244,6 +244,8 @@ export async function createContext({ env, bus: busOverride, log: logOverride, a
       await events.emit('content.deleted', { id: entry.id, type: entry.type, title: entry.title });
   });
   const storage = createLocalStorage(env.MEDIA_DIR);
+  // Visitor uploads from the public site: a separate store from the media library, never part of git or Deploy.
+  const uploads = createLocalStorage(env.UPLOAD_DIR);
   const media = createMediaService({
     db,
     dialect: dialect(db),
@@ -378,6 +380,7 @@ export async function createContext({ env, bus: busOverride, log: logOverride, a
     content,
     media,
     storage,
+    uploads,
     themes,
     siteFiles,
     libraries,

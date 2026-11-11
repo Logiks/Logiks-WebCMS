@@ -67,7 +67,7 @@ Only the few needed before the database can be reached are environment variables
 | `PORT`                                                                | The port the server listens on                                                            |
 | `TRUST_PROXY_HOPS`                                                    | How many proxies sit in front (1 behind a single load balancer)                           |
 | `SHUTDOWN_DELAY_MS`                                                   | How long to keep serving after being told to stop, so the load balancer can drain         |
-| `SITE_DIR`, `MEDIA_DIR`, `LIBRARY_DIR`, `PLUGINS_DIR`, `VERSIONS_DIR` | Per-server folders; most can be rebuilt from the database                                 |
+| `SITE_DIR`, `MEDIA_DIR`, `UPLOAD_DIR`, `LIBRARY_DIR`, `PLUGINS_DIR`, `VERSIONS_DIR` | Per-server folders; most can be rebuilt from the database                                 |
 | `CFG__<group>__<key>`                                                 | Pins one setting from the server; the admin shows it read-only                            |
 
 ## Load balancer settings (AWS ALB)

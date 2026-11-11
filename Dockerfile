@@ -17,7 +17,7 @@ COPY admin ./admin
 COPY site ./site
 # Uploads. In a cluster mount ONE shared volume here on every web and worker container (EFS, NFS): a file uploaded through one server must be readable by all of them.
 # public/ is this container's own mirror of the site tree (derived from the database; safe to lose).
-RUN mkdir -p /app/data/media /app/public && chown -R node:node /app/data /app/public
+RUN mkdir -p /app/data/media /app/uploads /app/public && chown -R node:node /app/data /app/uploads /app/public
 USER node
 EXPOSE 3000
 # Liveness only. Point the ALB target group at /readyz. A worker serves no HTTP, so it is healthy while its process runs.
