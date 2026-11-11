@@ -557,6 +557,8 @@ export function defineCoreSettings(registry) {
             : 'Use a branch name, like main (letters, numbers, dots, dashes, slashes).',
         help: 'Created on the first deploy if it does not exist yet.',
       },
+      // Which tables and settings a deploy carries, and how (skip / add / sync). Edited in Operations → Deploy, not here.
+      data_selection: { type: 'json', label: 'Data to carry', default: null, hidden: true },
     },
   });
 
@@ -601,6 +603,12 @@ export function defineCoreSettings(registry) {
         label: 'Run database migrations after a pull',
         default: true,
         help: 'Production servers refuse to start with pending migrations, so leave this on unless your pipeline runs them.',
+      },
+      allow_destructive_migrations: {
+        type: 'boolean',
+        label: 'Allow updates that remove or rename tables or columns',
+        default: false,
+        help: 'Off: an update whose database changes would drop or rename a table or column, or empty a table, is refused before anything changes, and the update screen says which. Turn it on only after a backup, for an update you have checked.',
       },
       import_site: {
         type: 'boolean',

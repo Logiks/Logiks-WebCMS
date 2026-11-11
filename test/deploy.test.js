@@ -457,6 +457,8 @@ test('end to end: what dev built (pages, data, media, themes) arrives on product
     assert.equal(snap.status, 'done', snap.message);
     assert.match(snap.message, /imported 1 page file/);
     assert.match(snap.message, /added the data/);
+    assert.match(snap.message, /brought in records/, 'the chosen records come in too (D-134)');
+    assert.doesNotMatch(snap.message, /Not everything came across/);
 
     assert.match(
       String(prod.ctx.siteFiles.get('pages/hello.html')?.content),

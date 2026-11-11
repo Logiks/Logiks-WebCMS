@@ -8,6 +8,11 @@ const targetBody = z.object({
   url: z.string().trim().max(300),
   branch: z.string().trim().min(1).max(100),
 });
+const selectionBody = z.object({
+  tables: z.record(z.string().max(64), z.enum(['skip', 'add', 'sync'])).optional(),
+  settings: z.array(z.string().max(200)).max(2000).optional(),
+});
+const idsBody = z.object({ ids: z.array(z.number().int().positive()).min(1).max(500) });
 const runBody = z.object({
   themes: z.array(z.string().max(32)).max(100).optional(),
   plugins: z.array(z.string().max(191)).max(100).optional(),
@@ -43,6 +48,45 @@ export default function deployRoutes(ctx) {
     async (req, res) => {
       const include = parse(runBody, req.body);
       res.status(202).json({ run: await deploy.start(include, actorOf(req)) });
+    },
+  );
+
+  // Which data a deploy carries (saved as a setting, so it is the same next time and on every server).
+  r.get('/deploy/data', requirePermission('deploy.read'), async (_req, res) => {
+    res.json(await ctx.deploySync.overview());
+  });
+  r.put(
+    '/deploy/data',
+    docs({ body: selectionBody }),
+    requirePermission('deploy.run'),
+    async (req, res) => {
+      const body = parse(selectionBody, req.body);
+      await ctx.deploySync.saveSelection(body, actorOf(req));
+      res.json(await ctx.deploySync.overview());
+    },
+  );
+
+  // Changes a deployment brought that differ from what is here. Nothing is applied until a person ticks it.
+  r.get('/deploy/conflicts', requirePermission('deploy.read'), async (req, res) => {
+    const status = ['open', 'applied', 'dismissed'].includes(String(req.query.status))
+      ? String(req.query.status)
+      : 'open';
+    res.json({ conflicts: await ctx.deploySync.listConflicts(status) });
+  });
+  r.post(
+    '/deploy/conflicts/apply',
+    docs({ body: idsBody }),
+    requirePermission('deploy.run'),
+    async (req, res) => {
+      res.json(await ctx.deploySync.applyConflicts(parse(idsBody, req.body).ids, actorOf(req)));
+    },
+  );
+  r.post(
+    '/deploy/conflicts/dismiss',
+    docs({ body: idsBody }),
+    requirePermission('deploy.run'),
+    async (req, res) => {
+      res.json(await ctx.deploySync.dismissConflicts(parse(idsBody, req.body).ids, actorOf(req)));
     },
   );
 

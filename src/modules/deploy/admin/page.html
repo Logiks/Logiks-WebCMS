@@ -29,6 +29,69 @@
           </div>
         </div>
 
+        <div class="panel mb-3" x-show="view && can('deploy.run')">
+          <div class="panel-h">Data to copy</div>
+          <div class="p-3">
+            <p class="small muted mb-3">Choose, table by table, what a deploy carries to production. <strong>Table structure is always copied.</strong> <em>Add missing</em> adds records production lacks. <em>Sync</em> also updates a record dev changed, but only if nobody changed it on production too; otherwise it waits for you under "Waiting for you". <strong>Nothing is ever deleted</strong>, and records are matched by name, slug or email, never by id. Secrets (passwords, API keys, webhook secrets) never travel.</p>
+            <template x-for="g in (view ? view.groups : [])" :key="g.id">
+              <div class="mb-3" x-show="rowsOf(g.id).length">
+                <div class="fw-semibold" x-text="g.label"></div>
+                <div class="small muted mb-1" x-text="g.help"></div>
+                <table class="table table-sm mb-0"><tbody>
+                  <template x-for="t in rowsOf(g.id)" :key="t.table">
+                    <tr>
+                      <td class="align-middle"><span x-text="t.label"></span> <span class="muted small mono" x-show="t.label !== t.table" x-text="t.table"></span></td>
+                      <td class="align-middle text-end muted small text-nowrap" x-text="t.rows === null ? '' : t.rows + ' record' + (t.rows === 1 ? '' : 's')"></td>
+                      <td class="text-end" style="width:11rem"><select class="form-select form-select-sm" :aria-label="'What to copy from ' + t.table" x-model="modes[t.table]" @change="sync(t.table)">
+                        <template x-for="m in t.modes" :key="m"><option :value="m" x-text="modeLabel(m)"></option></template>
+                      </select></td>
+                    </tr>
+                  </template>
+                </tbody></table>
+              </div>
+            </template>
+            <details class="mb-3">
+              <summary class="fw-semibold">Settings to copy <span class="muted small fw-normal" x-text="'(' + picked.length + ' chosen)'"></span></summary>
+              <div class="small muted my-1">Every setting is copied by default; untick the ones that should stay different on production (the site address, mail, maintenance mode…). A setting someone changed on production is never overwritten without your say-so. Keys and passwords are never copied.</div>
+              <template x-for="ns in (view ? view.settings : [])" :key="ns.namespace">
+                <div class="mb-2">
+                  <div class="form-check"><input class="form-check-input" type="checkbox" :id="'dep-ns-' + ns.namespace" :checked="nsAll(ns)" @change="toggleNs(ns, $event.target.checked)"><label class="form-check-label fw-semibold" :for="'dep-ns-' + ns.namespace" x-text="ns.title"></label></div>
+                  <div class="ms-4 d-flex flex-wrap gap-3">
+                    <template x-for="f in ns.fields" :key="f.id"><div class="form-check"><input class="form-check-input" type="checkbox" :id="'dep-st-' + f.id" :value="f.id" x-model="picked"><label class="form-check-label small" :for="'dep-st-' + f.id" x-text="f.label"></label></div></template>
+                  </div>
+                </div>
+              </template>
+              <div class="mt-2" x-show="view && view.secretKeys.length">
+                <div class="fw-semibold small">Never copied: keys and secrets <span class="muted fw-normal" x-text="'(' + (view ? view.secretKeys.length : 0) + ')'"></span></div>
+                <div class="small muted mb-1">These are encrypted for each server. Enter them on production under Settings.</div>
+                <div class="d-flex flex-wrap gap-2"><template x-for="k in (view ? view.secretKeys : [])" :key="k.id"><span class="tag" x-text="k.group + ' · ' + k.label"></span></template></div>
+              </div>
+            </details>
+            <button class="btn btn-sm btn-outline-primary" :disabled="!selDirty()" @click="saveSelection()">Save as default</button>
+            <span class="small muted ms-2" x-show="selDirty()">Deploy saves this choice first.</span>
+          </div>
+        </div>
+
+        <div class="panel mb-3" x-show="conflicts.length">
+          <div class="panel-h">Waiting for you <span class="tag warn ms-1" x-text="conflicts.length"></span></div>
+          <div class="p-3">
+            <p class="small muted mb-2">These records differ on this server, so the deployment did not change them. Tick the ones where dev's version should win, or keep this server's.</p>
+            <table class="table table-sm"><tbody>
+              <template x-for="c in conflicts" :key="c.id">
+                <tr>
+                  <td style="width:2rem"><input class="form-check-input" type="checkbox" :aria-label="'Select ' + c.label" :value="c.id" x-model.number="ticked"></td>
+                  <td><div x-text="c.label"></div>
+                    <template x-for="ch in c.changes" :key="ch.column"><div class="small muted"><span class="mono" x-text="ch.column"></span>: here <span class="mono" x-text="ch.current === null ? '(empty)' : ch.current"></span> · dev <span class="mono" x-text="ch.incoming === null ? '(empty)' : ch.incoming"></span></div></template>
+                  </td>
+                  <td class="muted text-end text-nowrap small" x-text="ago(c.createdAt)"></td>
+                </tr>
+              </template>
+            </tbody></table>
+            <button class="btn btn-sm btn-primary" :disabled="!ticked.length" @click="resolve('apply')">Use dev's version</button>
+            <button class="btn btn-sm btn-outline-secondary ms-1" :disabled="!ticked.length" @click="resolve('dismiss')">Keep this server's</button>
+          </div>
+        </div>
+
         <div class="panel">
           <div class="panel-h">Recent deploys</div>
           <div class="empty" x-show="data && !data.runs.length">Nothing yet. Each deploy shows up here.</div>

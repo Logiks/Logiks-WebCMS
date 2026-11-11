@@ -8,7 +8,6 @@ import AdmZip from 'adm-zip';
 import yauzl from 'yauzl';
 import { dialect, now } from '../../core/db/index.js';
 import { HttpError } from '../../core/http/errors.js';
-import { DATA_PREFIX } from '../backup/service.js';
 import { THEME_ID } from '../themes/package.js';
 import { redact } from '../updates/service.js';
 
@@ -230,9 +229,13 @@ export function createDeploy(ctx) {
       throw new Error(
         'Backups are switched off on this server, so the data cannot be included. Turn the Backups module on, or untick the data option.',
       );
-    const present = (await dialect(db).listTables()).filter((t) => !t.view).map((t) => t.name);
-    const tables = present.filter((n) => DATA_PREFIX.test(n));
-    if (media) tables.push(...['media', 'media_folders'].filter((n) => present.includes(n)));
+    // What goes in is the saved choice (Deploy → Data to copy), never "every table": the target only ever receives what
+    // a person ticked. Tables that do not exist here are left out.
+    const plan = await ctx.deploySync.prepareExport({ media });
+    const present = new Set(
+      (await dialect(db).listTables()).filter((t) => !t.view).map((t) => t.name),
+    );
+    const tables = Object.keys(plan.tables).filter((n) => present.has(n));
     let row;
     try {
       row = await backup.create(
@@ -271,10 +274,13 @@ export function createDeploy(ctx) {
       manifest.createdAt = 0;
       manifest.createdBy = null;
       await fs.writeFile(file, JSON.stringify(manifest));
+      await ctx.deploySync.writePlan(out, plan);
       return {
         tables: Object.keys(manifest.tables ?? {}).length,
         rows: manifest.rows ?? 0,
         media: manifest.media?.files ?? 0,
+        synced: Object.values(plan.tables).filter((m) => m === 'sync').length,
+        settings: plan.settings.length,
       };
     } finally {
       await fs.rm(tmp, { force: true });
@@ -466,7 +472,12 @@ export function createDeploy(ctx) {
 
     async overview() {
       const runs = (await db('deploy_runs').orderBy('id', 'desc').limit(15)).map(toRow);
-      return { target: target(), runs, available: await available() };
+      return {
+        target: target(),
+        runs,
+        available: await available(),
+        conflicts: await ctx.deploySync.openConflictCount(),
+      };
     },
 
     /** Saves where deploys go. Credentials in a URL are refused by the setting's own validation. */

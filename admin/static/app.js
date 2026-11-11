@@ -2315,6 +2315,13 @@ document.addEventListener('alpine:init', () => {
     siteTree: true,
     withData: true,
     withMedia: true,
+    view: null, // the data choice: groups, tables with their mode, settings
+    modes: {}, // table → skip | add | sync, as edited here
+    picked: [], // setting ids ticked
+    saved: '', // the choice as last saved, to tell when it has changed
+    conflicts: [], // changes a deployment brought that differ on this server
+    ticked: [],
+    conflictCount: -1,
     timer: null,
     async init() {
       if (!(await this.mountFragment('deploy', 'page'))) return;
@@ -2335,8 +2342,88 @@ document.addEventListener('alpine:init', () => {
           this.loaded = true;
         }
         this.data = d;
+        if (!this.view && this.can('deploy.read')) await this.loadView();
+        if (d.conflicts !== this.conflictCount) {
+          this.conflictCount = d.conflicts;
+          const c = await api('GET', '/admin/deploy/conflicts');
+          this.conflicts = c.conflicts;
+          this.ticked = this.ticked.filter((id) => c.conflicts.some((x) => x.id === id));
+        }
       } catch {
         /* the next tick tries again */
+      }
+    },
+    async loadView() {
+      const v = await api('GET', '/admin/deploy/data');
+      this.view = v;
+      this.modes = Object.fromEntries(v.tables.map((t) => [t.table, t.mode]));
+      this.picked = v.settings.flatMap((n) => n.fields.filter((f) => f.selected).map((f) => f.id));
+      this.saved = this.selKey();
+    },
+    selection() {
+      return { tables: { ...this.modes }, settings: [...this.picked] };
+    },
+    selKey() {
+      return JSON.stringify([
+        Object.entries(this.modes).sort(([a], [b]) => (a < b ? -1 : 1)),
+        [...this.picked].sort(),
+      ]);
+    },
+    selDirty() {
+      return !!this.view && this.selKey() !== this.saved;
+    },
+    rowsOf(group) {
+      return this.view ? this.view.tables.filter((t) => t.group === group) : [];
+    },
+    modeLabel(m) {
+      return m === 'skip' ? 'Skip' : m === 'add' ? 'Add missing' : 'Sync';
+    },
+    /** A child record cannot be placed without its parents: choosing one lifts the others it needs to at least "Add missing". */
+    sync(table) {
+      const t = this.view.tables.find((x) => x.table === table);
+      if (this.modes[table] === 'skip') return;
+      for (const r of t.requires) if (this.modes[r] === 'skip') this.modes[r] = 'add';
+    },
+    nsAll(ns) {
+      return ns.fields.every((f) => this.picked.includes(f.id));
+    },
+    toggleNs(ns, on) {
+      const ids = ns.fields.map((f) => f.id);
+      this.picked = on
+        ? [...new Set([...this.picked, ...ids])]
+        : this.picked.filter((id) => !ids.includes(id));
+    },
+    async saveSelection() {
+      try {
+        const v = await api('PUT', '/admin/deploy/data', this.selection());
+        this.view = v;
+        this.modes = Object.fromEntries(v.tables.map((t) => [t.table, t.mode]));
+        this.picked = v.settings.flatMap((n) =>
+          n.fields.filter((f) => f.selected).map((f) => f.id),
+        );
+        this.saved = this.selKey();
+        toast('What to copy is saved.');
+        return true;
+      } catch (e) {
+        toast(e.message, 'error');
+        return false;
+      }
+    },
+    async resolve(how) {
+      const ids = [...this.ticked];
+      const what =
+        how === 'apply'
+          ? `Replace this server's version of ${ids.length} record${ids.length === 1 ? '' : 's'} with dev's?`
+          : `Keep this server's version of ${ids.length} record${ids.length === 1 ? '' : 's'}?`;
+      if (!confirm(what)) return;
+      try {
+        const r = await api('POST', `/admin/deploy/conflicts/${how}`, { ids });
+        if (r.problems?.length) toast(r.problems[0], 'error');
+        else toast(how === 'apply' ? 'Dev’s version applied.' : 'Kept this server’s version.');
+        this.conflictCount = -1;
+        await this.refresh();
+      } catch (e) {
+        toast(e.message, 'error');
       }
     },
     get running() {
@@ -2371,6 +2458,7 @@ document.addEventListener('alpine:init', () => {
         )
       )
         return;
+      if (this.selDirty() && !(await this.saveSelection())) return;
       try {
         await api('POST', '/admin/deploy/run', {
           themes: this.themes,

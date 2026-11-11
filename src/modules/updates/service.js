@@ -7,6 +7,7 @@ import path from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import yazl from 'yazl';
 import { DATA_DIR } from '../deploy/service.js';
+import { scanMigration } from '../../core/migration-guard.js';
 import { dialect } from '../../core/db/index.js';
 import { HttpError, notFound } from '../../core/http/errors.js';
 import {
@@ -57,7 +58,7 @@ const lastLine = (text) =>
  * without a shell, and refuses to restart a production server that has pending migrations (it would not come back up).
  *
  * @param {{env: import('../../core/env.js').Env, db: import('knex').Knex, settings: any, bus: any, audit: any, nodes: any,
- *   state: any, log: import('pino').Logger, appRoot: string, getBackup?: () => any, getSiteFiles?: () => any}} deps
+ *   state: any, log: import('pino').Logger, appRoot: string, getBackup?: () => any, getSiteFiles?: () => any, getDeploySync?: () => any}} deps
  */
 export function createUpdatesService({
   env,
@@ -71,6 +72,7 @@ export function createUpdatesService({
   appRoot,
   getBackup = () => null,
   getSiteFiles = () => null,
+  getDeploySync = () => null,
 }) {
   let stopped = false;
   let bootCommit = null;
@@ -287,6 +289,10 @@ export function createUpdatesService({
       if (!g.branch) throw new StepError(blockerMessage(g));
       await fetchRemote(g);
       const after = await readGit();
+      const risky = after.behind > 0 ? await destructiveIncoming(after) : [];
+      const warning = risky.length
+        ? ` Warning: it changes the database in a way that removes or renames data: ${destructiveMessage(risky)}. It will not be applied until Settings → Updates allows it.`
+        : '';
       await audit.log({
         actor: actorInfo(actor),
         action: 'updates.check',
@@ -300,13 +306,41 @@ export function createUpdatesService({
         step: null,
         git: after,
         message: after.behind
-          ? `${after.behind} update${after.behind === 1 ? '' : 's'} available.`
+          ? `${after.behind} update${after.behind === 1 ? '' : 's'} available.${warning}`
           : 'Up to date.',
       });
     } catch (e) {
       await fail('check', actor, e);
     }
   }
+
+  /**
+   * Database changes in the incoming commits that would remove or rename data (D-135): the NEW migration files between this
+   * checkout and the remote branch, scanned by core/migration-guard.js. Read from git, so nothing is applied to find out.
+   */
+  async function destructiveIncoming(g) {
+    const ref = `refs/remotes/${g.remote}/${g.sourceBranch}`;
+    const diff = await git(
+      'diff',
+      '--name-only',
+      '--diff-filter=A',
+      'HEAD',
+      ref,
+      '--',
+      'migrations',
+    );
+    if (diff.code !== 0) return [];
+    const out = [];
+    for (const file of diff.out.split('\n').filter((f) => /^migrations\/[\w.-]+\.js$/.test(f))) {
+      const shown = await git('show', `${ref}:${file}`);
+      if (shown.code !== 0) continue;
+      const found = scanMigration(shown.out);
+      if (found.length) out.push({ file: file.slice('migrations/'.length), found });
+    }
+    return out;
+  }
+  const destructiveMessage = (list) =>
+    `${list.map((d) => `${d.file} (${d.found.join('; ')})`).join(', ')}`;
 
   async function fetchRemote(g) {
     alive();
@@ -384,7 +418,9 @@ export function createUpdatesService({
   async function zipSnapshot(dir, file) {
     const zip = new yazl.ZipFile();
     const names = await listFiles(dir);
-    for (const n of names.filter((x) => x !== 'manifest.json')) zip.addFile(path.join(dir, n), n);
+    // sync.json is the deployer's plan for the records step, not part of a backup.
+    for (const n of names.filter((x) => x !== 'manifest.json' && x !== 'sync.json'))
+      zip.addFile(path.join(dir, n), n);
     zip.addFile(path.join(dir, 'manifest.json'), 'manifest.json');
     zip.end();
     await pipeline(zip.outputStream, createWriteStream(file));
@@ -398,7 +434,7 @@ export function createUpdatesService({
    * already updated and the admin should see exactly what did not come across.
    */
   async function importDeployment(from, actor) {
-    const out = { pages: null, data: null, problems: [] };
+    const out = { pages: null, data: null, sync: null, problems: [] };
     const diff = await git(
       'diff',
       '--name-status',
@@ -468,6 +504,29 @@ export function createUpdatesService({
         }
       }
     }
+    // Records matched by their natural key (content, users, menus, settings…): added, updated only when nobody changed them
+    // here, otherwise left as a conflict for a person to tick. Nothing is deleted. Which tables is the deployer's choice.
+    const sync = getDeploySync();
+    if (
+      settings.get('updates.import_data') &&
+      sync &&
+      changes.some((c) => c.file.startsWith(`${DATA_DIR}/`) && c.status !== 'D')
+    ) {
+      try {
+        set({ step: 'Bringing in the chosen records' });
+        const head = (await git('rev-parse', 'HEAD')).out.slice(0, 40);
+        const r = await sync.importFrom(path.join(appRoot, DATA_DIR), actor, head);
+        const tot = Object.values(r.tables).reduce(
+          (a, t) => ({ added: a.added + t.added, updated: a.updated + t.updated }),
+          { added: 0, updated: 0 },
+        );
+        if (tot.added || tot.updated || r.conflicts)
+          out.sync = { ...tot, conflicts: r.conflicts, removedOnDev: r.removedOnDev };
+        out.problems.push(...r.problems);
+      } catch (e) {
+        out.problems.push(`records: ${e.message}`);
+      }
+    }
     return out;
   }
 
@@ -492,6 +551,14 @@ export function createUpdatesService({
       let point = null;
       let imported = null;
       if (g.behind > 0) {
+        // Updates never drop or rename a table or column without the admin saying so: the refusal comes before anything changes.
+        if (!settings.get('updates.allow_destructive_migrations')) {
+          const risky = await destructiveIncoming(g);
+          if (risky.length)
+            throw new StepError(
+              `This update changes the database in a way that removes or renames data: ${destructiveMessage(risky)}. Nothing was changed. Take a backup (Operations → Backups), then turn on "Allow updates that remove or rename tables or columns" in Settings → Updates and update again.`,
+            );
+        }
         alive();
         const backupId = await safetyBackup(actor);
         alive();
@@ -525,6 +592,7 @@ export function createUpdatesService({
         imported = await importDeployment(from, actor);
         if (imported.pages) done('site');
         if (imported.data) done('data');
+        if (imported.sync) done('records');
       } else {
         // The code may already be at the new version without this server having installed or migrated it (a manual
         // `git pull`, or a pipeline that stopped halfway), so finish that here instead of leaving it to someone.
@@ -549,6 +617,8 @@ export function createUpdatesService({
         imported?.pages &&
           `imported ${imported.pages.written} page file${imported.pages.written === 1 ? '' : 's'}${imported.pages.removed ? ` and removed ${imported.pages.removed}` : ''}`,
         imported?.data && 'added the data that came with it',
+        imported?.sync &&
+          `brought in records (${imported.sync.added} new, ${imported.sync.updated} updated${imported.sync.conflicts ? `, ${imported.sync.conflicts} waiting for you in Operations → Deploy` : ''})`,
       ].filter(Boolean);
       const detail = did.length ? ` (${did.join(' and ')})` : '';
       const problems = imported?.problems.length
@@ -574,7 +644,16 @@ export function createUpdatesService({
           restore_point: point?.id ?? null,
           backup: point?.backup_id ?? null,
           imported: imported
-            ? { pages: imported.pages, data: !!imported.data, problems: imported.problems.length }
+            ? {
+                pages: imported.pages,
+                data: !!imported.data,
+                sync: imported.sync && {
+                  added: imported.sync.added,
+                  updated: imported.sync.updated,
+                  conflicts: imported.sync.conflicts,
+                },
+                problems: imported.problems.length,
+              }
             : null,
         },
       });
