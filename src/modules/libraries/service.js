@@ -642,11 +642,18 @@ export function createLibraries({
             },
             actor,
           );
+          const skipped = item.include.filter((f) => !include.includes(f) || !known.has(f));
           installed.push({
             name: item.name,
             version: lib.version,
-            ...(include.length < item.include.length
-              ? { note: 'Scripts were skipped: library scripts are off.' }
+            ...(skipped.length
+              ? {
+                  note: `Not selected: ${skipped.join(', ')}. ${
+                    skipped.some((f) => isScript(f)) && !allowScripts()
+                      ? 'Library scripts are off: turn on Settings → Libraries → "Let libraries add JavaScript to the site", then import the list again.'
+                      : 'This version of the package does not have them.'
+                  }`,
+                }
               : {}),
           });
         } catch (e) {

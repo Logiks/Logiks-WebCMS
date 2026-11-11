@@ -22,6 +22,7 @@ import { createMailer } from './core/mail/index.js';
 import { createRecovery } from './modules/auth/recovery.js';
 import { createUpdatesService } from './modules/updates/service.js';
 import { createDeploySync } from './modules/deploy/sync.js';
+import { createDeployReleases } from './modules/deploy/release.js';
 import { createContentRegistry, defineCoreContent } from './modules/content/registry.js';
 import { createContentService } from './modules/content/service.js';
 import { createContentTemplates } from './modules/content/templates.js';
@@ -189,6 +190,7 @@ export async function createContext({ env, bus: busOverride, log: logOverride, a
     getBackup: () => ctx.backup ?? null,
     getSiteFiles: () => siteFiles,
     getDeploySync: () => ctx.deploySync ?? null,
+    getDeployReleases: () => ctx.deployReleases ?? null,
   });
   await updates.start();
 
@@ -414,6 +416,7 @@ export async function createContext({ env, bus: busOverride, log: logOverride, a
   };
   // Brings a deployment's records in without deleting anything or overwriting local edits (D-134); used by Updates and Deploy.
   ctx.deploySync = createDeploySync(ctx);
+  ctx.deployReleases = createDeployReleases(ctx);
   // The modules that need the finished context (services, scheduler, the site's data layer, plugins, the AI tools…)
   // are built here, in the order their manifests' `requires` imply, and each manifest's contract is checked (D-067).
   ctx.modules = createModuleRegistry();

@@ -342,6 +342,11 @@ export function createThemesService({ env, db, settings, bus, audit, cache, log,
       timer.unref();
     },
     stop: () => clearInterval(timer),
+    /** Re-read the themes on this server and tell the others to (System → Cache, D-136). */
+    async reload() {
+      await refresh_();
+      await bus.publish(CHANNEL, {}).catch(() => {});
+    },
 
     list() {
       const active = svc.activeId();

@@ -1644,6 +1644,7 @@ document.addEventListener('alpine:init', () => {
             },
             { id: 'prompts', label: 'Prompts', perm: 'prompts.read' },
             { id: 'publish', label: 'Publish & Git', module: 'publish', perm: 'publish.read' },
+            { id: 'cache', label: 'Cache', module: 'cache-control', perm: 'cache.read' },
             {
               id: 'history',
               label: 'Change history',
@@ -2315,13 +2316,29 @@ document.addEventListener('alpine:init', () => {
     siteTree: true,
     withData: true,
     withMedia: true,
+    // Rarely changed, so it starts folded; the person's choice is remembered in this browser only.
+    dataOpen: (() => {
+      try {
+        return localStorage.getItem('deploy.dataOpen') === '1';
+      } catch {
+        return false;
+      }
+    })(),
     view: null, // the data choice: groups, tables with their mode, settings
     modes: {}, // table → skip | add | sync, as edited here
     picked: [], // setting ids ticked
+    pickedLibs: [], // library names ticked
     saved: '', // the choice as last saved, to tell when it has changed
     conflicts: [], // changes a deployment brought that differ on this server
     ticked: [],
     conflictCount: -1,
+    title: '', // release title and notes for the next deploy
+    notes: '',
+    releases: [], // release notes, newest first
+    unread: 0,
+    openId: null,
+    detail: null,
+    notesKey: '',
     timer: null,
     async init() {
       if (!(await this.mountFragment('deploy', 'page'))) return;
@@ -2343,6 +2360,13 @@ document.addEventListener('alpine:init', () => {
         }
         this.data = d;
         if (!this.view && this.can('deploy.read')) await this.loadView();
+        const key = `${d.notes.count}:${d.notes.unread}`;
+        if (key !== this.notesKey) {
+          this.notesKey = key;
+          const n = await api('GET', '/admin/deploy/releases');
+          this.releases = n.releases;
+          this.unread = n.unread;
+        }
         if (d.conflicts !== this.conflictCount) {
           this.conflictCount = d.conflicts;
           const c = await api('GET', '/admin/deploy/conflicts');
@@ -2358,15 +2382,43 @@ document.addEventListener('alpine:init', () => {
       this.view = v;
       this.modes = Object.fromEntries(v.tables.map((t) => [t.table, t.mode]));
       this.picked = v.settings.flatMap((n) => n.fields.filter((f) => f.selected).map((f) => f.id));
+      this.pickedLibs = v.libraries.filter((l) => l.selected).map((l) => l.name);
       this.saved = this.selKey();
     },
+    toggleData() {
+      this.dataOpen = !this.dataOpen;
+      try {
+        localStorage.setItem('deploy.dataOpen', this.dataOpen ? '1' : '0');
+      } catch {
+        /* the fold still works; it is just not remembered */
+      }
+    },
+    /** One line for the folded panel: what a deploy will carry, and anything unsaved. */
+    dataSummary() {
+      if (!this.view) return '';
+      const modes = Object.values(this.modes);
+      const sync = modes.filter((m) => m === 'sync').length;
+      const add = modes.filter((m) => m === 'add').length;
+      return `${sync} synced · ${add} added · ${this.picked.length} settings${this.selDirty() ? ' · unsaved changes' : ''}`;
+    },
+    /** All ticked means "every library, including ones added later" (null); otherwise exactly the ticked names. */
+    libsChoice() {
+      return this.view && this.pickedLibs.length === this.view.libraries.length
+        ? null
+        : [...this.pickedLibs];
+    },
     selection() {
-      return { tables: { ...this.modes }, settings: [...this.picked] };
+      return {
+        tables: { ...this.modes },
+        settings: [...this.picked],
+        libraries: this.libsChoice(),
+      };
     },
     selKey() {
       return JSON.stringify([
         Object.entries(this.modes).sort(([a], [b]) => (a < b ? -1 : 1)),
         [...this.picked].sort(),
+        this.libsChoice() === null ? null : [...this.pickedLibs].sort(),
       ]);
     },
     selDirty() {
@@ -2401,6 +2453,7 @@ document.addEventListener('alpine:init', () => {
         this.picked = v.settings.flatMap((n) =>
           n.fields.filter((f) => f.selected).map((f) => f.id),
         );
+        this.pickedLibs = v.libraries.filter((l) => l.selected).map((l) => l.name);
         this.saved = this.selKey();
         toast('What to copy is saved.');
         return true;
@@ -2408,6 +2461,65 @@ document.addEventListener('alpine:init', () => {
         toast(e.message, 'error');
         return false;
       }
+    },
+    async openNote(r) {
+      if (this.openId === r.id) {
+        this.openId = null;
+        return;
+      }
+      this.openId = r.id;
+      try {
+        this.detail = await api('GET', `/admin/deploy/releases/${r.id}`);
+        if (r.unread) {
+          await api('POST', `/admin/deploy/releases/${r.id}/read`);
+          this.notesKey = '';
+          await this.refresh();
+        }
+      } catch (e) {
+        toast(e.message, 'error');
+      }
+    },
+    async setStep(s, done) {
+      try {
+        await api('PUT', `/admin/deploy/releases/${this.detail.id}/steps`, { step: s.id, done });
+        s.done = done;
+        this.notesKey = '';
+        await this.refresh();
+      } catch (e) {
+        toast(e.message, 'error');
+      }
+    },
+    noteSummary(d) {
+      const f = d.release.summary.files;
+      const bits = [
+        [f.pages.count, 'page'],
+        [f.components.count, 'component'],
+        [f.themes.count, 'theme file'],
+        [f.plugins.count, 'plugin file'],
+        [f.migrations.count, 'database migration'],
+        [f.codeFiles, 'code file'],
+      ]
+        .filter(([n]) => n)
+        .map(([n, w]) => `${n} ${w}${n === 1 ? '' : 's'}`);
+      const s = d.release.changes.schema;
+      const lib = d.release.changes.libraries;
+      const more = [
+        s && s.tablesAdded.length ? `new tables: ${s.tablesAdded.join(', ')}` : '',
+        s && s.columnsAdded.length ? `new columns: ${s.columnsAdded.join(', ')}` : '',
+        lib && lib.added.length
+          ? `libraries added: ${lib.added.map((x) => x.name).join(', ')}`
+          : '',
+        lib && lib.updated.length
+          ? `libraries updated: ${lib.updated.map((x) => x.name + ' ' + x.to.version).join(', ')}`
+          : '',
+      ].filter(Boolean);
+      return [`Changed: ${bits.join(', ') || 'data only'}.`, ...more].join(' · ');
+    },
+    resultLine(d) {
+      const r = d.result;
+      if (!r) return '';
+      const gone = Object.values(r.removedOnDev || {}).reduce((n, x) => n + x.count, 0);
+      return `On this server: ${r.added} record${r.added === 1 ? '' : 's'} added, ${r.updated} updated${r.conflicts ? `, ${r.conflicts} waiting for you above` : ''}${gone ? `, ${gone} removed on dev but kept here` : ''}${r.problems ? `, ${r.problems} problem${r.problems === 1 ? '' : 's'} (see Updates)` : ''}.`;
     },
     async resolve(how) {
       const ids = [...this.ticked];
@@ -2466,6 +2578,8 @@ document.addEventListener('alpine:init', () => {
           siteTree: this.siteTree,
           data: this.withData && !!this.data.available.data,
           media: this.withMedia,
+          title: this.title.trim(),
+          notes: this.notes.trim(),
         });
         toast('Deploying…');
         await this.refresh();
@@ -2479,6 +2593,69 @@ document.addEventListener('alpine:init', () => {
     summary(r) {
       if (r.status === 'running') return r.step || 'Working…';
       return r.message || (r.status === 'done' ? 'Done.' : 'Failed.');
+    },
+  }));
+
+  // ───────── System → Cache (D-136) ─────────
+  Alpine.data('cachePage', () => ({
+    ...H,
+    s: null,
+    busy: '',
+    error: '',
+    async init() {
+      if (!(await this.mountFragment('cache-control', 'page'))) return;
+      await this.load();
+    },
+    async load() {
+      try {
+        this.s = await api('GET', '/admin/cache');
+        this.error = '';
+      } catch (e) {
+        this.error = e.message;
+      }
+    },
+    async clear(scope) {
+      this.busy = scope;
+      try {
+        await api('POST', '/admin/cache/clear', { scope });
+        toast(`${this.s.scopes[scope]} cleared on every server.`);
+        await this.load();
+      } catch (e) {
+        toast(e.message, 'error');
+      } finally {
+        this.busy = '';
+      }
+    },
+    async setEnabled(on) {
+      if (
+        !on &&
+        !confirm(
+          'Switch server-side caching off on every server? The site gets slower while it is off; use it while developing.',
+        )
+      )
+        return;
+      this.busy = 'switch';
+      try {
+        await api('PUT', '/admin/cache/enabled', { enabled: on });
+        toast(on ? 'Server-side caching is on.' : 'Server-side caching is off on every server.');
+        await this.load();
+      } catch (e) {
+        toast(e.message, 'error');
+      } finally {
+        this.busy = '';
+      }
+    },
+    hitRate() {
+      const st = this.s?.stats;
+      if (!st) return '';
+      const hits = st.l1Hits + st.l2Hits;
+      const all = hits + st.misses;
+      return all ? `${Math.round((hits / all) * 100)}%` : '–';
+    },
+    what(e) {
+      if (e.action === 'cache.switched')
+        return e.enabled ? 'Caching switched on' : 'Caching switched off';
+      return `Cleared: ${this.s.scopes[e.scope] || e.scope}`;
     },
   }));
 
@@ -5340,8 +5517,11 @@ document.addEventListener('alpine:init', () => {
         }
         const r = await api('POST', '/admin/libraries/import', doc);
         this.report = `Installed ${r.installed.length}${r.installed.length ? ': ' + r.installed.map((x) => `${x.name} ${x.version}`).join(', ') : ''}.`;
-        if (r.failed.length)
-          this.error = `Not installed: ${r.failed.map((x) => `${x.name} (${x.error})`).join('; ')}`;
+        const notes = r.installed.filter((x) => x.note).map((x) => `${x.name}: ${x.note}`);
+        const bad = r.failed.length
+          ? [`Not installed: ${r.failed.map((x) => `${x.name} (${x.error})`).join('; ')}`]
+          : [];
+        if (notes.length || bad.length) this.error = [...bad, ...notes].join(' ');
         await this.load();
       } catch (e) {
         this.error = e.message;
@@ -6424,7 +6604,8 @@ document.addEventListener('alpine:init', () => {
     tTable: '',
     tColumns: [],
     tAvailableColumns: [],
-    tWhere: [],
+    tWhere: [], // conditions and groups: { kind: 'c' | 'g', … }
+    tWhereMatch: 'all',
     tParams: [],
     tSortColumn: '',
     tSortDir: 'asc',
@@ -6470,7 +6651,8 @@ document.addEventListener('alpine:init', () => {
         this.qSource = 'table';
         this.tTable = r.config.table;
         this.tColumns = [...r.config.columns];
-        this.tWhere = (r.config.where || []).map((w) => ({ ...w }));
+        this.tWhereMatch = r.config.whereMatch || 'all';
+        this.tWhere = (r.config.where || []).map((w) => this.whereFromApi(w));
         this.tParams = (r.config.params || []).map((p) => ({ ...p }));
         this.tSortColumn = r.config.sort?.column ?? '';
         this.tSortDir = r.config.sort?.dir ?? 'asc';
@@ -6526,11 +6708,115 @@ document.addEventListener('alpine:init', () => {
         ? this.tColumns.filter((k) => k !== key)
         : [...this.tColumns, key];
     },
+    // ── where logic of a table query ──
+    whereOps: [
+      ['=', 'is'],
+      ['!=', 'is not'],
+      ['>', 'is greater than'],
+      ['>=', 'is at least'],
+      ['<', 'is less than'],
+      ['<=', 'is at most'],
+      ['contains', 'contains'],
+      ['starts_with', 'starts with'],
+      ['ends_with', 'ends with'],
+      ['in', 'is one of (comma list)'],
+      ['not_in', 'is none of (comma list)'],
+      ['is_null', 'is empty'],
+      ['not_null', 'is not empty'],
+    ],
+    opNeedsValue(op) {
+      return op !== 'is_null' && op !== 'not_null';
+    },
+    newCondition() {
+      return {
+        uid: Math.random().toString(36).slice(2, 9), // gives each row's checkbox its own id
+        kind: 'c',
+        column: '',
+        op: '=',
+        source: 'param',
+        param: '',
+        value: '',
+        ignoreIfMissing: false,
+      };
+    },
     addWhere() {
-      this.tWhere.push({ column: '', param: '' });
+      this.tWhere.push(this.newCondition());
+    },
+    addGroup() {
+      this.tWhere.push({ kind: 'g', match: 'any', conditions: [this.newCondition()] });
     },
     removeWhere(i) {
       this.tWhere.splice(i, 1);
+    },
+    addToGroup(g) {
+      g.conditions.push(this.newCondition());
+    },
+    removeFromGroup(g, i) {
+      g.conditions.splice(i, 1);
+      if (!g.conditions.length) this.tWhere.splice(this.tWhere.indexOf(g), 1);
+    },
+    whereFromApi(w) {
+      if (w.group)
+        return {
+          kind: 'g',
+          match: w.group.match,
+          conditions: w.group.conditions.map((c) => this.whereFromApi(c)),
+        };
+      return {
+        uid: Math.random().toString(36).slice(2, 9),
+        kind: 'c',
+        column: w.column,
+        op: w.op || '=',
+        source: w.value !== undefined ? 'value' : 'param',
+        param: w.param ?? '',
+        value: w.value === undefined ? '' : String(w.value),
+        ignoreIfMissing: !!w.ignoreIfMissing,
+      };
+    },
+    /** One finished condition as the API wants it, or null while it is still incomplete. */
+    whereToApi(c) {
+      if (!c.column) return null;
+      const out = { column: c.column, op: c.op };
+      if (!this.opNeedsValue(c.op)) return out;
+      if (c.source === 'param') {
+        if (!c.param) return null;
+        out.param = c.param;
+        if (c.ignoreIfMissing) out.ignoreIfMissing = true;
+        return out;
+      }
+      if (String(c.value) === '') return null;
+      const numeric = ['>', '>=', '<', '<='].includes(c.op) && !Number.isNaN(Number(c.value));
+      out.value = numeric ? Number(c.value) : String(c.value);
+      return out;
+    },
+    whereBuild() {
+      return this.tWhere
+        .map((w) => {
+          if (w.kind === 'g') {
+            const conditions = w.conditions.map((c) => this.whereToApi(c)).filter(Boolean);
+            return conditions.length ? { group: { match: w.match, conditions } } : null;
+          }
+          return this.whereToApi(w);
+        })
+        .filter(Boolean);
+    },
+    /** The where logic in words, for the person writing it. */
+    whereSummary() {
+      const label = (op) => this.whereOps.find((o) => o[0] === op)?.[1] ?? op;
+      const one = (c) => {
+        if (!c.column) return '…';
+        const right = !this.opNeedsValue(c.op)
+          ? ''
+          : c.source === 'param'
+            ? ` ‹${c.param || '…'}›`
+            : ` “${c.value}”`;
+        return `${c.column} ${label(c.op)}${right}`;
+      };
+      const join = (m) => (m === 'any' ? ' OR ' : ' AND ');
+      const parts = this.tWhere.map((w) =>
+        w.kind === 'g' ? `(${w.conditions.map(one).join(join(w.match))})` : one(w),
+      );
+      return parts.length ? parts.join(join(this.tWhereMatch)) : 'No conditions: every row.';
     },
     addTableParam() {
       this.tParams.push({ name: '', type: 'string', required: false });
@@ -6551,7 +6837,8 @@ document.addEventListener('alpine:init', () => {
           source: 'table',
           table: this.tTable,
           columns: this.tColumns,
-          where: this.tWhere.filter((w) => w.column && w.param),
+          where: this.whereBuild(),
+          whereMatch: this.tWhereMatch,
           params: this.tParams
             .filter((p) => p.name.trim())
             .map((p) => ({ name: p.name.trim(), type: p.type, required: !!p.required })),
@@ -10016,6 +10303,12 @@ document.addEventListener('alpine:init', () => {
     consoleResult: null,
     savedQueries: [],
     newQueryName: '',
+    selected: [], // tables ticked for export
+    withRecords: true,
+    importFile: null,
+    importPlan: null,
+    importPick: [],
+    importMsg: '',
 
     async init() {
       if (!(await this.mountFragment('dbms', 'page'))) return;
@@ -10026,6 +10319,66 @@ document.addEventListener('alpine:init', () => {
       const r = await api('GET', '/admin/dbms/tables');
       this.tables = r.tables;
       this.typeLabels = r.typeLabels;
+    },
+
+    toggleAll(on) {
+      this.selected = on ? this.tables.filter((t) => !t.view).map((t) => t.name) : [];
+    },
+    exportUrl(names = this.selected, records = this.withRecords) {
+      return `/api/admin/dbms/export?tables=${names.map(encodeURIComponent).join(',')}${records ? '' : '&data=false'}`;
+    },
+    /** One line per table in an import file: what will happen to it here. */
+    importLine(p) {
+      if (p.blocked) return p.blocked;
+      const n = `${p.rows} record${p.rows === 1 ? '' : 's'} in the file`;
+      if (!p.exists) return `New table here · ${n}`;
+      const cols = p.newColumns.length ? ` · adds columns ${p.newColumns.join(', ')}` : '';
+      return `Exists here (${p.hereRows} record${p.hereRows === 1 ? '' : 's'}, kept as they are) · ${n}; only missing ones are added${cols}`;
+    },
+    async pickImport(ev) {
+      const file = ev.target.files[0];
+      ev.target.value = '';
+      if (!file) return;
+      this.busy = true;
+      this.error = this.importMsg = '';
+      try {
+        const plan = await api('POST', '/admin/dbms/import?dryRun=true', file);
+        this.importFile = file;
+        this.importPlan = plan;
+        this.importPick = plan.tables.filter((t) => !t.blocked).map((t) => t.table);
+      } catch (e) {
+        this.error = e.message;
+      } finally {
+        this.busy = false;
+      }
+    },
+    cancelImport() {
+      this.importPlan = null;
+      this.importFile = null;
+      this.importPick = [];
+    },
+    async runImport() {
+      const n = this.importPick.length;
+      if (
+        !confirm(
+          `Import ${n} table${n === 1 ? '' : 's'}? It only adds what is missing here; nothing is deleted or replaced.`,
+        )
+      )
+        return;
+      this.busy = true;
+      this.error = '';
+      try {
+        const qs = `confirm=IMPORT&tables=${this.importPick.map(encodeURIComponent).join(',')}`;
+        const r = await api('POST', `/admin/dbms/import?${qs}`, this.importFile);
+        const x = r.result || {};
+        this.importMsg = `Imported ${r.imported.length} table${r.imported.length === 1 ? '' : 's'}: ${x.rowsAdded ?? 0} record${x.rowsAdded === 1 ? '' : 's'} added, ${x.tablesCreated ?? 0} table${x.tablesCreated === 1 ? '' : 's'} created, ${x.columnsAdded ?? 0} column${x.columnsAdded === 1 ? '' : 's'} added.`;
+        this.cancelImport();
+        await this.loadTables();
+      } catch (e) {
+        this.error = e.message;
+      } finally {
+        this.busy = false;
+      }
     },
 
     async openTable(name) {

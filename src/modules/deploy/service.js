@@ -10,6 +10,7 @@ import { dialect, now } from '../../core/db/index.js';
 import { HttpError } from '../../core/http/errors.js';
 import { THEME_ID } from '../themes/package.js';
 import { redact } from '../updates/service.js';
+import { buildRelease, newMigrations, readState, writeReleases } from './release.js';
 
 /** A run that has been "running" this long is taken to have died with its server, and no longer blocks a new one. */
 const STALE_MS = 60 * 60_000;
@@ -273,6 +274,7 @@ export function createDeploy(ctx) {
       const manifest = JSON.parse(await fs.readFile(file, 'utf8'));
       manifest.createdAt = 0;
       manifest.createdBy = null;
+      await ctx.deploySync.filterLibraries(out, plan.libraries, manifest);
       await fs.writeFile(file, JSON.stringify(manifest));
       await ctx.deploySync.writePlan(out, plan);
       return {
@@ -328,12 +330,17 @@ export function createDeploy(ctx) {
         previous = (await g('rev-parse', 'HEAD')).out;
       }
 
+      // What the last deploy said about itself (schema, libraries, settings, earlier release notes), read before the tree is emptied.
+      const prevState = await readState(dir);
+
       // Start from an empty working tree so a file deleted here is deleted in the repository too.
       for (const e of await fs.readdir(dir))
         if (e !== '.git') await fs.rm(path.join(dir, e), { recursive: true, force: true });
 
       await step('Copying the code');
       await copyCode(dir);
+      // Earlier release notes stay in the repository (the tree was emptied above).
+      if (prevState.releases.length) await writeReleases(dir, prevState.releases);
 
       const added = { siteTree: false, themes: [], plugins: [], data: null };
       if (include.siteTree) {
@@ -368,7 +375,46 @@ export function createDeploy(ctx) {
       const dev = await run('git', ['rev-parse', 'HEAD'], ctx.appRoot);
       const devCommit = dev.code === 0 ? dev.out.slice(0, 40) : null;
       let commit = previous;
+      let release = null;
       if (changedFiles.length) {
+        // The release notes: what changed, and what a person may want to do by hand (a deploy removes nothing).
+        await step('Writing the release notes');
+        try {
+          const changed = (await g('diff', '--cached', '--name-status', '--no-renames')).out
+            .split('\n')
+            .filter(Boolean)
+            .map((l) => {
+              const [status, file] = l.split('\t');
+              return { status: status[0], file };
+            });
+          const lastDev = prevState.releases.at(-1)?.devCommit;
+          const log = lastDev
+            ? await run(
+                'git',
+                ['log', '--format=%h %s', '-n', '50', `${lastDev}..HEAD`],
+                ctx.appRoot,
+              )
+            : { code: 1, out: '' };
+          release = buildRelease({
+            prev: prevState,
+            next: await readState(dir),
+            changed,
+            migrationsNew: await newMigrations(ctx.appRoot, prevState.migrations),
+            title: include.title,
+            notes: include.notes,
+            devCommit,
+            commits: log.code === 0 ? log.out.split('\n').filter(Boolean) : [],
+            by: actor?.email ?? null,
+            added,
+          });
+          await writeReleases(dir, [...prevState.releases, release]);
+          await g('add', '-A');
+        } catch (e) {
+          // Notes are a help, never a reason to stop a deploy.
+          log.warn({ err: e.message }, 'deploy: release notes could not be written');
+          release = null;
+        }
+
         const who = actor?.email ?? 'the scheduler';
         const c = await run(
           'git',
@@ -400,6 +446,10 @@ export function createDeploy(ctx) {
               : `Couldn't push to ${redact(url)}: ${push.timedOut ? 'it took too long' : lastLine(push.out) || 'unknown error'}. This server needs push access to the repository.`,
           );
       }
+      if (release)
+        await ctx.deployReleases
+          .store(release, { source: 'dev' })
+          .catch((e) => log.warn({ err: e.message }, 'deploy: release notes could not be stored'));
       const message = changedFiles.length
         ? `Deployed ${changedFiles.length} changed file${changedFiles.length === 1 ? '' : 's'} to ${branch} (${commit.slice(0, 7)}).`
         : `Nothing changed since the last deploy (${(commit ?? '').slice(0, 7) || 'empty repository'}).`;
@@ -477,6 +527,10 @@ export function createDeploy(ctx) {
         runs,
         available: await available(),
         conflicts: await ctx.deploySync.openConflictCount(),
+        notes: {
+          count: (await ctx.deployReleases.list()).length,
+          unread: await ctx.deployReleases.unread(),
+        },
       };
     },
 
@@ -493,7 +547,7 @@ export function createDeploy(ctx) {
 
     /**
      * Starts a deploy. Returns the new run at once; the work continues in the background and the row turns done or failed.
-     * @param {{ themes?: string[], plugins?: string[], siteTree?: boolean, data?: boolean, media?: boolean }} include
+     * @param {{ themes?: string[], plugins?: string[], siteTree?: boolean, data?: boolean, media?: boolean, title?: string, notes?: string }} include
      */
     async start(include, actor) {
       const url = settings.get('deploy.repo_url');
@@ -520,6 +574,8 @@ export function createDeploy(ctx) {
         siteTree: include.siteTree !== false,
         data: include.data !== false && !!ctx.backup,
         media: include.media !== false,
+        title: String(include.title ?? '').slice(0, 200),
+        notes: String(include.notes ?? '').slice(0, 4000),
       };
       const id = await insertGetId(db('deploy_runs'), {
         status: 'running',

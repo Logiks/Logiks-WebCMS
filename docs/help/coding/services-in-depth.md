@@ -35,6 +35,18 @@ Pick a table or view, the columns to return, optional `where` filters bound to n
 **parameterised**; there is no SQL text to inject into. Column names you pick are checked against the real table. Credentials, sessions, settings, audit and platform tables are never
 available here, however permissive you are.
 
+### The Where section
+
+Choose which rows the service returns with **Where**. Each condition is _a column_, _a test_ and _a value_:
+
+- **Tests:** is, is not, is greater than, is at least, is less than, is at most, contains, starts with, ends with, is one of / is none of (a comma list), is empty, is not empty. Text matching ignores case.
+- **The value** is either a **parameter** the caller sends (`?city=Pune`) or a **fixed value** you type. A comparison against a parameter can be set to **Skip if not given**, so an empty search box drops the condition instead of matching nothing. Without it, a missing parameter is compared as empty.
+- **All or any:** with more than one condition, choose whether rows must match _all_ of them or _any_ one.
+- **Groups** give you "this AND (that OR that)": add a group, choose whether it matches all or any of its own conditions, and put the conditions inside.
+- A line under the builder reads the logic back in words, so you can check it before saving.
+
+Values are always bound to the query, never written into it. For a list ("is one of") use a text parameter and send `?ids=2,5,9`.
+
 ```
 GET /api/v1/services/branches?city=Pune&per_page=20&page=2
 → { "items": [ { "id": 7, "name": "Kothrud", "city": "Pune" } ], "page": 2, "perPage": 20, "total": 31, "pages": 2 }

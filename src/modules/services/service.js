@@ -65,14 +65,48 @@ export function createServices(ctx) {
       .default({ default: 10, max: 50 }),
     fields: z.array(z.string().regex(NAME)).max(50).optional(),
   });
+  // The where logic of a table query (D-140): conditions on columns, each against a declared parameter or a fixed value, joined
+  // all-of / any-of, with one level of groups for "a AND (b OR c)". The old `{ column, param }` filter reads as "column is param".
+  const OPS = [
+    '=',
+    '!=',
+    '>',
+    '>=',
+    '<',
+    '<=',
+    'contains',
+    'starts_with',
+    'ends_with',
+    'in',
+    'not_in',
+    'is_null',
+    'not_null',
+  ];
+  const NO_VALUE = new Set(['is_null', 'not_null']);
+  const conditionSchema = z.object({
+    column: z.string().regex(NAME),
+    op: z.enum(OPS).default('='),
+    param: z.string().regex(NAME).optional(),
+    value: z.union([z.string().max(500), z.number(), z.boolean()]).optional(),
+    // A parameter the caller did not send drops the condition (a search box left empty) instead of matching nothing.
+    ignoreIfMissing: z.boolean().default(false),
+  });
+  const whereItemSchema = z.union([
+    z.object({
+      group: z.object({
+        match: z.enum(['all', 'any']).default('all'),
+        conditions: z.array(conditionSchema).min(1).max(10),
+      }),
+    }),
+    conditionSchema,
+  ]);
+  const conditionsOf = (where) => where.flatMap((w) => (w.group ? w.group.conditions : [w]));
   const queryTableConfigSchema = z.object({
     source: z.literal('table'),
     table: z.string().regex(NAME),
     columns: z.array(z.string().regex(NAME)).min(1).max(50),
-    where: z
-      .array(z.object({ column: z.string().regex(NAME), param: z.string().regex(NAME) }))
-      .max(10)
-      .default([]),
+    where: z.array(whereItemSchema).max(20).default([]),
+    whereMatch: z.enum(['all', 'any']).default('all'),
     params: z.array(paramSchema).max(20).default([]),
     sort: z
       .object({ column: z.string().regex(NAME), dir: z.enum(['asc', 'desc']).default('asc') })
@@ -155,20 +189,29 @@ export function createServices(ctx) {
           );
         await checkColumns(config.table, [
           ...config.columns,
-          ...config.where.map((w) => w.column),
+          ...conditionsOf(config.where).map((w) => w.column),
           ...(config.sort ? [config.sort.column] : []),
         ]);
         const declared = new Set(config.params.map((p) => p.name));
-        for (const w of config.where)
-          if (!declared.has(w.param))
-            throw new HttpError(
-              422,
-              'invalid_input',
-              `The filter on "${w.column}" needs a declared parameter "${w.param}".`,
-              {
-                field: 'config.where',
-              },
+        const wrong = (message) =>
+          new HttpError(422, 'invalid_input', message, { field: 'config.where' });
+        for (const w of conditionsOf(config.where)) {
+          if (NO_VALUE.has(w.op)) continue;
+          if (w.param !== undefined && w.value !== undefined)
+            throw wrong(
+              `The filter on "${w.column}" has both a parameter and a fixed value; use one.`,
             );
+          if (w.param === undefined && w.value === undefined)
+            throw wrong(
+              `The filter on "${w.column}" needs a parameter or a fixed value to compare with.`,
+            );
+          if (w.param !== undefined && !declared.has(w.param))
+            throw wrong(`The filter on "${w.column}" needs a declared parameter "${w.param}".`);
+          if (w.param === undefined && w.ignoreIfMissing)
+            throw wrong(
+              `"Ignore when missing" only applies to a filter that uses a parameter ("${w.column}").`,
+            );
+        }
         return { ...base.data, mode: /** @type {'query'} */ ('query'), config };
       }
       const config = parseConfig(queryTypeConfigSchema, input.config);
@@ -274,12 +317,73 @@ export function createServices(ctx) {
     };
   }
 
+  /**
+   * The where logic, built with Knex's query builder only: every value is bound, never written into the SQL.
+   * `match` says whether the items are all required or any one will do; a group carries its own.
+   */
+  function applyWhere(qb, items, match, bindings) {
+    const any = match === 'any';
+    const like = dialect.kind === 'pg' ? 'ilike' : 'like';
+    for (const item of items) {
+      if (item.group) {
+        const inner = function () {
+          applyWhere(this, item.group.conditions, item.group.match, bindings);
+        };
+        any ? qb.orWhere(inner) : qb.where(inner);
+        continue;
+      }
+      const c = item;
+      const v = c.param !== undefined ? bindings[c.param] : c.value;
+      const missing = v === null || v === undefined || v === '';
+      if (c.param !== undefined && c.ignoreIfMissing && missing) continue;
+      const w = (m) => qb[any ? `or${m[0].toUpperCase()}${m.slice(1)}` : m].bind(qb);
+      switch (c.op) {
+        case 'is_null':
+          w('whereNull')(c.column);
+          break;
+        case 'not_null':
+          w('whereNotNull')(c.column);
+          break;
+        case 'in':
+        case 'not_in': {
+          const list = String(v ?? '')
+            .split(',')
+            .map((x) => x.trim())
+            .filter(Boolean);
+          w(c.op === 'in' ? 'whereIn' : 'whereNotIn')(c.column, list);
+          break;
+        }
+        case 'contains':
+        case 'starts_with':
+        case 'ends_with': {
+          if (missing) {
+            w('whereRaw')('1 = 0'); // nothing to look for: nothing matches
+            break;
+          }
+          const s = String(v);
+          const pattern =
+            c.op === 'contains' ? `%${s}%` : c.op === 'starts_with' ? `${s}%` : `%${s}`;
+          w('where')(c.column, like, pattern);
+          break;
+        }
+        case '!=':
+          w('where')(c.column, '<>', v);
+          break;
+        case '=':
+          w('where')(c.column, v);
+          break;
+        default:
+          w('where')(c.column, c.op, v);
+      }
+    }
+  }
+
   /** A table/view is queried entirely through Knex's query builder (parameterised, never raw SQL text). */
   async function runTableQuery(config, query) {
     const bindings = bindParams(config.params, query);
     const base = () => {
-      let q = db(config.table);
-      for (const w of config.where) q = q.where(w.column, bindings[w.param]);
+      const q = db(config.table);
+      applyWhere(q, config.where, config.whereMatch, bindings);
       return q;
     };
     const perPage = clamp(query.per_page, config.perPage.default, 1, config.perPage.max);

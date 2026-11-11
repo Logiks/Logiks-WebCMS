@@ -152,6 +152,26 @@ async function drain(stream, limit = 256 * 1024 * 1024) {
 }
 
 /** The manifest of an opened zip, checked for shape; and every file name checked against what a backup contains. */
+/**
+ * The part of a backup to look at or restore. A table import (System → Database) only ever takes the tables the person was
+ * allowed to import and chose, never the folders or media a full backup may carry.
+ */
+function scoped(manifest, only, source) {
+  if (!only && source !== 'table-import') return manifest;
+  const keep = new Set(
+    only ?? [...Object.keys(manifest.tables ?? {}), ...Object.keys(manifest.schema ?? {})],
+  );
+  const pick = (o) => Object.fromEntries(Object.entries(o ?? {}).filter(([t]) => keep.has(t)));
+  return {
+    ...manifest,
+    tables: pick(manifest.tables),
+    schema: pick(manifest.schema),
+    ...(source === 'table-import'
+      ? { folders: {}, media: { ...manifest.media, index: {}, files: 0 } }
+      : {}),
+  };
+}
+
 async function readManifest(zip) {
   for (const name of zip.names.keys()) {
     // `[...path].html` is a normal page file name, so a folder entry is judged by its path segments, not by a substring.
@@ -448,7 +468,11 @@ export function createBackup(ctx) {
    * stream that yazl pulls in turn, so memory use is a few chunks whatever the size. The manifest is the last entry:
    * it holds the checksums, which are only known once everything before it has been written.
    */
-  async function build(id, { includeMedia, secrets, folders = [], tables: only }, actor) {
+  async function build(
+    id,
+    { includeMedia, secrets, folders = [], tables: only, schemaTables },
+    actor,
+  ) {
     // Data comes only from the tables people create (do_, sys_, data_). The schema below is every table.
     // (A snapshot taken before an erase names its tables and carries ALL their data, whatever they are called.)
     const names = only ? [...only] : (await userTables()).filter((n) => DATA_PREFIX.test(n));
@@ -473,7 +497,9 @@ export function createBackup(ctx) {
     // keys are recorded but not recreated.
     const everyTable = (await dialect.listTables())
       .filter((t) => !t.view && !t.name.startsWith('sqlite_') && !t.name.startsWith('search_fts'))
-      .map((t) => t.name);
+      .map((t) => t.name)
+      // A table export (System → Database) describes only the tables it carries.
+      .filter((t) => !schemaTables || schemaTables.includes(t));
     const allFks = await dialect.foreignKeys();
     const schema = {};
     for (const name of everyTable) {
@@ -604,6 +630,7 @@ export function createBackup(ctx) {
       migrations,
       tables,
       skippedTables: skippedNames,
+      schemaScoped: !!schemaTables,
       rows: counters.rows,
       media: {
         files: Object.keys(mediaIndex).length,
@@ -717,7 +744,7 @@ export function createBackup(ctx) {
     /**
      * Start a backup. Returns at once with the new row; the work runs in the background and the row turns `ready`
      * (or `failed` with a reason).
-     * @param {{ includeMedia?: boolean, secrets?: 'keep'|'remove', folders?: string[], tables?: string[], name?: string, source?: string }} [opts]
+     * @param {{ includeMedia?: boolean, secrets?: 'keep'|'remove', folders?: string[], tables?: string[], schemaTables?: string[], name?: string, source?: string }} [opts]
      * @param {any} [actor]
      */
     async create(opts = {}, actor = null) {
@@ -749,7 +776,13 @@ export function createBackup(ctx) {
           });
           const { manifest, size } = await build(
             id,
-            { includeMedia, secrets, folders, tables: opts.tables },
+            {
+              includeMedia,
+              secrets,
+              folders,
+              tables: opts.tables,
+              schemaTables: opts.schemaTables,
+            },
             actor,
           );
           await finish(id, { status: 'ready', size, manifest: JSON.stringify(manifest) });
@@ -795,7 +828,7 @@ export function createBackup(ctx) {
      * @param {string | Buffer} source
      * @param {string} name
      * @param {any} actor
-     * @param {{ source?: 'deploy' }} [opts] set only by the updater, for a deployment repository's snapshot
+     * @param {{ source?: 'deploy' | 'table-import' }} [opts] set only by the updater (a deployment's snapshot) and by Database → Import
      */
     async upload(source, name, actor, { source: kind } = {}) {
       let file = typeof source === 'string' ? source : null;
@@ -818,7 +851,8 @@ export function createBackup(ctx) {
           name: String(name || 'Uploaded backup').slice(0, 190),
           status: 'running',
           // Only the updater, for the snapshot a deployment repository carries (Operations → Deploy), may say 'deploy'.
-          source: kind === 'deploy' ? 'deploy' : 'uploaded',
+          // 'table-import' is set only by System → Database → Import, which checks who may import which table first.
+          source: kind === 'deploy' || kind === 'table-import' ? kind : 'uploaded',
           secrets: manifest.secrets === 'remove' ? 'remove' : 'keep',
           size,
           manifest: JSON.stringify(manifest),
@@ -899,11 +933,16 @@ export function createBackup(ctx) {
      * What restoring this backup here would do, and what stops it. Nothing is changed. Reads only the manifest.
      * @returns {Promise<{ backup: any, blockers: string[], warnings: string[], adds: { tables: number, rows: number }, secretsNotReadable: number, creates: string[] }>}
      */
-    async inspect(id) {
+    async inspect(id, /** @type {{ tables?: string[] }} */ opts = {}) {
+      const only = opts.tables;
       const backup = await svc.get(id);
       if (backup.status !== 'ready')
         throw new HttpError(409, 'conflict', 'That backup is not ready.');
-      const manifest = await withZip(fileKey(backup.id), (zip) => readManifest(zip));
+      const manifest = scoped(
+        await withZip(fileKey(backup.id), (zip) => readManifest(zip)),
+        only,
+        backup.source,
+      );
       const blockers = [];
       const warnings = [];
       const have = new Set(await appliedMigrations());
@@ -912,7 +951,11 @@ export function createBackup(ctx) {
         blockers.push(
           `This backup comes from a newer version of the software (${newer.length} database change${newer.length === 1 ? '' : 's'} this server does not have yet). Update this server first, then restore.`,
         );
-      const here = new Set(backup.source === 'flush' ? await allTables() : await userTables());
+      const here = new Set(
+        backup.source === 'flush' || backup.source === 'table-import'
+          ? await allTables()
+          : await userTables(),
+      );
       const missing = Object.keys(manifest.tables).filter((t) => !here.has(t) && !skipped(t));
       // Tables the backup defines (data or not) that this server lacks and does not run on its own.
       const defined = Object.keys(manifest.schema ?? {}).filter(
@@ -987,7 +1030,7 @@ export function createBackup(ctx) {
      * ALTER TABLE, missing records and files are added. Nothing is ever deleted, dropped, replaced or overwritten. The
      * records go in as ONE transaction (all or nothing). A safety backup first is optional.
      * @param {number | string} id
-     * @param {{ confirm: string, safety?: boolean }} opts
+     * @param {{ confirm: string, safety?: boolean, tables?: string[] }} opts
      * @param {any} actor
      */
     async restore(id, opts, actor) {
@@ -998,7 +1041,7 @@ export function createBackup(ctx) {
           'Type RESTORE to confirm. A restore only adds what is missing here (tables, columns and records); nothing is deleted or replaced.',
           { field: 'confirm' },
         );
-      const report = await svc.inspect(id);
+      const report = await svc.inspect(id, { tables: opts.tables });
       if (report.blockers.length) throw new HttpError(409, 'conflict', report.blockers[0]);
       await assertIdle();
       await setStatus({
@@ -1024,7 +1067,7 @@ export function createBackup(ctx) {
               );
             await setStatus({ state: 'running', op: 'restore', backupId: Number(id) });
           }
-          const result = await apply(id, actor);
+          const result = await apply(id, actor, opts.tables);
           await setStatus({ state: 'idle', step: 'Done', result });
         } catch (e) {
           log?.warn({ err: e.message }, 'backup: restore failed');
@@ -1048,13 +1091,13 @@ export function createBackup(ctx) {
       );
   }
 
-  async function apply(id, actor) {
+  async function apply(id, actor, only) {
     const backup = await svc.get(id);
     return withZip(fileKey(backup.id), async (zip) => {
-      const manifest = await readManifest(zip);
+      const manifest = scoped(await readManifest(zip), only, backup.source);
       // A snapshot this server made itself before an erase (source 'flush') restores every table it carries. Any other
       // backup, which may have come from anywhere, only ever restores the do_ / sys_ / data_ tables.
-      const trusted = backup.source === 'flush';
+      const trusted = backup.source === 'flush' || backup.source === 'table-import';
       let here = new Set(trusted ? await allTables() : await userTables());
       // The tables the backup defines that this server may have: never a runtime table, which the target owns.
       const defined = Object.keys(manifest.schema ?? {}).filter(

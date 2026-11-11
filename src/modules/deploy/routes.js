@@ -11,7 +11,9 @@ const targetBody = z.object({
 const selectionBody = z.object({
   tables: z.record(z.string().max(64), z.enum(['skip', 'add', 'sync'])).optional(),
   settings: z.array(z.string().max(200)).max(2000).optional(),
+  libraries: z.array(z.string().max(191)).max(200).nullable().optional(),
 });
+const stepBody = z.object({ step: z.string().min(1).max(300), done: z.boolean() });
 const idsBody = z.object({ ids: z.array(z.number().int().positive()).min(1).max(500) });
 const runBody = z.object({
   themes: z.array(z.string().max(32)).max(100).optional(),
@@ -19,6 +21,8 @@ const runBody = z.object({
   siteTree: z.boolean().optional(),
   data: z.boolean().optional(),
   media: z.boolean().optional(),
+  title: z.string().max(200).optional(),
+  notes: z.string().max(4000).optional(),
 });
 
 /** Operations → Deploy: choose a repository and branch, push this installation's code to it, see past deploys. */
@@ -87,6 +91,36 @@ export default function deployRoutes(ctx) {
     requirePermission('deploy.run'),
     async (req, res) => {
       res.json(await ctx.deploySync.dismissConflicts(parse(idsBody, req.body).ids, actorOf(req)));
+    },
+  );
+
+  // Release notes: written by the deploy, kept on every server that pulls it, readable later.
+  r.get('/deploy/releases', requirePermission('deploy.read'), async (_req, res) => {
+    res.json({
+      releases: await ctx.deployReleases.list(),
+      unread: await ctx.deployReleases.unread(),
+    });
+  });
+  r.get('/deploy/releases/:id', requirePermission('deploy.read'), async (req, res) => {
+    res.json(await ctx.deployReleases.get(req.params.id));
+  });
+  r.post(
+    '/deploy/releases/:id/read',
+    docs({ noBody: true }),
+    requirePermission('deploy.read'),
+    async (req, res) => {
+      await ctx.deployReleases.markRead(req.params.id);
+      res.json({ ok: true });
+    },
+  );
+  r.put(
+    '/deploy/releases/:id/steps',
+    docs({ body: stepBody }),
+    requirePermission('deploy.read'),
+    async (req, res) => {
+      const b = parse(stepBody, req.body);
+      await ctx.deployReleases.setStepDone(req.params.id, b.step, b.done, actorOf(req));
+      res.json({ ok: true });
     },
   );
 

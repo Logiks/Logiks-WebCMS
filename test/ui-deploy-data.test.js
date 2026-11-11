@@ -20,6 +20,23 @@ test('Deploy screen: choose what to copy per table, a child lifts its parents, t
     status: 'open',
     created_at: t0,
   });
+  const lib = (name, include, autoload) => ({
+    name,
+    version: '3.0.0',
+    integrity: `sha512-${name}`,
+    tarball: 'AAAA',
+    size: 4,
+    unpacked_size: 4,
+    files: '[]',
+    include: JSON.stringify(include),
+    autoload,
+    position: 0,
+    installed_at: t0,
+    updated_at: t0,
+  });
+  await node.ctx
+    .db('libraries')
+    .insert([lib('aos', ['dist/aos.js'], true), lib('swiper', [], false)]);
   const b = await openAdmin(node.url);
   try {
     await b.signIn(ADMIN.email, ADMIN.password);
@@ -29,6 +46,19 @@ test('Deploy screen: choose what to copy per table, a child lifts its parents, t
     await wait(() => b.$(`${section} #dep-url`));
     await wait(() => b.$$(`${section} select`).length > 5);
 
+    // Folded by default, with a one-line summary; the header opens and folds it.
+    const body = () => b.$(`${section} #dep-data-body`);
+    assert.equal(b.visible(body()), false, 'starts folded');
+    assert.match(b.text(), /\d+ synced · \d+ added · \d+ settings/);
+    const head = b.$(`${section} button[aria-controls="dep-data-body"]`);
+    b.click(head);
+    await wait(() => b.visible(body()));
+    assert.equal(head.getAttribute('aria-expanded'), 'true');
+    b.click(head);
+    await wait(() => !b.visible(body()));
+    b.click(head);
+    await wait(() => b.visible(body()));
+
     const sel = (table) => b.$(`${section} select[aria-label="What to copy from ${table}"]`);
     assert.equal(sel('menus').value, 'sync', 'what you built syncs by default');
     assert.equal(sel('entries').value, 'skip', 'content is off by default');
@@ -36,6 +66,16 @@ test('Deploy screen: choose what to copy per table, a child lifts its parents, t
       [...sel('media').options].map((o) => o.value),
       ['skip', 'add'],
     );
+
+    // Libraries: each is listed with its chosen files; unticking one is saved by name.
+    const libs = () => b.$(`${section} [data-libraries]`);
+    assert.ok(b.visible(libs()));
+    assert.match(libs().textContent, /aos[\s\S]*dist\/aos\.js/);
+    assert.match(libs().textContent, /swiper[\s\S]*No files chosen/);
+    const swiper = b.$(`${section} #dep-lib-swiper`);
+    swiper.checked = false;
+    swiper.dispatchEvent(new b.win.Event('change', { bubbles: true }));
+    await wait(() => /\(1 of 2\)/.test(libs().textContent));
 
     // Choosing entry_terms lifts entries and terms (a child needs its parents).
     sel('entry_terms').value = 'add';
@@ -49,6 +89,7 @@ test('Deploy screen: choose what to copy per table, a child lifts its parents, t
     const saved = node.ctx.settings.get('deploy.data_selection');
     assert.notEqual(saved.tables.entries, 'skip');
     assert.ok(saved.settings.includes('site.theme'));
+    assert.deepEqual(saved.libraries, ['aos'], 'only the ticked library is saved');
     await wait(() => save().disabled);
 
     // The waiting change: tick it and take dev's version.

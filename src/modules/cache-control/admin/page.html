@@ -1,0 +1,61 @@
+<div class="page-head d-flex justify-content-between align-items-end flex-wrap gap-2">
+  <div><h1>Cache</h1><p>Clear what the servers keep so a change shows at once, or switch server-side caching off while you develop.</p></div>
+  <button type="button" class="btn btn-outline-secondary btn-sm" @click="load()">Refresh</button>
+</div>
+<div class="alert alert-danger" role="alert" x-show="error" x-text="error"></div>
+
+<div class="alert alert-warning d-flex justify-content-between align-items-center flex-wrap gap-2" role="status" x-show="s && !s.enabled" data-off>
+  <span><strong>Server-side caching is off.</strong> Every page and API answer is built on each request, and nothing is kept by browsers or a CDN. Turn it back on before the site goes live.</span>
+</div>
+
+<div class="panel mb-3" x-show="s">
+  <div class="panel-h">Server-side caching</div>
+  <div class="p-3 d-flex justify-content-between align-items-center flex-wrap gap-3">
+    <div class="small muted" style="max-width:42rem">Applies to every server at once and takes effect immediately. While it is off nothing is stored or served from the cache (rendered pages, content and API answers), and responses are sent so browsers and CDNs do not keep them either. Compiled templates need no switch: they are rebuilt whenever a file changes.</div>
+    <div class="form-check form-switch mb-0" x-show="can('cache.manage')">
+      <input class="form-check-input" type="checkbox" role="switch" id="cache-on" :checked="s && s.enabled" :disabled="busy !== ''" @change="setEnabled($event.target.checked)">
+      <label class="form-check-label" for="cache-on" x-text="s && s.enabled ? 'On' : 'Off'"></label>
+    </div>
+    <span class="small muted" x-show="!can('cache.manage')" x-text="s && s.enabled ? 'On' : 'Off'"></span>
+  </div>
+</div>
+
+<div class="panel mb-3" x-show="s && can('cache.clear')">
+  <div class="panel-h">Clear</div>
+  <div class="p-3">
+    <p class="small muted mb-3">Each button clears on every server. Visitors and the admin get fresh copies on their next request; nothing is deleted from the site itself.</p>
+    <div class="row g-3">
+      <div class="col-md-4"><div class="border rounded p-3 h-100">
+        <div class="fw-semibold">Rendered pages</div>
+        <div class="small muted mb-2">Every page the site has built and kept. Use after editing content, a menu or a setting.</div>
+        <button type="button" class="btn btn-primary btn-sm" data-clear="pages" :disabled="busy !== ''" @click="clear('pages')">Clear pages</button>
+      </div></div>
+      <div class="col-md-4"><div class="border rounded p-3 h-100">
+        <div class="fw-semibold">Templates and components</div>
+        <div class="small muted mb-2">The compiled site (pages, components, styles) on each server, and the pages built from it. Use after changing a component or layout.</div>
+        <button type="button" class="btn btn-primary btn-sm" data-clear="templates" :disabled="busy !== ''" @click="clear('templates')">Clear templates</button>
+      </div></div>
+      <div class="col-md-4"><div class="border rounded p-3 h-100">
+        <div class="fw-semibold">Everything</div>
+        <div class="small muted mb-2">All of the above, plus content and API data, and a re-read of themes and libraries. The surest reset.</div>
+        <button type="button" class="btn btn-outline-primary btn-sm" data-clear="everything" :disabled="busy !== ''" @click="clear('everything')">Clear everything</button>
+      </div></div>
+    </div>
+  </div>
+</div>
+
+<div class="row g-3 mb-3" x-show="s">
+  <div class="col-md-6"><div class="panel p-3 h-100">
+    <div class="muted small">This server</div>
+    <div class="mt-1" x-text="s ? (s.stats.backend === 'redis' ? 'Shared through Redis' : 'Kept in memory (no Redis)') : ''"></div>
+    <div class="small muted mt-2" x-text="s ? s.stats.l1Entries + ' of ' + s.stats.l1Max + ' in-memory entries · hit rate ' + hitRate() + ' · ' + s.stats.misses + ' misses since start' : ''"></div>
+    <div class="small muted mt-2" x-text="s ? 'Pages are kept ' + (s.pageSeconds > 0 ? s.pageSeconds + ' seconds' : 'for no time (page cache off)') + '. Change it under Settings → Website.' : ''"></div>
+  </div></div>
+  <div class="col-md-6"><div class="panel p-3 h-100">
+    <div class="muted small">Recent</div>
+    <div class="small muted mt-1" x-show="s && !s.recent.length">Nothing cleared or switched yet.</div>
+    <template x-for="e in (s ? s.recent : [])" :key="e.at + e.action">
+      <div class="small"><span x-text="what(e)"></span> <span class="muted" x-text="(e.by ? 'by ' + e.by + ' · ' : '') + ago(e.at)"></span></div>
+    </template>
+  </div></div>
+</div>

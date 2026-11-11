@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { parse } from '../../core/http/errors.js';
+import { rm } from 'node:fs/promises';
+import { HttpError, parse } from '../../core/http/errors.js';
 import { actorOf, requirePermission } from '../../core/http/middleware.js';
 import { docs } from '../../core/http/docs.js';
 
@@ -89,6 +90,51 @@ export default function dbmsRoutes(ctx) {
     await dbms.dropTable(req.params.table, actorOf(req));
     res.status(204).end();
   });
+
+  // ── Export / import of chosen tables (transfer.js, D-139) ──
+  r.get('/dbms/export', requirePermission('dbms.read'), async (req, res) => {
+    const tables = String(req.query.tables ?? '')
+      .split(',')
+      .map((t) => t.trim())
+      .filter(Boolean);
+    const file = await ctx.dbTransfer.exportTables(
+      { tables, data: req.query.data !== 'false' },
+      actorOf(req),
+    );
+    res.setHeader('content-type', 'application/zip');
+    res.setHeader('content-disposition', `attachment; filename="${file.name}"`);
+    res.setHeader('cache-control', 'no-store');
+    res.on('close', file.done);
+    file.stream.pipe(res);
+  });
+  // The zip is the request body. `dryRun=true` only reads it and says what would happen; importing needs `confirm=IMPORT`.
+  r.post(
+    '/dbms/import',
+    requirePermission('dbms.write'),
+    docs({ binary: 'application/zip' }),
+    async (req, res) => {
+      const dry = req.query.dryRun === 'true';
+      if (!dry && req.query.confirm !== 'IMPORT')
+        throw new HttpError(
+          422,
+          'invalid_input',
+          'Confirm the import. It only adds: missing tables, columns and records. Nothing is deleted or replaced.',
+        );
+      const file = await ctx.dbTransfer.receive(req);
+      try {
+        const tables =
+          typeof req.query.tables === 'string'
+            ? req.query.tables
+                .split(',')
+                .map((t) => t.trim())
+                .filter(Boolean)
+            : undefined;
+        res.json(await ctx.dbTransfer.importFile(file, { tables, confirm: !dry }, actorOf(req)));
+      } finally {
+        await rm(file, { force: true });
+      }
+    },
+  );
 
   const queryBody = z.object({ sql: z.string().min(1).max(50_000) });
   r.post(

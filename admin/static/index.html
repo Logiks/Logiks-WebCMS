@@ -320,6 +320,11 @@
       </div>
     </template>
 
+    <!-- System → Cache -->
+    <template x-if="route === 'cache'">
+      <section x-data="cachePage"></section>
+    </template>
+
     <!-- Publish & Git -->
     <template x-if="route === 'publish'">
       <section x-data="publishPage"></section>

@@ -48,8 +48,8 @@ async function devNode(fx) {
   await node.ctx.settings.update('deploy', { values: { repo_url: fx.origin, branch: 'main' } });
   return node;
 }
-async function deployFrom(dev, fx, tables = {}, settings) {
-  const sel = { tables, ...(settings ? { settings } : {}) };
+async function deployFrom(dev, fx, tables = {}, settings, libraries) {
+  const sel = { tables, ...(settings ? { settings } : {}), ...(libraries ? { libraries } : {}) };
   await dev.ctx.deploySync.saveSelection(sel, actor);
   const run = await dev.ctx.deploy.start({ data: true, media: false }, actor);
   await dev.ctx.deploy.idle();
@@ -531,6 +531,90 @@ test('a large content table syncs in chunks: 4,000 entries arrive, a repeat chan
       (await prod.ctx.db('entries').where({ slug: 'post-7' }).first()).title,
       'Seven, edited',
     );
+  } finally {
+    await prod?.close();
+    await dev.close();
+    fx.cleanup();
+  }
+});
+
+test('libraries: each one is chosen on its own and travels with its chosen files and its "every page" switch', async () => {
+  const fx = fixture();
+  const dev = await devNode(fx);
+  let prod;
+  try {
+    const t0 = Date.now();
+    const lib = (name, include, autoload) => ({
+      name,
+      version: '1.0.0',
+      integrity: `sha512-${name}`,
+      tarball: 'AAAA',
+      size: 4,
+      unpacked_size: 4,
+      files: JSON.stringify([['dist/a.js', 1]]),
+      include: JSON.stringify(include),
+      autoload,
+      position: 0,
+      installed_at: t0,
+      updated_at: t0,
+    });
+    await dev.ctx
+      .db('libraries')
+      .insert([lib('aos', ['dist/aos.css', 'dist/aos.js'], true), lib('other', ['x.js'], false)]);
+    const view = await dev.ctx.deploySync.overview();
+    assert.deepEqual(
+      view.libraries.map((l) => [l.name, l.files, l.autoload, l.selected]),
+      [
+        ['aos', ['dist/aos.css', 'dist/aos.js'], true, true],
+        ['other', ['x.js'], false, true],
+      ],
+      'the choice lists each library with its chosen files',
+    );
+
+    // Only aos is ticked.
+    const sel = await dev.ctx.deploySync.saveSelection({ tables: {}, libraries: ['aos'] }, actor);
+    assert.deepEqual(sel.libraries, ['aos']);
+    const clone = await deployFrom(dev, fx, {}, undefined, ['aos']);
+    const rows = fs
+      .readFileSync(path.join(clone, 'deploy-data/db/libraries.ndjson'), 'utf8')
+      .split('\n')
+      .filter(Boolean)
+      .map((l) => JSON.parse(l));
+    assert.deepEqual(
+      rows.map((r) => r.name),
+      ['aos'],
+    );
+    const manifest = JSON.parse(
+      fs.readFileSync(path.join(clone, 'deploy-data/manifest.json'), 'utf8'),
+    );
+    assert.equal(manifest.tables.libraries.rows, 1, 'the manifest still describes the file');
+
+    prod = await startNode({ seed: true });
+    const r = await bring(prod, clone);
+    assert.equal(r.problems.length, 0, r.problems.join('; '));
+    const got = await prod.ctx.db('libraries');
+    assert.deepEqual(
+      got.map((l) => l.name),
+      ['aos'],
+    );
+    assert.deepEqual(
+      JSON.parse(got[0].include),
+      ['dist/aos.css', 'dist/aos.js'],
+      'the chosen files came',
+    );
+    assert.equal(!!got[0].autoload, true, 'and the every-page switch');
+
+    // Dev changes which files are chosen: production follows (it was not edited there).
+    await dev.ctx
+      .db('libraries')
+      .where({ name: 'aos' })
+      .update({ include: JSON.stringify(['dist/aos.js']), updated_at: t0 + 1 });
+    await bring(prod, await deployFrom(dev, fx, {}, undefined, ['aos']));
+    assert.deepEqual(JSON.parse((await prod.ctx.db('libraries').first()).include), ['dist/aos.js']);
+
+    // All ticked = every library, including one added later.
+    const all = await dev.ctx.deploySync.saveSelection({ tables: {}, libraries: null }, actor);
+    assert.equal(all.libraries, null);
   } finally {
     await prod?.close();
     await dev.close();

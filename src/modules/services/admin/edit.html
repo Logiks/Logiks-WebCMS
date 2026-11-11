@@ -109,10 +109,57 @@
                               </div>
                             </template>
 
-                            <div class="d-flex justify-content-between align-items-center mt-3 mb-2" x-show="tTable"><label class="form-label mb-0">Filter by column = parameter</label><button type="button" class="btn btn-sm btn-outline-secondary" @click="addWhere()">Add filter</button></div>
+                            <div class="d-flex justify-content-between align-items-center mt-3 mb-1" x-show="tTable" data-where>
+                              <label class="form-label mb-0">Where</label>
+                              <span><button type="button" class="btn btn-sm btn-outline-secondary" data-add-where @click="addWhere()">Add condition</button> <button type="button" class="btn btn-sm btn-outline-secondary" data-add-group @click="addGroup()">Add group</button></span>
+                            </div>
+                            <div class="small muted mb-2" x-show="tTable">Choose which rows the service returns. A condition compares a column with a parameter the caller sends, or with a fixed value. Add a group for “this AND (that OR that)”.</div>
+                            <div class="d-flex align-items-center gap-2 mb-2" x-show="tTable && tWhere.length > 1">
+                              <span class="small">Rows must match</span>
+                              <select class="form-select form-select-sm w-auto" aria-label="Match all or any" x-model="tWhereMatch"><option value="all">all of these</option><option value="any">any of these</option></select>
+                            </div>
                             <template x-for="(w, i) in tWhere" :key="i">
-                              <div class="row g-2 mb-2 align-items-center">
-                                <div class="col-10 col-md-5"><select class="form-select form-select-sm mono" aria-label="Column" x-model="w.column"><option value="">Column…</option><template x-for="c in tAvailableColumns" :key="c"><option :value="c" x-text="c"></option></template></select></div>
+                              <div>
+                                <template x-if="w.kind === 'c'">
+                                  <div class="row g-2 mb-2 align-items-center">
+                                    <div class="col-12 col-md-3"><select class="form-select form-select-sm mono" aria-label="Column" x-model="w.column"><option value="">Column…</option><template x-for="c in tAvailableColumns" :key="c"><option :value="c" x-text="c"></option></template></select></div>
+                                    <div class="col-6 col-md-2"><select class="form-select form-select-sm" aria-label="Condition" x-model="w.op"><template x-for="o in whereOps" :key="o[0]"><option :value="o[0]" x-text="o[1]"></option></template></select></div>
+                                    <div class="col-6 col-md-2" x-show="opNeedsValue(w.op)"><select class="form-select form-select-sm" aria-label="Compare with" x-model="w.source"><option value="param">a parameter</option><option value="value">a fixed value</option></select></div>
+                                    <div class="col-8 col-md-3" x-show="opNeedsValue(w.op)">
+                                      <select class="form-select form-select-sm mono" aria-label="Parameter" x-model="w.param" x-show="w.source === 'param'"><option value="">Parameter…</option><template x-for="p in tParams" :key="p.name"><option :value="p.name" x-text="p.name"></option></template></select>
+                                      <input class="form-control form-control-sm" aria-label="Fixed value" placeholder="value" x-model="w.value" x-show="w.source === 'value'">
+                                    </div>
+                                    <div class="col-12 col-md-auto" x-show="opNeedsValue(w.op) && w.source === 'param'"><div class="form-check mb-0"><input class="form-check-input" type="checkbox" :id="'wi-' + w.uid" x-model="w.ignoreIfMissing"><label class="form-check-label small" :for="'wi-' + w.uid" title="When the caller does not send this parameter, skip this condition instead of matching nothing">Skip if not given</label></div></div>
+                                    <div class="col-4 col-md-1 text-end"><button type="button" class="btn btn-sm btn-outline-danger" @click="removeWhere(i)" aria-label="Remove condition">×</button></div>
+                                  </div>
+                                </template>
+                                <template x-if="w.kind === 'g'">
+                                  <div class="border rounded p-2 mb-2" data-group>
+                                    <div class="d-flex align-items-center gap-2 mb-2">
+                                      <span class="small">A group: rows match</span>
+                                      <select class="form-select form-select-sm w-auto" aria-label="Group matches all or any" x-model="w.match"><option value="all">all of</option><option value="any">any of</option></select>
+                                      <span class="small">these</span>
+                                      <button type="button" class="btn btn-sm btn-outline-secondary ms-auto" @click="addToGroup(w)">Add to group</button>
+                                      <button type="button" class="btn btn-sm btn-outline-danger" @click="removeWhere(i)" aria-label="Remove group">×</button>
+                                    </div>
+                                    <template x-for="(c, j) in w.conditions" :key="j">
+                                      <div class="row g-2 mb-2 align-items-center">
+                                    <div class="col-12 col-md-3"><select class="form-select form-select-sm mono" aria-label="Column" x-model="c.column"><option value="">Column…</option><template x-for="c in tAvailableColumns" :key="c"><option :value="c" x-text="c"></option></template></select></div>
+                                    <div class="col-6 col-md-2"><select class="form-select form-select-sm" aria-label="Condition" x-model="c.op"><template x-for="o in whereOps" :key="o[0]"><option :value="o[0]" x-text="o[1]"></option></template></select></div>
+                                    <div class="col-6 col-md-2" x-show="opNeedsValue(c.op)"><select class="form-select form-select-sm" aria-label="Compare with" x-model="c.source"><option value="param">a parameter</option><option value="value">a fixed value</option></select></div>
+                                    <div class="col-8 col-md-3" x-show="opNeedsValue(c.op)">
+                                      <select class="form-select form-select-sm mono" aria-label="Parameter" x-model="c.param" x-show="c.source === 'param'"><option value="">Parameter…</option><template x-for="p in tParams" :key="p.name"><option :value="p.name" x-text="p.name"></option></template></select>
+                                      <input class="form-control form-control-sm" aria-label="Fixed value" placeholder="value" x-model="c.value" x-show="c.source === 'value'">
+                                    </div>
+                                    <div class="col-12 col-md-auto" x-show="opNeedsValue(c.op) && c.source === 'param'"><div class="form-check mb-0"><input class="form-check-input" type="checkbox" :id="'wi-' + c.uid" x-model="c.ignoreIfMissing"><label class="form-check-label small" :for="'wi-' + c.uid" title="When the caller does not send this parameter, skip this condition instead of matching nothing">Skip if not given</label></div></div>
+                                    <div class="col-4 col-md-1 text-end"><button type="button" class="btn btn-sm btn-outline-danger" @click="removeFromGroup(w, j)" aria-label="Remove condition">×</button></div>
+                                  </div>
+                                    </template>
+                                  </div>
+                                </template>
+                              </div>
+                            </template>
+                            <div class="small muted" x-show="tTable && tWhere.length" data-where-summary x-text="'Returns rows where: ' + whereSummary()"></div></select></div>
                                 <span class="col-2 col-md-auto text-center">=</span>
                                 <div class="col-10 col-md-5"><select class="form-select form-select-sm mono" aria-label="Parameter" x-model="w.param"><option value="">Parameter…</option><template x-for="p in tParams" :key="p.name"><option :value="p.name" x-text="p.name"></option></template></select></div>
                                 <div class="col-2 col-md-1 text-end"><button type="button" class="btn btn-sm btn-outline-danger" @click="removeWhere(i)" aria-label="Remove filter">×</button></div>

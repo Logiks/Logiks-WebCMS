@@ -58,7 +58,7 @@ const lastLine = (text) =>
  * without a shell, and refuses to restart a production server that has pending migrations (it would not come back up).
  *
  * @param {{env: import('../../core/env.js').Env, db: import('knex').Knex, settings: any, bus: any, audit: any, nodes: any,
- *   state: any, log: import('pino').Logger, appRoot: string, getBackup?: () => any, getSiteFiles?: () => any, getDeploySync?: () => any}} deps
+ *   state: any, log: import('pino').Logger, appRoot: string, getBackup?: () => any, getSiteFiles?: () => any, getDeploySync?: () => any, getDeployReleases?: () => any}} deps
  */
 export function createUpdatesService({
   env,
@@ -73,6 +73,7 @@ export function createUpdatesService({
   getBackup = () => null,
   getSiteFiles = () => null,
   getDeploySync = () => null,
+  getDeployReleases = () => null,
 }) {
   let stopped = false;
   let bootCommit = null;
@@ -434,7 +435,7 @@ export function createUpdatesService({
    * already updated and the admin should see exactly what did not come across.
    */
   async function importDeployment(from, actor) {
-    const out = { pages: null, data: null, sync: null, problems: [] };
+    const out = { pages: null, data: null, sync: null, notes: 0, problems: [] };
     const diff = await git(
       'diff',
       '--name-status',
@@ -444,6 +445,7 @@ export function createUpdatesService({
       '--',
       'public',
       DATA_DIR,
+      'deploy-notes',
     );
     if (diff.code !== 0) return out;
     const changes = diff.out
@@ -526,6 +528,34 @@ export function createUpdatesService({
       } catch (e) {
         out.problems.push(`records: ${e.message}`);
       }
+    }
+
+    // The deployer's release notes: stored so they can be read later (Operations → Deploy → Release notes). The newest one
+    // also records what bringing this update in did here.
+    const releases = getDeployReleases();
+    const noteFiles = changes
+      .filter((c) => c.status !== 'D' && /^deploy-notes\/releases\/\d+\.json$/.test(c.file))
+      .map((c) => c.file)
+      .sort();
+    if (releases && noteFiles.length) {
+      const result = {
+        added: out.sync?.added ?? 0,
+        updated: out.sync?.updated ?? 0,
+        conflicts: out.sync?.conflicts ?? 0,
+        removedOnDev: out.sync?.removedOnDev ?? {},
+        problems: out.problems.length,
+      };
+      for (const f of noteFiles)
+        try {
+          const release = JSON.parse(await fsp.readFile(path.join(appRoot, f), 'utf8'));
+          await releases.store(release, {
+            source: 'deploy',
+            result: f === noteFiles.at(-1) ? result : null,
+          });
+          out.notes++;
+        } catch (e) {
+          out.problems.push(`release notes ${f}: ${e.message}`);
+        }
     }
     return out;
   }
@@ -617,6 +647,7 @@ export function createUpdatesService({
         imported?.pages &&
           `imported ${imported.pages.written} page file${imported.pages.written === 1 ? '' : 's'}${imported.pages.removed ? ` and removed ${imported.pages.removed}` : ''}`,
         imported?.data && 'added the data that came with it',
+        imported?.notes && `release notes: ${imported.notes} new, read them in Operations → Deploy`,
         imported?.sync &&
           `brought in records (${imported.sync.added} new, ${imported.sync.updated} updated${imported.sync.conflicts ? `, ${imported.sync.conflicts} waiting for you in Operations → Deploy` : ''})`,
       ].filter(Boolean);

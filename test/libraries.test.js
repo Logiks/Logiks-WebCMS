@@ -233,7 +233,7 @@ describe('System → Libraries', () => {
       assert.equal(imp.body.installed.length, 2);
       assert.match(
         imp.body.installed.find((x) => x.name === 'demo-icons').note,
-        /Scripts were skipped/,
+        /Not selected: js\/icons\.js\. Library scripts are off: turn on Settings → Libraries/,
       );
       const got = (await oa.get('/api/admin/libraries')).body.libraries.find(
         (l) => l.name === 'demo-icons',
@@ -241,6 +241,17 @@ describe('System → Libraries', () => {
       assert.equal(got.integrity, icons.integrity);
       assert.equal(got.autoload, true);
       assert.deepEqual(got.include, ['css/icons.css'], 'scripts are off on this installation');
+
+      // Turn scripts on and import the same list again: the chosen script file comes across too, with no note.
+      await other.ctx.settings.update('libraries', { values: { allow_scripts: true } }, null);
+      const again = await oa.post('/api/admin/libraries/import').send(ex.body);
+      assert.equal(again.body.failed.length, 0, JSON.stringify(again.body.failed));
+      assert.equal(again.body.installed.find((x) => x.name === 'demo-icons').note, undefined);
+      const full = (await oa.get('/api/admin/libraries')).body.libraries.find(
+        (l) => l.name === 'demo-icons',
+      );
+      assert.deepEqual(full.include, ['css/icons.css', 'js/icons.js']);
+      await other.ctx.settings.update('libraries', { values: { allow_scripts: false } }, null);
 
       const forged = { ...ex.body, libraries: [{ ...icons, integrity: 'sha512-AAAA' }] };
       const bad = await oa.post('/api/admin/libraries/import').send(forged);

@@ -78,7 +78,8 @@ export async function siteGlobals(ctx, { locale, path, query, contact, preview, 
 export default function publicSite(ctx) {
   const r = Router();
   const { settings, content, themes, cache, site, metrics, jobs } = ctx;
-  const ttl = () => settings.get('site.page_cache_seconds');
+  // With the cache switched off (System → Cache) nothing may be kept anywhere, a browser or CDN included.
+  const ttl = () => (ctx.cache.enabled() ? settings.get('site.page_cache_seconds') : 0);
   r.use(cookieParser()); // only this router needs it — the admin/auth API parses its own cookies separately
 
   // ───────── activity/analytics (docs/DECISIONS.md D-056) ─────────

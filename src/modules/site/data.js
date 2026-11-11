@@ -25,7 +25,7 @@ const iso = (ms) => (ms ? new Date(ms).toISOString() : null);
 export function createPublicData(ctx) {
   const { settings, content, media, cache } = ctx;
   const def = () => settings.get('general.default_locale');
-  const ttl = () => settings.get('site.page_cache_seconds');
+  const ttl = () => (cache.enabled() ? settings.get('site.page_cache_seconds') : 0);
 
   const localeOf = async (v) => {
     if (!settings.get('features.multilingual') || !v || String(v) === def()) return def();

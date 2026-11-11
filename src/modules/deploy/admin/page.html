@@ -25,13 +25,24 @@
               <div class="form-check"><input class="form-check-input" type="checkbox" :id="'dep-pl-' + p.slug" :value="p.slug" x-model="plugins"><label class="form-check-label" :for="'dep-pl-' + p.slug">Plugin <strong x-text="p.name"></strong> <span class="muted small mono" x-text="'plugins/' + p.slug"></span></label></div>
             </template>
             <div class="small muted mt-2" x-show="!data?.available.themes.length && !data?.available.plugins.length">No installed or cloned themes, and no uploaded plugins, are stored only in the database.</div>
+            <div class="mt-3">
+              <label class="form-label small mb-1" for="dep-title">Release title <span class="muted">(optional)</span></label>
+              <input class="form-control form-control-sm mb-2" id="dep-title" x-model="title" maxlength="200" placeholder="e.g. New pricing page and blog layout">
+              <label class="form-label small mb-1" for="dep-notes">Notes for whoever updates production <span class="muted">(optional)</span></label>
+              <textarea class="form-control form-control-sm" id="dep-notes" x-model="notes" rows="3" maxlength="4000" placeholder="Anything to check or do after updating"></textarea>
+              <div class="small muted mt-1">Every deploy also writes release notes into the repository: what changed, and what you may want to remove by hand, because a deploy never removes or renames anything.</div>
+            </div>
             <div class="mt-3"><button class="btn btn-primary" :disabled="!canDeploy()" @click="deploy()">Deploy</button> <span class="small muted ms-2" x-show="targetDirty()">Save the repository first.</span><span class="small muted ms-2" x-show="!data?.target.url">Set a repository first.</span><span class="small muted ms-2" x-show="running">A deploy is running…</span></div>
           </div>
         </div>
 
         <div class="panel mb-3" x-show="view && can('deploy.run')">
-          <div class="panel-h">Data to copy</div>
-          <div class="p-3">
+          <button type="button" class="panel-h w-100 text-start border-0 d-flex align-items-center gap-2" @click="toggleData()" :aria-expanded="dataOpen" aria-controls="dep-data-body">
+            <i class="bi" :class="dataOpen ? 'bi-chevron-down' : 'bi-chevron-right'" aria-hidden="true"></i>
+            <span>Data to copy</span>
+            <span class="muted small fw-normal ms-2" x-text="dataSummary()"></span>
+          </button>
+          <div class="p-3" id="dep-data-body" x-show="dataOpen">
             <p class="small muted mb-3">Choose, table by table, what a deploy carries to production. <strong>Table structure is always copied.</strong> <em>Add missing</em> adds records production lacks. <em>Sync</em> also updates a record dev changed, but only if nobody changed it on production too; otherwise it waits for you under "Waiting for you". <strong>Nothing is ever deleted</strong>, and records are matched by name, slug or email, never by id. Secrets (passwords, API keys, webhook secrets) never travel.</p>
             <template x-for="g in (view ? view.groups : [])" :key="g.id">
               <div class="mb-3" x-show="rowsOf(g.id).length">
@@ -50,6 +61,18 @@
                 </tbody></table>
               </div>
             </template>
+            <div class="mb-3" x-show="view && view.libraries.length && modes.libraries !== 'skip'" data-libraries>
+              <div class="fw-semibold">Libraries to copy <span class="muted small fw-normal" x-text="'(' + pickedLibs.length + ' of ' + (view ? view.libraries.length : 0) + ')'"></span></div>
+              <div class="small muted mb-1">Each library travels with the files you chose for it and its "load on every page" switch, so production loads the same files. A new version on dev updates production's copy.</div>
+              <template x-for="l in (view ? view.libraries : [])" :key="l.name">
+                <div class="form-check">
+                  <input class="form-check-input" type="checkbox" :id="'dep-lib-' + l.name" :value="l.name" x-model="pickedLibs">
+                  <label class="form-check-label" :for="'dep-lib-' + l.name"><strong x-text="l.name"></strong> <span class="muted small" x-text="l.version"></span>
+                    <span class="tag ms-1" x-show="l.autoload">on every page</span>
+                    <span class="muted small mono d-block" x-text="l.files.join(', ') || 'No files chosen: it will not load anywhere'"></span></label>
+                </div>
+              </template>
+            </div>
             <details class="mb-3">
               <summary class="fw-semibold">Settings to copy <span class="muted small fw-normal" x-text="'(' + picked.length + ' chosen)'"></span></summary>
               <div class="small muted my-1">Every setting is copied by default; untick the ones that should stay different on production (the site address, mail, maintenance mode…). A setting someone changed on production is never overwritten without your say-so. Keys and passwords are never copied.</div>
@@ -89,6 +112,47 @@
             </tbody></table>
             <button class="btn btn-sm btn-primary" :disabled="!ticked.length" @click="resolve('apply')">Use dev's version</button>
             <button class="btn btn-sm btn-outline-secondary ms-1" :disabled="!ticked.length" @click="resolve('dismiss')">Keep this server's</button>
+          </div>
+        </div>
+
+        <div class="panel mb-3" x-show="releases.length" data-releases>
+          <div class="panel-h">Release notes <span class="tag warn ms-1" x-show="unread" x-text="unread + ' new'"></span></div>
+          <div class="p-3">
+            <p class="small muted mb-2">What each deploy changed, in the order they arrived, with the things you may want to do by hand. A deploy never removes or renames a table, column, library or plugin on its own.</p>
+            <template x-for="r in releases" :key="r.id">
+              <div class="border rounded mb-2">
+                <button type="button" class="btn btn-link text-start w-100 text-decoration-none d-flex gap-2 align-items-center" :aria-expanded="openId === r.id" @click="openNote(r)">
+                  <i class="bi" :class="openId === r.id ? 'bi-chevron-down' : 'bi-chevron-right'" aria-hidden="true"></i>
+                  <span class="fw-semibold" x-text="r.seq + '. ' + r.title"></span>
+                  <span class="tag warn" x-show="r.unread">new</span>
+                  <span class="muted small ms-auto text-nowrap" x-text="(r.stepCount ? r.stepsDone + ' of ' + r.stepCount + ' steps done · ' : '') + ago(r.createdAt)"></span>
+                </button>
+                <div class="px-3 pb-3" x-show="openId === r.id && detail && detail.id === r.id">
+                  <template x-if="detail && detail.id === r.id">
+                    <div>
+                      <div class="mb-2" style="white-space:pre-wrap" x-show="detail.release.notes" x-text="detail.release.notes"></div>
+                      <div class="small mb-2" x-text="noteSummary(detail)"></div>
+                      <div class="small mb-2" x-show="detail.result" x-text="resultLine(detail)"></div>
+                      <div x-show="detail.release.steps.length">
+                        <div class="fw-semibold small">To do (optional)</div>
+                        <template x-for="s in detail.release.steps" :key="s.id">
+                          <div class="form-check mb-1">
+                            <input class="form-check-input" type="checkbox" :id="'dep-step-' + s.id" :checked="s.done" @change="setStep(s, $event.target.checked)">
+                            <label class="form-check-label" :for="'dep-step-' + s.id"><span x-text="s.title"></span>
+                              <span class="tag ms-1" x-show="s.stillHere === true">still on this server</span>
+                              <span class="tag ok ms-1" x-show="s.stillHere === false">gone from this server</span>
+                              <span class="d-block small muted" x-text="s.detail + ' (' + s.where + ')'"></span></label>
+                          </div>
+                        </template>
+                      </div>
+                      <div class="small muted" x-show="!detail.release.steps.length">Nothing for you to do by hand in this release.</div>
+                      <details class="mt-2" x-show="detail.release.commits.length"><summary class="small">Source changes (<span x-text="detail.release.commits.length"></span>)</summary>
+                        <div class="small mono" x-text="detail.release.commits.join('\n')" style="white-space:pre-wrap"></div></details>
+                    </div>
+                  </template>
+                </div>
+              </div>
+            </template>
           </div>
         </div>
 

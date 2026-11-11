@@ -146,8 +146,20 @@ export function createDeploySync(ctx) {
       tables.push({ ...e, mode: sel.tables[e.table], rows });
     }
     const chosen = new Set(sel.settings);
+    const libs = await db('libraries')
+      .orderBy('position')
+      .orderBy('name')
+      .select('name', 'version', 'include', 'autoload')
+      .catch(() => []);
     return {
       groups: GROUPS,
+      libraries: libs.map((l) => ({
+        name: l.name,
+        version: l.version,
+        files: JSON.parse(l.include || '[]'),
+        autoload: !!l.autoload,
+        selected: sel.libraries === null || sel.libraries.includes(l.name),
+      })),
       tables,
       settings: settingChoices().map((d) => ({
         namespace: d.namespace,
@@ -189,7 +201,31 @@ export function createDeploySync(ctx) {
         const key = rest.join('.');
         return { id, namespace, key, value: settings.get(id) };
       });
-    return { tables, settings: picked };
+    return { tables, settings: picked, libraries: sel.libraries };
+  }
+
+  /**
+   * Keeps only the ticked libraries in the snapshot (their chosen files and "load on every page" travel in the record itself),
+   * and corrects the manifest's line for the table so it still describes the file.
+   * @param {string} dir the unpacked snapshot @param {string[]|null} names null = all @param {any} manifest
+   */
+  async function filterLibraries(dir, names, manifest) {
+    if (names === null) return;
+    const file = path.join(dir, 'db', 'libraries.ndjson');
+    if (!(await exists(file))) return;
+    const keep = new Set(names);
+    const lines = (await fs.readFile(file, 'utf8'))
+      .split('\n')
+      .filter((l) => l.trim() && keep.has(JSON.parse(l).name));
+    const body = lines.length ? `${lines.join('\n')}\n` : '';
+    await fs.writeFile(file, body);
+    if (manifest?.tables?.libraries)
+      manifest.tables.libraries = {
+        ...manifest.tables.libraries,
+        rows: lines.length,
+        bytes: Buffer.byteLength(body),
+        sha256: createHash('sha256').update(body).digest('hex'),
+      };
   }
 
   async function writePlan(dir, plan) {
@@ -711,6 +747,7 @@ export function createDeploySync(ctx) {
     saveSelection,
     overview,
     prepareExport,
+    filterLibraries,
     writePlan,
     importFrom,
     listConflicts,

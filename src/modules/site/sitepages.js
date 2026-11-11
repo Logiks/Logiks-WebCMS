@@ -147,6 +147,10 @@ export function createSitePages(ctx) {
   };
 
   const svc = {
+    /** Drops this server's compiled site; the next request rebuilds it from the site tree (System → Cache, D-136). */
+    clearCompiled() {
+      bundles.clear();
+    },
     /** The page that answers this address (without any language prefix): { file, params } or null. */
     match(urlPath) {
       const t = buildTable();

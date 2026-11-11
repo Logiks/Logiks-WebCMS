@@ -458,6 +458,13 @@ test('end to end: what dev built (pages, data, media, themes) arrives on product
     assert.match(snap.message, /imported 1 page file/);
     assert.match(snap.message, /added the data/);
     assert.match(snap.message, /brought in records/, 'the chosen records come in too (D-134)');
+    assert.match(snap.message, /release notes: \d+ new/, "the deployer's notes arrive too (D-138)");
+    const releaseNotes = await prod.ctx.deployReleases.list();
+    assert.ok(
+      releaseNotes.length >= 1 && releaseNotes[0].unread,
+      'stored on the server that updated, unread',
+    );
+    assert.ok(releaseNotes[0].result, 'with what bringing the update in did here');
     assert.doesNotMatch(snap.message, /Not everything came across/);
 
     assert.match(

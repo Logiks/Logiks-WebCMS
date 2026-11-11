@@ -276,5 +276,12 @@ export function normalizeSelection(raw, catalog, knownSettings) {
   const settings = Array.isArray(asked.settings)
     ? [...new Set(asked.settings.filter((s) => typeof s === 'string' && knownSettings.has(s)))]
     : [...knownSettings].filter(isDefaultSetting);
-  return { tables, settings };
+  // Which libraries a deploy carries: null = all of them (what a table in "sync" or "add" means), or the names ticked.
+  const libraries = Array.isArray(asked.libraries)
+    ? [...new Set(asked.libraries.filter((n) => typeof n === 'string' && n.length <= 191))].slice(
+        0,
+        200,
+      )
+    : null;
+  return { tables, settings, libraries };
 }

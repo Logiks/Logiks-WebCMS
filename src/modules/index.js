@@ -17,6 +17,7 @@ import events from './events/module.js';
 import webhooks from './webhooks/module.js';
 import scheduler from './scheduler/module.js';
 import publish from './publish/module.js';
+import cacheControl from './cache-control/module.js';
 import backup from './backup/module.js';
 import deploy from './deploy/module.js';
 import sitemap from './sitemap/module.js';
@@ -61,6 +62,7 @@ export const builtinModules = [
   webhooks,
   scheduler,
   publish,
+  cacheControl,
   backup,
   deploy,
   sitemap,

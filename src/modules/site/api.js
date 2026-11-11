@@ -18,7 +18,7 @@ import { publicSpec } from '../../core/api/openapi.js';
 export default function publicContentApi(ctx, { v1 = false } = {}) {
   const r = Router();
   const { settings } = ctx;
-  const ttl = () => settings.get('site.page_cache_seconds');
+  const ttl = () => (ctx.cache.enabled() ? settings.get('site.page_cache_seconds') : 0);
 
   if (v1)
     r.get('/openapi.json', (_req, res) => {

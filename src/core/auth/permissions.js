@@ -120,6 +120,11 @@ export function defineCorePermissions(permissions) {
     'publish.manage':
       'Publish a release, push, pull, switch branches, restore a release and refresh caches',
   });
+  permissions.define('Cache', {
+    'cache.read': 'See whether server-side caching is on and what it holds',
+    'cache.clear': 'Clear the cached pages, templates and components on every server',
+    'cache.manage': 'Switch server-side caching off or back on for every server',
+  });
   permissions.define('SEO', {
     'seo.read': 'View SEO Manager rules',
     'seo.write': 'Create, edit and delete SEO Manager rules',
