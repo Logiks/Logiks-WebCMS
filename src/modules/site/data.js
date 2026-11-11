@@ -266,7 +266,17 @@ export function createPublicData(ctx) {
     /** Services (Webmaster → Services, D-045): a component reads one exactly like any other /api/public/… address. */
     async service(slug, q, o) {
       if (!settings.get('features.services')) throw notFound('There is no such data.');
-      const defn = await ctx.services.getPublic(slug);
+      let defn;
+      try {
+        defn = await ctx.services.getPublic(slug);
+      } catch (e) {
+        if (o.safe && e?.status === 404)
+          ctx.log?.warn(
+            { service: slug },
+            'site: a component asked for a Service that is missing, switched off, or customer-only on this server',
+          );
+        throw e;
+      }
       const body = await ctx.services.run(defn, {
         query: q,
         locale: q.locale ?? o.locale,
@@ -441,8 +451,21 @@ export function createPublicData(ctx) {
       if (op.method !== method) continue;
       const p = matchPath(op.parts, seg);
       if (!p) continue;
-      if (!ctx.modules.isEnabled(op.module, ctx) || (op.flag && !settings.get(op.flag)))
+      if (!ctx.modules.isEnabled(op.module, ctx) || (op.flag && !settings.get(op.flag))) {
+        // A block that asks for data that is switched off renders empty and nothing else happens, so the reason is written to
+        // the log. Only for a page asking from inside the server (`safe`), never for a stranger probing /api/public.
+        if (o.safe)
+          ctx.log?.warn(
+            {
+              url: u.pathname,
+              reason: !ctx.modules.isEnabled(op.module, ctx)
+                ? `the "${op.module}" module is switched off here (Settings → Modules, or Settings → Features for Services)`
+                : `the setting "${op.flag}" is off (Settings → Features)`,
+            },
+            'site: a component asked for data that is not available on this server',
+          );
         throw notFound('There is no such data.');
+      }
       if (o.allow) {
         if (!o.allow.modules.has(op.module))
           throw new HttpError(

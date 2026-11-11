@@ -81,6 +81,14 @@ describe('the tarball reader', () => {
       /valid \.tgz/,
     );
   });
+
+  test('a package of thousands of tiny files unpacks when maxBytes is exactly their total size', () => {
+    // Tar headers and padding make the stream far bigger than the files; the unpack step passes the recorded file size.
+    const src = {};
+    for (let i = 0; i < 2000; i++) src[`font/icon-${i}.svg`] = 'x'.repeat(40);
+    const files = readTarball(tgz(src), { maxBytes: 2000 * 40, maxFiles: 10_000 });
+    assert.equal(files.size, 2000);
+  });
 });
 
 describe('System → Libraries', () => {

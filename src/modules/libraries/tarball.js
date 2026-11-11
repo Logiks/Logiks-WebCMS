@@ -19,7 +19,12 @@ export class TarballError extends Error {}
 export function readTarball(tgz, { maxBytes, maxFiles }) {
   let tar;
   try {
-    tar = zlib.gunzipSync(tgz, { maxOutputLength: maxBytes + 1024 * 1024 });
+    // The tar stream is bigger than the files in it: each entry costs a 512-byte header plus padding to 512 (and a
+    // pax header or directory entry may come with it). A fixed slack broke packages with thousands of small files
+    // (bootstrap-icons) whenever `maxBytes` was their exact file size, so the allowance grows with `maxFiles`.
+    tar = zlib.gunzipSync(tgz, {
+      maxOutputLength: maxBytes + 1024 * 1024 + (maxFiles * 2 + 16) * 1024,
+    });
   } catch (e) {
     throw new TarballError(
       e.code === 'ERR_BUFFER_TOO_LARGE'
