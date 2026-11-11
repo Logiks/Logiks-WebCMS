@@ -31,6 +31,16 @@ export function createJobs({ redis, log, backoffMs = 2000 }) {
   };
   let queue = null;
   let worker = null;
+  /** @type {Array<(job: string|undefined, err: Error) => void>} */
+  const failureListeners = [];
+  const failed = (job, err) => {
+    for (const fn of failureListeners)
+      try {
+        fn(job, err);
+      } catch {
+        /* a listener must never break job handling */
+      }
+  };
 
   const useBull = redis.enabled;
   const getQueue = () =>
@@ -76,6 +86,7 @@ export function createJobs({ redis, log, backoffMs = 2000 }) {
           });
           if (local.failed.size > 100) local.failed.delete(local.failed.keys().next().value);
           log.error({ job: name, err: e.message }, 'job failed');
+          failed(name, e);
           return;
         }
         await new Promise((r) => setTimeout(r, backoffMs * 2 ** (attempt - 1)));
@@ -130,6 +141,11 @@ export function createJobs({ redis, log, backoffMs = 2000 }) {
 
   return {
     kind: useBull ? 'bullmq' : 'local',
+
+    /** Called once for each job that has run out of retries. Used by the server error log. */
+    onFailure(fn) {
+      failureListeners.push(fn);
+    },
 
     define(name, handler) {
       handlers.set(name, handler);
@@ -198,9 +214,11 @@ export function createJobs({ redis, log, backoffMs = 2000 }) {
           prefix: 'cms:bull',
           concurrency: 5,
         });
-        worker.on('failed', (job, err) =>
-          log.error({ job: job?.name, err: err.message }, 'job failed'),
-        );
+        worker.on('failed', (job, err) => {
+          log.error({ job: job?.name, err: err.message }, 'job failed');
+          // BullMQ calls this after every attempt; only the last one is a real failure.
+          if (job && job.attemptsMade >= (job.opts?.attempts ?? 1)) failed(job.name, err);
+        });
         worker.on('error', (err) => log.error({ err: err.message }, 'worker error'));
       } else {
         log.warn('No Redis: running jobs in-process (dev/single-node only)');

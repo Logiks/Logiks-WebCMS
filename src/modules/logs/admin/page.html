@@ -13,6 +13,18 @@
             </tr></template>
           </tbody></table>
         </div>
+        <div class="panel mb-3" x-show="open === 'errors'">
+          <div class="panel-h d-flex justify-content-between align-items-center"><span>Most frequent server errors</span><select class="form-select form-select-sm w-auto" aria-label="Period" x-model="topDays" @change="loadTop()"><option value="1">Last day</option><option value="7">Last 7 days</option><option value="30">Last 30 days</option><option value="0">All time</option></select></div>
+          <div class="empty" x-show="!top.length">No server errors in this period.</div>
+          <table class="table table-sm mb-0" x-show="top.length"><thead><tr><th class="text-end">Times</th><th>Error</th><th>Where</th><th>Last seen</th></tr></thead><tbody>
+            <template x-for="e in top" :key="e.fingerprint"><tr>
+              <td class="text-end fw-semibold" x-text="n(e.count)"></td>
+              <td class="small"><div class="mono" x-text="e.name"></div><div class="muted" style="word-break:break-word" x-text="e.message"></div></td>
+              <td class="muted small" x-text="e.job ? 'job ' + e.job : (e.path || e.source)"></td>
+              <td class="muted small text-nowrap" x-text="ago(e.last)" :title="new Date(e.last).toLocaleString()"></td>
+            </tr></template>
+          </tbody></table>
+        </div>
         <div class="panel" x-show="open">
           <div class="panel-h"><span x-text="(current ? current.label : '') + ' — newest first'"></span><button type="button" class="btn-close" aria-label="Close" @click="open = ''"></button></div>
           <div class="empty" x-show="!rows.length">Nothing logged yet.</div>

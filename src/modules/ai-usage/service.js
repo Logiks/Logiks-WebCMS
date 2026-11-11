@@ -3,6 +3,8 @@ import { now, dialect } from '../../core/db/index.js';
 
 const MAX_ROWS = 500;
 const PROMPT_CHARS = 500;
+const CONTEXT_CHARS = 20_000;
+const EXPORT_MAX = 20_000;
 
 /**
  * The message a person typed that this call is answering: the last user message with real text (tool results and
@@ -47,7 +49,7 @@ function periodOf(day, period) {
   return d.toISOString().slice(0, 10);
 }
 
-export function createAiUsage({ db, log }) {
+export function createAiUsage({ db, log, settings }) {
   /**
    * @param {{ provider: string, model?: string, feature: string, userId?: number|null, inputTokens?: number,
    *   outputTokens?: number, cacheReadTokens?: number, units?: number, ok?: boolean, prompt?: string, turnKey?: string }} e
@@ -66,6 +68,11 @@ export function createAiUsage({ db, log }) {
         units: Number(e.units) || 0,
         ok: e.ok !== false,
         prompt: e.prompt ? String(e.prompt).slice(0, PROMPT_CHARS) : null,
+        // The whole message, for the usage export. Off = only the 500-character excerpt above is kept.
+        context:
+          e.prompt && settings?.get('system.ai_usage_keep_full_messages') !== false
+            ? String(e.prompt).slice(0, CONTEXT_CHARS)
+            : null,
         turn_key: e.turnKey ?? null,
       });
     } catch (err) {
@@ -106,7 +113,7 @@ export function createAiUsage({ db, log }) {
     return q;
   };
 
-  return {
+  const svc = {
     record,
 
     /**
@@ -241,12 +248,13 @@ export function createAiUsage({ db, log }) {
      * however many model calls (tool loop, continuations) it took. Only calls made since messages were recorded.
      */
     async messages(
-      /** @type {{ from?: string, to?: string, kind?: string, limit?: any, before?: any }} */ {
+      /** @type {{ from?: string, to?: string, kind?: string, limit?: any, before?: any, includeContext?: boolean }} */ {
         from,
         to,
         kind = 'text',
         limit = 50,
         before,
+        includeContext = false,
       } = {},
     ) {
       const q = range(db('ai_usage_log'), { from, to, kind: kind === 'media' ? 'media' : 'text' })
@@ -257,6 +265,7 @@ export function createAiUsage({ db, log }) {
           db.raw('max(ai_usage_log.id) as last_id'),
           db.raw('min(ai_usage_log.created_at) as at'),
           db.raw('max(ai_usage_log.prompt) as prompt'),
+          ...(includeContext ? [db.raw('max(ai_usage_log.context) as context')] : []),
           db.raw('max(ai_usage_log.feature) as feature'),
           db.raw('max(ai_usage_log.model) as model'),
           db.raw('max(ai_usage_log.user_id) as user_id'),
@@ -278,6 +287,7 @@ export function createAiUsage({ db, log }) {
         id: Number(r.last_id),
         at: Number(r.at),
         prompt: r.prompt || '',
+        ...(includeContext ? { context: r.context || '' } : {}),
         feature: r.feature,
         model: r.model,
         userId: r.user_id,
@@ -290,6 +300,42 @@ export function createAiUsage({ db, log }) {
         units: Number(r.units) || 0,
         provider: r.provider,
       }));
+    },
+
+    /**
+     * Every message in the range with its cost, oldest first, for a download. `message` is the full text when it was
+     * kept (see `system.ai_usage_keep_full_messages`), otherwise the 500-character excerpt; `fullMessage` says which.
+     */
+    async exportMessages(/** @type {{ from?: string, to?: string, kind?: string }} */ q = {}) {
+      const out = [];
+      let before;
+      while (out.length < EXPORT_MAX) {
+        const page = await svc.messages({ ...q, limit: MAX_ROWS, before, includeContext: true });
+        if (!page.length) break;
+        out.push(...page);
+        before = page[page.length - 1].id;
+        if (page.length < MAX_ROWS) break;
+      }
+      return out
+        .slice(0, EXPORT_MAX)
+        .reverse()
+        .map((m) => ({
+          id: m.id,
+          at: new Date(m.at).toISOString(),
+          userId: m.userId,
+          email: m.email,
+          provider: m.provider,
+          feature: m.feature,
+          model: m.model,
+          calls: m.calls,
+          failed: m.failed,
+          inputTokens: m.input,
+          outputTokens: m.output,
+          cacheReadTokens: m.cacheRead,
+          images: m.units,
+          fullMessage: !!m.context,
+          message: m.context || m.prompt,
+        }));
     },
 
     /** Newest first. */
@@ -334,4 +380,5 @@ export function createAiUsage({ db, log }) {
         .del();
     },
   };
+  return svc;
 }

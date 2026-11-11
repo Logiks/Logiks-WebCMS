@@ -4447,6 +4447,8 @@ document.addEventListener('alpine:init', () => {
     open: '',
     rows: [],
     more: false,
+    top: [], // Server errors, most frequent first
+    topDays: '7',
     error: '',
     get current() {
       return this.logs.find((l) => l.id === this.open);
@@ -4478,6 +4480,17 @@ document.addEventListener('alpine:init', () => {
       const r = await api('GET', `/admin/logs/${id}?limit=50`);
       this.rows = r.rows;
       this.more = r.rows.length === 50;
+      if (id === 'errors') await this.loadTop();
+    },
+    async loadTop() {
+      this.top = [];
+      try {
+        this.top = (
+          await api('GET', `/admin/logs/errors/top?days=${Number(this.topDays) || 0}`)
+        ).errors;
+      } catch (e) {
+        this.error = e.message;
+      }
     },
     async loadMore() {
       const r = await api(
@@ -4625,6 +4638,10 @@ document.addEventListener('alpine:init', () => {
       } catch (e) {
         this.error = e.message;
       }
+    },
+    /** A download of every message in the range, with the full text. A plain link: the session cookie signs it. */
+    exportUrl(format) {
+      return '/api/admin/ai-usage/export?' + new URLSearchParams({ ...this.params(), format });
     },
     async loadMoreMessages() {
       const q = {

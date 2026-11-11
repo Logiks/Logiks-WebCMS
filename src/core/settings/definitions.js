@@ -510,6 +510,20 @@ export function defineCoreSettings(registry) {
         max: 3650,
         help: '0 keeps entries forever.',
       },
+      error_log_retention_days: {
+        type: 'number',
+        label: 'Keep the server error log for (days)',
+        default: 30,
+        min: 0,
+        max: 3650,
+        help: '0 keeps entries forever.',
+      },
+      ai_usage_keep_full_messages: {
+        type: 'boolean',
+        label: 'Keep the full text of each AI message',
+        default: true,
+        help: 'Lets the AI usage export include the whole message, not just the first 500 characters. Turn off if messages may hold personal data you do not want stored. Removed with the AI usage log.',
+      },
       metrics_enabled: {
         type: 'boolean',
         label: 'Expose Prometheus metrics',

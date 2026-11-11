@@ -4,6 +4,7 @@
           <div><label class="form-label small" for="au-from">From</label><input id="au-from" type="date" class="form-control form-control-sm" x-model="from" @change="load()"></div>
           <div><label class="form-label small" for="au-to">To</label><input id="au-to" type="date" class="form-control form-control-sm" x-model="to" @change="load()"></div>
           <div><label class="form-label small" for="au-period">Group by</label><select id="au-period" class="form-select form-select-sm" x-model="period" @change="load()"><option value="day">Day</option><option value="week">Week</option><option value="month">Month</option></select></div>
+          <div class="ms-auto d-flex gap-2 align-items-end"><a class="btn btn-outline-secondary btn-sm" :href="exportUrl('csv')" download>Export CSV</a><a class="btn btn-outline-secondary btn-sm" :href="exportUrl('json')" download>Export JSON</a></div>
         </div>
         <div class="panel mb-3" x-show="s">
           <div class="panel-h" x-text="(kind === 'media' ? 'Images' : 'Tokens') + ' by user, per ' + period"></div>

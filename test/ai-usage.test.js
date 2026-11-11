@@ -140,3 +140,72 @@ test('the report is not readable without signing in', async () => {
   const res = await fetch(`${node.url}/api/admin/ai-usage/summary`);
   assert.ok([401, 403].includes(res.status), `got ${res.status}`);
 });
+
+test('the usage export carries the full message, not just the 500-character excerpt, and is safe to open in a spreadsheet', async () => {
+  const long = '=SUM(1,1) ' + 'word '.repeat(300); // 1,510 characters, starts like a formula
+  await node.ctx.aiUsage.record({
+    provider: 'anthropic',
+    model: 'claude-export',
+    feature: 'assistant',
+    inputTokens: 5,
+    outputTokens: 2,
+    prompt: long,
+    turnKey: 'export-1',
+  });
+  const json = await admin.get('/api/admin/ai-usage/export?format=json&kind=text');
+  assert.equal(json.status, 200);
+  assert.match(json.headers['content-disposition'], /attachment; filename="text-usage-.*\.json"/);
+  const m = json.body.messages.find((x) => x.model === 'claude-export');
+  assert.equal(m.message, long); // whole text
+  assert.equal(m.fullMessage, true);
+  assert.equal(m.inputTokens, 5);
+  const row = await node.ctx.db('ai_usage_log').where({ model: 'claude-export' }).first();
+  assert.equal(row.prompt.length, 500); // the on-screen excerpt is unchanged
+
+  const csv = await admin.get('/api/admin/ai-usage/export?format=csv&kind=text');
+  assert.match(csv.headers['content-type'], /text\/csv/);
+  assert.match(csv.text, /"'=SUM\(1,1\) word/); // formula neutralised
+  assert.ok(csv.text.split('\r\n')[0].includes('message'));
+});
+
+test('the media export lists image prompts only, and the keep-full-messages setting turns the full text off', async () => {
+  await node.ctx.aiUsage.record({
+    provider: 'openai',
+    model: 'img',
+    feature: 'media-generator',
+    units: 1,
+    prompt: 'a red fox',
+    turnKey: 'media-1',
+  });
+  const media = (await admin.get('/api/admin/ai-usage/export?format=json&kind=media')).body
+    .messages;
+  assert.ok(media.length >= 1 && media.every((x) => x.feature === 'media-generator'));
+  assert.ok(media.some((x) => x.message === 'a red fox' && x.images === 1));
+
+  await node.ctx.settings.update(
+    'system',
+    { values: { ai_usage_keep_full_messages: false } },
+    null,
+    {
+      internal: true,
+    },
+  );
+  await node.ctx.aiUsage.record({
+    provider: 'openai',
+    model: 'img2',
+    feature: 'media-generator',
+    units: 1,
+    prompt: 'x'.repeat(800),
+    turnKey: 'media-2',
+  });
+  const m = (
+    await admin.get('/api/admin/ai-usage/export?format=json&kind=media')
+  ).body.messages.find((x) => x.model === 'img2');
+  assert.equal(m.fullMessage, false);
+  assert.equal(m.message.length, 500);
+});
+
+test('exporting needs aiusage.read', async () => {
+  const res = await fetch(`${node.url}/api/admin/ai-usage/export`);
+  assert.equal(res.status, 401);
+});

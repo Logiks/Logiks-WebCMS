@@ -16,7 +16,7 @@ test('the log manager lists every log with its size and how long it is kept', as
   assert.equal(res.status, 200);
   assert.deepEqual(
     res.body.logs.map((l) => l.id),
-    ['audit', 'events', 'webhooks', 'activity', 'ai'],
+    ['audit', 'events', 'webhooks', 'activity', 'errors', 'ai'],
   );
   assert.ok(res.body.logs.every((l) => Number.isInteger(l.retentionDays)));
 });

@@ -63,10 +63,17 @@ export function installShutdown({ ctx, server = null }) {
   }
 
   for (const sig of ['SIGTERM', 'SIGINT']) process.on(sig, () => shutdown(sig));
-  process.on('unhandledRejection', (e) => log.error({ err: e }, 'unhandled rejection'));
+  process.on('unhandledRejection', (e) => {
+    log.error({ err: e }, 'unhandled rejection');
+    ctx.errorLog?.record({ source: 'process', err: e });
+  });
   process.on('uncaughtException', (e) => {
     log.fatal({ err: e }, 'uncaught exception');
-    shutdown('uncaughtException');
+    // Give the write a moment: the process is about to exit.
+    const done = ctx.errorLog?.record({ source: 'process', err: e });
+    Promise.race([done, new Promise((r) => setTimeout(r, 1000))]).finally(() =>
+      shutdown('uncaughtException'),
+    );
   });
   ctx.state.requestRestart = () => shutdown('restart', { restart: true });
   return Object.assign(shutdown, {

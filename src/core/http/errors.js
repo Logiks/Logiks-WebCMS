@@ -31,7 +31,7 @@ export const apiNotFound = (_req, _res, next) =>
   next(new HttpError(404, 'not_found', 'No such endpoint.'));
 
 /** @param {import('pino').Logger} log @param {boolean} isProd */
-export function errorHandler(log, isProd) {
+export function errorHandler(log, isProd, onServerError = null) {
   return (err, req, res, _next) => {
     if (res.headersSent) return;
     let status = err.status || err.statusCode || 500;
@@ -58,6 +58,7 @@ export function errorHandler(log, isProd) {
 
     if (status >= 500) {
       (req.log ?? log).error({ err }, 'unhandled error');
+      onServerError?.(err, req, status);
       if (isProd) message = 'Something went wrong on our side.';
     }
     res.status(status).json({

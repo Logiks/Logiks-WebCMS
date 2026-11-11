@@ -281,7 +281,11 @@ export function createApp(ctx) {
   app.use((_req, res) =>
     res.status(404).type('html').send(page('Not found', '<h1>Page not found</h1>')),
   );
-  app.use(errorHandler(log, env.isProd));
+  app.use(
+    errorHandler(log, env.isProd, (err, req, status) =>
+      ctx.errorLog?.record({ source: 'http', err, req, status }),
+    ),
+  );
   return app;
 }
 

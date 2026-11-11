@@ -15,6 +15,14 @@ export default function logRoutes(ctx) {
   r.get('/logs', need, async (_req, res) => {
     res.json({ logs: await logManager.sources() });
   });
+  r.get('/logs/errors/top', need, async (req, res) => {
+    const days = Number(req.query.days);
+    res.json({
+      errors: await ctx.errorLog.top({
+        since: days > 0 ? Date.now() - days * 86_400_000 : undefined,
+      }),
+    });
+  });
   r.get('/logs/:id', need, async (req, res) => {
     const { limit, before } = req.query;
     res.json({ rows: await logManager.view(req.params.id, { limit, before }) });

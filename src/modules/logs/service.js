@@ -51,6 +51,18 @@ const SOURCES = [
     view: (r) => ({ title: `${r.surface} · ${r.event_type}`, detail: r.path }),
   },
   {
+    id: 'errors',
+    label: 'Server errors',
+    help: 'Unhandled request errors, failed jobs and crashes. The most frequent ones are listed first below.',
+    table: 'error_log',
+    setting: ['system', 'error_log_retention_days'],
+    forever: true,
+    view: (r) => ({
+      title: `${r.source}${r.status ? ` · ${r.status}` : ''} · ${r.name}`,
+      detail: [r.message, r.job || (r.path && `${r.method} ${r.path}`)].filter(Boolean).join(' · '),
+    }),
+  },
+  {
     id: 'ai',
     label: 'AI usage',
     help: 'Every call to a text or image AI provider.',
