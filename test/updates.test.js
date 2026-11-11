@@ -32,7 +32,8 @@ const LOCK = (v) =>
     version: v,
     lockfileVersion: 3,
     requires: true,
-    packages: { '': { name: 'fixture', version: v } },
+    // the dependency's version follows `v`, so a different lock is a real dependency change (a bare version bump is not)
+    packages: { '': { name: 'fixture', version: v }, 'node_modules/dep': { version: v } },
   });
 
 function makeRepos({ servers = ['server'] } = {}) {
@@ -122,6 +123,36 @@ test('a checkout in sync reports its running commit and nothing to update', asyn
       node.ctx.updates.snapshot().git.fetchedAt,
       'the last fetch time comes from git itself',
     );
+  } finally {
+    await node.close();
+    repos.cleanup();
+  }
+});
+
+test('an update that only bumps the version (what every deploy does) does not ask for npm ci', async () => {
+  const repos = makeRepos();
+  const node = await nodeFor(repos.server);
+  try {
+    const bare = JSON.parse(LOCK('1.0.0'));
+    bare.version = bare.packages[''].version = '1.0.1';
+    repos.push(
+      {
+        'package.json': '{"name":"fixture","version":"1.0.1","type":"module"}',
+        'package-lock.json': JSON.stringify(bare),
+        'src/a.js': '// a\n',
+      },
+      'Deploy v1.0.1',
+    );
+    await node.ctx.updates.dispatch(self(node), 'check', {}, null);
+    await finished(node);
+    const g = node.ctx.updates.snapshot().git;
+    assert.equal(g.behind, 1);
+    assert.equal(g.needsInstall, false);
+    // A real dependency change on top of the version bump still asks for it.
+    repos.push({ 'package-lock.json': LOCK('1.0.2') }, 'New dependency version');
+    await node.ctx.updates.dispatch(self(node), 'check', {}, null);
+    await finished(node);
+    assert.equal(node.ctx.updates.snapshot().git.needsInstall, true);
   } finally {
     await node.close();
     repos.cleanup();

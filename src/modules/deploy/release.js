@@ -20,6 +20,63 @@ const cut = (v, n = 200) => {
 };
 const names = (list) => [...list].sort();
 
+// ───────────────────────────── the version ─────────────────────────────
+
+export const BUMPS = ['major', 'minor', 'fix'];
+const SEMVER = /^(\d+)\.(\d+)\.(\d+)$/;
+const parts = (v) => (SEMVER.exec(String(v ?? '')) ?? []).slice(1).map(Number);
+
+/** -1, 0 or 1; a value that is not x.y.z counts as 0.0.0. */
+export function compareVersions(a, b) {
+  const x = parts(a).length ? parts(a) : [0, 0, 0];
+  const y = parts(b).length ? parts(b) : [0, 0, 0];
+  for (let i = 0; i < 3; i++) if (x[i] !== y[i]) return x[i] < y[i] ? -1 : 1;
+  return 0;
+}
+
+/** major → 2.0.0, minor → 1.3.0, fix → 1.2.4 (from 1.2.3). Anything that is not x.y.z starts from 0.0.0. */
+export function bumpVersion(version, kind) {
+  const [maj, min, fix] = parts(version).length ? parts(version) : [0, 0, 0];
+  if (kind === 'major') return `${maj + 1}.0.0`;
+  if (kind === 'minor') return `${maj}.${min + 1}.0`;
+  if (kind === 'fix') return `${maj}.${min}.${fix + 1}`;
+  throw new HttpError(422, 'invalid_input', 'Choose major, minor or issue fix.');
+}
+
+/**
+ * The version a new deploy builds on: the newest of what the deployment repository last said and what this code says,
+ * so a version bumped by hand in package.json is never taken back.
+ */
+export function currentVersion(last, packageVersion) {
+  return last && compareVersions(last, packageVersion) > 0 ? last : packageVersion;
+}
+
+/**
+ * Writes the version into the deployment folder's package.json (and package-lock.json), nothing else. Same indentation and
+ * trailing newline Prettier keeps, so the file differs by that one line.
+ */
+export async function writeVersion(dir, version) {
+  const set = async (rel, edit) => {
+    const f = path.join(dir, rel);
+    let text;
+    try {
+      text = await fs.readFile(f, 'utf8');
+    } catch {
+      return; // no lockfile: nothing to keep in step
+    }
+    const json = JSON.parse(text);
+    edit(json);
+    await fs.writeFile(f, `${JSON.stringify(json, null, 2)}\n`);
+  };
+  await set('package.json', (j) => {
+    j.version = version;
+  });
+  await set('package-lock.json', (j) => {
+    j.version = version;
+    if (j.packages?.['']) j.packages[''].version = version;
+  });
+}
+
 // ───────────────────────────── reading a deployment checkout ─────────────────────────────
 
 /** What a deployment checkout says about the previous (or the new) state. Everything is optional: an old one has none of it. */
@@ -242,7 +299,8 @@ export function buildSteps({ schema, libraries, plugins, migrations }) {
 
 /**
  * @param {{ prev: any, next: any, changed: {status: string, file: string}[], migrationsNew: {file: string, destructive: string[]}[],
- *   title?: string, notes?: string, devCommit?: string|null, commits?: string[], by?: string|null, added?: any }} i
+ *   title?: string, notes?: string, devCommit?: string|null, commits?: string[], by?: string|null, added?: any,
+ *   version?: string|null, bump?: string|null }} i
  */
 export function buildRelease({
   prev,
@@ -255,6 +313,8 @@ export function buildRelease({
   commits,
   by,
   added,
+  version,
+  bump,
 }) {
   const seq = (prev.releases.at(-1)?.seq ?? 0) + 1;
   const schema = diffSchema(prev.schema, next.schema);
@@ -273,6 +333,9 @@ export function buildRelease({
     version: 1,
     uid: `${seq}-${randomBytes(4).toString('hex')}`,
     seq,
+    /** The application version this deploy made (x.y.z), and which kind of release it was. Older releases have neither. */
+    appVersion: version ?? null,
+    bump: bump ?? null,
     title: (title || '').trim().slice(0, 200) || `Release ${seq}`,
     notes: (notes || '').trim().slice(0, 4000),
     createdAt: now(),
@@ -311,7 +374,10 @@ export function renderMarkdown(releases) {
     '',
   ];
   for (const r of [...releases].sort((a, b) => b.seq - a.seq)) {
-    out.push(`## ${r.seq}. ${r.title} (${when(r.createdAt)} UTC)`, '');
+    out.push(
+      `## ${r.appVersion ? `v${r.appVersion} · ` : ''}${r.seq}. ${r.title} (${when(r.createdAt)} UTC)`,
+      '',
+    );
     if (r.notes) out.push(r.notes, '');
     const f = r.summary.files;
     const bits = [
@@ -406,6 +472,8 @@ export function createDeployReleases(ctx) {
     createdAt: Number(r.created_at),
     receivedAt: Number(r.received_at),
     unread: !r.read_at,
+    version: JSON.parse(r.body).appVersion ?? null,
+    bump: JSON.parse(r.body).bump ?? null,
     stepCount: JSON.parse(r.body).steps?.length ?? 0,
     stepsDone: JSON.parse(r.done || '[]').length,
     result: r.result ? JSON.parse(r.result) : null,
@@ -463,6 +531,41 @@ export function createDeployReleases(ctx) {
       return (
         await db('deploy_releases').orderBy('created_at', 'desc').orderBy('id', 'desc').limit(100)
       ).map(row);
+    },
+
+    /** The version of the newest release this server has (made here or received), or null before any carried one. */
+    async latestVersion() {
+      let best = null;
+      for (const r of await db('deploy_releases').orderBy('seq', 'desc').limit(20)) {
+        const v = JSON.parse(r.body).appVersion;
+        if (v && (!best || compareVersions(v, best) > 0)) best = v;
+      }
+      return best;
+    },
+
+    /** What changed in each version, newest first, for the Updates screen. Steps stay in Deploy → Release notes. */
+    async changelog() {
+      return (
+        await db('deploy_releases').orderBy('created_at', 'desc').orderBy('id', 'desc').limit(100)
+      ).map((r) => {
+        const b = JSON.parse(r.body);
+        return {
+          id: Number(r.id),
+          seq: Number(r.seq),
+          version: b.appVersion ?? null,
+          bump: b.bump ?? null,
+          title: r.title,
+          notes: b.notes ?? '',
+          by: b.by ?? null,
+          createdAt: Number(r.created_at),
+          receivedAt: Number(r.received_at),
+          summary: b.summary?.files ?? null,
+          schema: b.changes?.schema ?? null,
+          libraries: b.changes?.libraries ?? null,
+          commits: (b.commits ?? []).slice(0, 20),
+          stepCount: b.steps?.length ?? 0,
+        };
+      });
     },
 
     async unread() {

@@ -125,6 +125,7 @@ test('signing in shows the shell with navigation for an administrator', async ()
     'Audit log',
     'Activity',
     'Events',
+    'Server errors',
     'Text usage',
     'Text usage by user',
     'Media usage',

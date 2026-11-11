@@ -32,6 +32,11 @@ export default function updatesRoutes(ctx) {
   const r = Router();
   const guard = requirePermission('system.update');
 
+  // What each deployed version changed, newest first (kept from every update this server pulled, or made by its own deploys).
+  r.get('/updates/changelog', guard, async (_req, res) => {
+    res.json({ version: ctx.version, releases: await ctx.deployReleases.changelog() });
+  });
+
   r.get('/updates', guard, async (_req, res) => {
     const cluster = await ctx.nodes.list();
     res.json({

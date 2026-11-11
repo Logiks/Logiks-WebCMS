@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { createWriteStream, statSync } from 'node:fs';
 import fsp from 'node:fs/promises';
@@ -40,6 +40,24 @@ export function classifyChanges(files) {
     needsInstall: files.some((f) => f === 'package.json' || f === 'package-lock.json'),
     needsMigrate: files.some((f) => f.startsWith('migrations/')),
   };
+}
+
+/**
+ * A package.json or lockfile that differs ONLY in its own version needs no `npm ci`: every deploy bumps that line (D-144),
+ * and reinstalling on each update would be slow for nothing. Anything else in either file still means install.
+ */
+export function sameWithoutVersion(a, b) {
+  try {
+    const strip = (text) => {
+      const j = JSON.parse(text);
+      delete j.version;
+      if (j.packages?.['']) delete j.packages[''].version;
+      return JSON.stringify(j);
+    };
+    return strip(a) === strip(b);
+  } catch {
+    return false;
+  }
 }
 
 const lastLine = (text) =>
@@ -137,6 +155,29 @@ export function createUpdatesService({
     });
   }
   const git = (...args) => run('git', args);
+
+  /** One file as it is at a commit, whole (`run` keeps only the tail of long output, and a lockfile is long). */
+  const showFile = (ref, file) =>
+    new Promise((resolve) =>
+      execFile(
+        'git',
+        ['show', `${ref}:${file}`],
+        { cwd: appRoot, env: env.childEnv(), maxBuffer: 64 * 1024 * 1024 },
+        (err, stdout) => resolve(err ? null : stdout),
+      ),
+    );
+
+  /** `classifyChanges`, but a dependency file that only had its version bumped does not count as an install. */
+  async function classifyBetween(files, from, to) {
+    const c = classifyChanges(files);
+    if (!c.needsInstall) return c;
+    for (const f of ['package.json', 'package-lock.json'])
+      if (files.includes(f)) {
+        const [a, b] = await Promise.all([showFile(from, f), showFile(to, f)]);
+        if (a === null || b === null || !sameWithoutVersion(a, b)) return c;
+      }
+    return { ...c, needsInstall: false };
+  }
 
   /** The site mirror (SITE_DIR) as a git pathspec to leave out, when it sits inside this checkout. */
   function mirrorPathspec() {
@@ -236,7 +277,7 @@ export function createUpdatesService({
           const files = (await git('diff', '--name-only', '--relative', 'HEAD', ref)).out
             .split('\n')
             .filter(Boolean);
-          Object.assign(info, classifyChanges(files));
+          Object.assign(info, await classifyBetween(files, 'HEAD', ref));
           if (ahead > 0 && !info.blocker) info.blocker = 'diverged';
         }
       }
@@ -630,10 +671,14 @@ export function createUpdatesService({
         const needsInstall =
           !!bootCommit &&
           head !== bootCommit &&
-          classifyChanges(
-            (await git('diff', '--name-only', '--relative', bootCommit, head)).out
-              .split('\n')
-              .filter(Boolean),
+          (
+            await classifyBetween(
+              (await git('diff', '--name-only', '--relative', bootCommit, head)).out
+                .split('\n')
+                .filter(Boolean),
+              bootCommit,
+              head,
+            )
           ).needsInstall;
         await finishInstall({ needsInstall, onlyIfPending: true }, done);
       }
@@ -810,7 +855,7 @@ export function createUpdatesService({
       const changed = (await git('diff', '--name-only', '--relative', target, 'HEAD')).out
         .split('\n')
         .filter(Boolean);
-      const { needsInstall, needsMigrate } = classifyChanges(changed);
+      const { needsInstall, needsMigrate } = await classifyBetween(changed, target, 'HEAD');
 
       set({ step: `Putting back ${target.slice(0, 7)}` });
       const reset = await git('reset', '--hard', target);

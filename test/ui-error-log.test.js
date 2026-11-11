@@ -32,6 +32,21 @@ test('Log manager shows the most frequent server errors first when the log is op
   assert.match(top.cells[0].textContent, /^3$/);
 });
 
+test('Logs → Server errors opens the errors directly, without the retention table', async () => {
+  await node.ctx.errorLog.record({ source: 'http', err: new Error('Direct thing') });
+  b.go('#/server-errors');
+  const page = () => b.$('section[x-data="logManagerPage(\'errors\')"]');
+  const rows = () => [...(page()?.querySelectorAll('tbody') ?? [])].flatMap((t) => [...t.rows]);
+  await wait(() => rows().some((r) => /Direct thing/.test(r.textContent) && b.visible(r)));
+  const hidden = (el) => el.closest('[x-show]')?.style.display === 'none';
+  const h = (t) => [...page().querySelectorAll('h1')].find((x) => x.textContent === t);
+  assert.ok(!hidden(h('Server errors')), 'its own heading shows');
+  assert.ok(hidden(h('Log manager')), "the Log Manager's heading does not");
+  const retention = [...page().querySelectorAll('th')].find((x) => /Keep for/.test(x.textContent));
+  assert.ok(hidden(retention), 'the retention table stays on the Log Manager');
+  assert.deepEqual(b.errors, []);
+});
+
 test('Text usage by user offers CSV and JSON downloads', async () => {
   b.go('#/ai-users-text');
   const links = () => [...b.$$('a[download]')].filter(b.visible).map((a) => a.getAttribute('href'));

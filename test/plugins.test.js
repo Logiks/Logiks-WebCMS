@@ -131,6 +131,17 @@ describe('installing a plugin from a zip', () => {
     assert.equal(migrations.length, 1);
   });
 
+  test('a description between 301 and 400 characters (allowed by the manifest) still loads', async () => {
+    const files = {
+      'plugin.json': MANIFEST({ slug: 'longdesc', description: 'd'.repeat(380) }),
+      'plugin.js':
+        "export default function (ctx) {\n  const { Router } = ctx.require('express');\n  const r = Router();\n  r.get('/ping', (req, res) => res.json({ ok: true }));\n  return r;\n}\n",
+    };
+    assert.equal((await install(admin, zipOf(files))).status, 201);
+    assert.equal((await admin.post('/api/admin/plugins/longdesc/enable').send({})).status, 200);
+    assert.equal((await admin.get('/api/admin/apps/longdesc/ping')).status, 200);
+  });
+
   test('reinstalling the same slug is a version upsert, not a duplicate', async () => {
     await install(admin, zipOf(BASE({ version: '1.0.1' })));
     const list = (await admin.get('/api/admin/plugins')).body.plugins;

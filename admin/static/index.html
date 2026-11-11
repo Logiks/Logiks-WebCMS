@@ -442,6 +442,10 @@
       <section x-data="mediaGeneratorPage"></section>
     </template>
 
+    <template x-if="route === 'server-errors'">
+      <section x-data="logManagerPage('errors')"></section>
+    </template>
+
     <template x-if="route === 'log-manager'">
       <section x-data="logManagerPage"></section>
     </template>

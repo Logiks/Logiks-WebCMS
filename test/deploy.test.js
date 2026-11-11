@@ -109,7 +109,7 @@ test('a deploy pushes the code, plugins and public, and never data, secrets or d
     await node.ctx.siteFiles.put('pages/hello.html', '<h1>Hello</h1>', null);
     const run = await deploy(node);
     assert.equal(run.status, 'done', run.message);
-    assert.match(run.message, /Deployed \d+ changed files? to main/);
+    assert.match(run.message, /Deployed v\d+\.\d+\.\d+: \d+ changed files? to main/);
 
     const out = fx.clone();
     const has = (rel) => fs.existsSync(path.join(out, rel));
@@ -134,7 +134,7 @@ test('a deploy pushes the code, plugins and public, and never data, secrets or d
       assert.equal(has(gone), false, gone);
     assert.equal(fs.readFileSync(path.join(out, '.gitignore'), 'utf8'), DEPLOY_GITIGNORE);
     assert.equal(git(out, 'branch', '--show-current'), 'main');
-    assert.match(git(out, 'log', '-1', '--format=%s'), /^Deploy from .* by /);
+    assert.match(git(out, 'log', '-1', '--format=%s'), /^Deploy v\d+\.\d+\.\d+ from .* by /);
     // The development folder itself is untouched.
     assert.equal(fs.existsSync(path.join(fx.app, 'data/media/photo.jpg')), true);
     assert.equal(fs.readFileSync(path.join(fx.app, '.gitignore'), 'utf8'), 'plugins/*\npublic/\n');

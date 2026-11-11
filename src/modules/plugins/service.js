@@ -52,6 +52,9 @@ const exists = async (p) => {
  *        and needs the complete ctx, not just what this module happens to depend on at construction time.
  * @param {{pluginsDir: string}} opts
  */
+/** @param {string} s @param {number} n */
+const clip = (s, n) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
+
 export function createPlugins(ctx, { pluginsDir }) {
   const { db, bus, audit, permissions, settings, log, env } = ctx;
   /** @type {any[]} */
@@ -380,7 +383,8 @@ export function createPlugins(ctx, { pluginsDir }) {
       id: `plugin-${p.slug}`,
       kind: 'plugin',
       label: p.name,
-      description: p.description ?? '',
+      // A plugin may describe itself in 400 characters, a module manifest accepts 300: trim rather than refuse to load.
+      description: clip(p.description ?? '', 300),
       version: p.version,
       requires: needs,
       provides: {

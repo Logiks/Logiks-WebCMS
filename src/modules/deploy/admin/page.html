@@ -25,6 +25,13 @@
               <div class="form-check"><input class="form-check-input" type="checkbox" :id="'dep-pl-' + p.slug" :value="p.slug" x-model="plugins"><label class="form-check-label" :for="'dep-pl-' + p.slug">Plugin <strong x-text="p.name"></strong> <span class="muted small mono" x-text="'plugins/' + p.slug"></span></label></div>
             </template>
             <div class="small muted mt-2" x-show="!data?.available.themes.length && !data?.available.plugins.length">No installed or cloned themes, and no uploaded plugins, are stored only in the database.</div>
+            <fieldset class="mt-3" data-bump>
+              <legend class="form-label small mb-1 float-none">What kind of release is this?</legend>
+              <div class="form-check"><input class="form-check-input" type="radio" name="dep-bump" id="dep-bump-fix" value="fix" x-model="bump"><label class="form-check-label" for="dep-bump-fix">Issue fix <span class="muted small">(bug fixes and small corrections)</span> <span class="tag ms-1 mono" x-text="nextVersion('fix')"></span></label></div>
+              <div class="form-check"><input class="form-check-input" type="radio" name="dep-bump" id="dep-bump-minor" value="minor" x-model="bump"><label class="form-check-label" for="dep-bump-minor">Minor <span class="muted small">(new features that work with what is there)</span> <span class="tag ms-1 mono" x-text="nextVersion('minor')"></span></label></div>
+              <div class="form-check"><input class="form-check-input" type="radio" name="dep-bump" id="dep-bump-major" value="major" x-model="bump"><label class="form-check-label" for="dep-bump-major">Major <span class="muted small">(big changes, or something people must act on)</span> <span class="tag ms-1 mono" x-text="nextVersion('major')"></span></label></div>
+              <div class="small muted mt-1">The version is now <span class="mono" x-text="data?.version?.current"></span>. A deploy that changes nothing keeps it. The new number is written into the deployed <span class="mono">package.json</span> and shown in Updates after each server restarts.</div>
+            </fieldset>
             <div class="mt-3">
               <label class="form-label small mb-1" for="dep-title">Release title <span class="muted">(optional)</span></label>
               <input class="form-control form-control-sm mb-2" id="dep-title" x-model="title" maxlength="200" placeholder="e.g. New pricing page and blog layout">
@@ -123,6 +130,7 @@
               <div class="border rounded mb-2">
                 <button type="button" class="btn btn-link text-start w-100 text-decoration-none d-flex gap-2 align-items-center" :aria-expanded="openId === r.id" @click="openNote(r)">
                   <i class="bi" :class="openId === r.id ? 'bi-chevron-down' : 'bi-chevron-right'" aria-hidden="true"></i>
+                  <span class="tag mono" x-show="r.version" x-text="'v' + r.version"></span>
                   <span class="fw-semibold" x-text="r.seq + '. ' + r.title"></span>
                   <span class="tag warn" x-show="r.unread">new</span>
                   <span class="muted small ms-auto text-nowrap" x-text="(r.stepCount ? r.stepsDone + ' of ' + r.stepCount + ' steps done · ' : '') + ago(r.createdAt)"></span>

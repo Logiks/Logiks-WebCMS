@@ -36,7 +36,8 @@ const LOCK = (v) =>
     version: v,
     lockfileVersion: 3,
     requires: true,
-    packages: { '': { name: 'fixture', version: v } },
+    // the dependency's version follows `v`, so a different lock is a real dependency change (a bare version bump is not)
+    packages: { '': { name: 'fixture', version: v }, 'node_modules/dep': { version: v } },
   });
 
 function makeRepos() {

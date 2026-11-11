@@ -1,6 +1,7 @@
-        <div class="page-head"><h1>Log manager</h1><p>Every log the platform keeps. Set how long each is kept (older entries are removed every night), or prune one now. Pruning can't be undone.</p></div>
+        <div class="page-head" x-show="only"><h1>Server errors</h1><p>Unexpected errors the server hit while answering requests and running jobs, grouped so the most frequent come first. Keep-for and pruning are under Operations → Log Manager.</p></div>
+        <div class="page-head" x-show="!only"><h1>Log manager</h1><p>Every log the platform keeps. Set how long each is kept (older entries are removed every night), or prune one now. Pruning can't be undone.</p></div>
         <div class="alert alert-danger" role="alert" x-show="error" x-text="error"></div>
-        <div class="panel mb-3">
+        <div class="panel mb-3" x-show="!only">
           <table class="table mb-0"><thead><tr><th>Log</th><th class="text-end">Entries</th><th>Oldest</th><th style="width:11rem">Keep for (days)</th><th class="text-end">Prune now</th></tr></thead><tbody>
             <template x-for="l in logs" :key="l.id"><tr :class="{'table-active': open === l.id}">
               <td><button type="button" class="btn btn-link p-0 fw-semibold text-start" @click="view(l.id)" x-text="l.label"></button><div class="muted small" x-text="l.help"></div></td>
@@ -26,7 +27,7 @@
           </tbody></table>
         </div>
         <div class="panel" x-show="open">
-          <div class="panel-h"><span x-text="(current ? current.label : '') + ' — newest first'"></span><button type="button" class="btn-close" aria-label="Close" @click="open = ''"></button></div>
+          <div class="panel-h"><span x-text="(current ? current.label : '') + ' — newest first'"></span><button type="button" class="btn-close" aria-label="Close" x-show="!only" @click="open = ''"></button></div>
           <div class="empty" x-show="!rows.length">Nothing logged yet.</div>
           <table class="table table-sm mb-0" x-show="rows.length"><tbody>
             <template x-for="r in rows" :key="r.id"><tr><td class="muted text-nowrap small" x-text="ago(r.at)" :title="new Date(r.at).toLocaleString()"></td><td class="mono small" x-text="r.title"></td><td class="muted small" x-text="r.detail"></td></tr></template>

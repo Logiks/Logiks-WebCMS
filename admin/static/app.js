@@ -1597,6 +1597,7 @@ document.addEventListener('alpine:init', () => {
             { id: 'audit', label: 'Audit log', perm: 'audit.read' },
             { id: 'content-activity', label: 'Activity', perm: 'content.activity' },
             { id: 'events', label: 'Events', module: 'events', perm: 'events.read' },
+            { id: 'server-errors', label: 'Server errors', module: 'logs', perm: 'logs.manage' },
             { id: 'ai-usage-text', label: 'Text usage', module: 'ai-usage', perm: 'aiusage.read' },
             {
               id: 'ai-users-text',
@@ -2082,6 +2083,9 @@ document.addEventListener('alpine:init', () => {
     data: null,
     history: [],
     points: [],
+    changelog: [], // what each deployed version changed (D-144)
+    logOpen: null,
+    logKey: '',
     restartAfter: true,
     restarting: {}, // nodeId → { host, role, since } while a server is on its way down and back up
     timer: null,
@@ -2104,6 +2108,12 @@ document.addEventListener('alpine:init', () => {
         // History changes rarely; read it on load, after an action, and every few ticks.
         if (withHistory || ++this.tick % 5 === 0)
           this.history = (await api('GET', '/admin/updates/history')).entries;
+        // The changelog grows when an update brings a release in, i.e. when a server's commit moves.
+        const key = this.data.nodes.map((n) => n.commit).join();
+        if (key !== this.logKey) {
+          this.logKey = key;
+          this.changelog = (await api('GET', '/admin/updates/changelog')).releases;
+        }
       } catch {
         /* the server that answered may be the one restarting; the next tick tries again */
       }
@@ -2131,6 +2141,32 @@ document.addEventListener('alpine:init', () => {
           );
         }
       }
+    },
+    bumpLabel(b) {
+      return { major: 'Major', minor: 'Minor', fix: 'Issue fix' }[b] || '';
+    },
+    /** One line on what a release touched, from the counts it recorded. */
+    logSummary(r) {
+      const f = r.summary;
+      const bits = f
+        ? [
+            [f.pages.count, 'page'],
+            [f.components.count, 'component'],
+            [f.themes.count, 'theme file'],
+            [f.plugins.count, 'plugin file'],
+            [f.migrations.count, 'database migration'],
+            [f.codeFiles, 'code file'],
+          ]
+            .filter(([n]) => n)
+            .map(([n, w]) => `${n} ${w}${n === 1 ? '' : 's'}`)
+        : [];
+      const more = [
+        r.schema?.tablesAdded.length ? `new tables: ${r.schema.tablesAdded.join(', ')}` : '',
+        r.libraries?.added.length
+          ? `libraries added: ${r.libraries.added.map((x) => x.name).join(', ')}`
+          : '',
+      ].filter(Boolean);
+      return [`Changed: ${bits.join(', ') || 'data only'}.`, ...more].join(' · ');
     },
     git(n) {
       return n.update?.git || null;
@@ -2334,6 +2370,7 @@ document.addEventListener('alpine:init', () => {
     conflictCount: -1,
     title: '', // release title and notes for the next deploy
     notes: '',
+    bump: 'fix', // major | minor | fix: decides the next version number
     releases: [], // release notes, newest first
     unread: 0,
     openId: null,
@@ -2547,6 +2584,9 @@ document.addEventListener('alpine:init', () => {
         (this.url.trim() !== this.data.target.url || this.branch.trim() !== this.data.target.branch)
       );
     },
+    nextVersion(kind) {
+      return this.data?.version ? 'v' + this.data.version.next[kind] : '';
+    },
     canDeploy() {
       return !!this.data?.target.url && !this.running && !this.targetDirty();
     },
@@ -2566,7 +2606,7 @@ document.addEventListener('alpine:init', () => {
       const t = this.data.target;
       if (
         !confirm(
-          `Push this installation's code to ${t.url} (${t.branch})? Servers pull it from there; their own data is not touched.`,
+          `Push this installation's code to ${t.url} (${t.branch}) as ${this.nextVersion(this.bump)}? Servers pull it from there; their own data is not touched.`,
         )
       )
         return;
@@ -2580,6 +2620,7 @@ document.addEventListener('alpine:init', () => {
           media: this.withMedia,
           title: this.title.trim(),
           notes: this.notes.trim(),
+          bump: this.bump,
         });
         toast('Deploying…');
         await this.refresh();
@@ -4439,8 +4480,10 @@ document.addEventListener('alpine:init', () => {
   }));
 
   // ───────── Automation → Log Manager ─────────
-  Alpine.data('logManagerPage', () => ({
+  // `only` = a log id: the screen shows just that log (Logs → Server errors), without the retention table.
+  Alpine.data('logManagerPage', (only = '') => ({
     ...H,
+    only,
     logs: [],
     edit: {}, // id → days to keep, as typed
     age: {}, // id → "older than N days" for a manual prune
@@ -4456,6 +4499,7 @@ document.addEventListener('alpine:init', () => {
     async init() {
       if (!(await this.mountFragment('logs', 'page'))) return;
       await this.load();
+      if (this.only) await this.view(this.only).catch((e) => (this.error = e.message));
     },
     n(v) {
       return Number(v || 0).toLocaleString();
@@ -11107,6 +11151,7 @@ document.addEventListener('alpine:init', () => {
     media: 'images files upload library pictures photos',
     'media-generator': 'ai image generate picture dall-e imagen stability',
     'media-analytics': 'media usage unused files',
+    'server-errors': 'server errors exceptions failures crashes 500 failed jobs log',
     'log-manager': 'logs prune retention delete old audit events keep days',
     'ai-usage-text': 'ai cost tokens anthropic models calls log',
     'ai-usage-media': 'ai images generated openai google stability log',

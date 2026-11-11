@@ -38,6 +38,32 @@
           </template>
         </div>
 
+        <div class="panel mb-3" data-changelog>
+          <div class="panel-h">Changelog <span class="muted small fw-normal ms-2" x-show="data" x-text="'This server runs v' + data?.version"></span></div>
+          <div class="small muted p-3 pb-0">What each deployed version changed, newest first. It comes with every update a server pulls, so the notes for versions you have not installed yet appear after you update. Each one lists what to do by hand in Operations → Deploy.</div>
+          <div class="empty" x-show="!changelog.length">Nothing yet. A deploy writes one entry, and an update that brings it in keeps it here.</div>
+          <div class="p-3 pt-2">
+            <template x-for="r in changelog" :key="r.id">
+              <div class="border rounded mb-2">
+                <button type="button" class="btn btn-link text-start w-100 text-decoration-none d-flex gap-2 align-items-center" :aria-expanded="logOpen === r.id" @click="logOpen = logOpen === r.id ? null : r.id">
+                  <i class="bi" :class="logOpen === r.id ? 'bi-chevron-down' : 'bi-chevron-right'" aria-hidden="true"></i>
+                  <span class="tag mono" x-show="r.version" x-text="'v' + r.version"></span>
+                  <span class="tag" x-show="r.bump" x-text="bumpLabel(r.bump)"></span>
+                  <span class="fw-semibold" x-text="r.title"></span>
+                  <span class="muted small ms-auto text-nowrap" x-text="ago(r.createdAt)"></span>
+                </button>
+                <div class="px-3 pb-3" x-show="logOpen === r.id">
+                  <div class="mb-2" style="white-space:pre-wrap" x-show="r.notes" x-text="r.notes"></div>
+                  <div class="small mb-2" x-text="logSummary(r)"></div>
+                  <div class="small mb-2" x-show="r.stepCount"><span x-text="r.stepCount + ' optional step' + (r.stepCount === 1 ? '' : 's') + ' to do by hand. '"></span><a href="#/deploy">Open the release notes</a></div>
+                  <details x-show="r.commits.length"><summary class="small">Source changes (<span x-text="r.commits.length"></span>)</summary>
+                    <div class="small mono" x-text="r.commits.join('\n')" style="white-space:pre-wrap"></div></details>
+                </div>
+              </div>
+            </template>
+          </div>
+        </div>
+
         <div class="panel mb-3">
           <div class="panel-h">Restore points</div>
           <div class="small muted p-3 pb-0">Every update first records the version a server was on, so you can go back to it. The last 5 per server are kept. Going back restores the code only: your data and database tables stay as they are, and the older code works with them.</div>

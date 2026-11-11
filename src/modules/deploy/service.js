@@ -10,7 +10,16 @@ import { dialect, now } from '../../core/db/index.js';
 import { HttpError } from '../../core/http/errors.js';
 import { THEME_ID } from '../themes/package.js';
 import { redact } from '../updates/service.js';
-import { buildRelease, newMigrations, readState, writeReleases } from './release.js';
+import {
+  BUMPS,
+  buildRelease,
+  bumpVersion,
+  currentVersion,
+  newMigrations,
+  readState,
+  writeReleases,
+  writeVersion,
+} from './release.js';
 
 /** A run that has been "running" this long is taken to have died with its server, and no longer blocks a new one. */
 const STALE_MS = 60 * 60_000;
@@ -290,6 +299,15 @@ export function createDeploy(ctx) {
     }
   }
 
+  /** The version this installation's code says (the copy in the deploy folder, so it is the file that gets deployed). */
+  async function codeVersion(dir) {
+    try {
+      return JSON.parse(await fs.readFile(path.join(dir, 'package.json'), 'utf8')).version;
+    } catch {
+      return ctx.version;
+    }
+  }
+
   async function execute(runId, { include, actor }) {
     const dir = path.join(os.tmpdir(), 'deploy');
     const url = settings.get('deploy.repo_url');
@@ -341,6 +359,11 @@ export function createDeploy(ctx) {
       await copyCode(dir);
       // Earlier release notes stay in the repository (the tree was emptied above).
       if (prevState.releases.length) await writeReleases(dir, prevState.releases);
+      // This installation's package.json carries the version it was written with, which is older than the last deploy's.
+      // Put the deployed version back, so a deploy with nothing new in it still compares equal to the repository.
+      const codeVer = await codeVersion(dir);
+      const baseVersion = currentVersion(prevState.releases.at(-1)?.appVersion, codeVer);
+      if (baseVersion !== codeVer) await writeVersion(dir, baseVersion);
 
       const added = { siteTree: false, themes: [], plugins: [], data: null };
       if (include.siteTree) {
@@ -376,9 +399,15 @@ export function createDeploy(ctx) {
       const devCommit = dev.code === 0 ? dev.out.slice(0, 40) : null;
       let commit = previous;
       let release = null;
+      let version = null;
       if (changedFiles.length) {
-        // The release notes: what changed, and what a person may want to do by hand (a deploy removes nothing).
+        // The new version: only a deploy that changes something gets one, and it is written into the deployed package.json
+        // (never this installation's own), so every server that pulls it reports it after its next restart. Written after
+        // the change check above, so the version line alone never makes a deploy.
+        version = bumpVersion(baseVersion, include.bump);
+        await writeVersion(dir, version);
         await step('Writing the release notes');
+        // The release notes: what changed, and what a person may want to do by hand (a deploy removes nothing).
         try {
           const changed = (await g('diff', '--cached', '--name-status', '--no-renames')).out
             .split('\n')
@@ -406,6 +435,8 @@ export function createDeploy(ctx) {
             commits: log.code === 0 ? log.out.split('\n').filter(Boolean) : [],
             by: actor?.email ?? null,
             added,
+            version,
+            bump: include.bump,
           });
           await writeReleases(dir, [...prevState.releases, release]);
           await g('add', '-A');
@@ -428,7 +459,7 @@ export function createDeploy(ctx) {
             'commit',
             '-q',
             '-m',
-            `Deploy from ${os.hostname()} by ${who}${devCommit ? `\n\nSource commit: ${devCommit}` : ''}`,
+            `Deploy${version ? ` v${version}` : ''} from ${os.hostname()} by ${who}${devCommit ? `\n\nSource commit: ${devCommit}` : ''}`,
           ],
           dir,
         );
@@ -451,7 +482,7 @@ export function createDeploy(ctx) {
           .store(release, { source: 'dev' })
           .catch((e) => log.warn({ err: e.message }, 'deploy: release notes could not be stored'));
       const message = changedFiles.length
-        ? `Deployed ${changedFiles.length} changed file${changedFiles.length === 1 ? '' : 's'} to ${branch} (${commit.slice(0, 7)}).`
+        ? `Deployed${version ? ` v${version}:` : ''} ${changedFiles.length} changed file${changedFiles.length === 1 ? '' : 's'} to ${branch} (${commit.slice(0, 7)}).`
         : `Nothing changed since the last deploy (${(commit ?? '').slice(0, 7) || 'empty repository'}).`;
       await db('deploy_runs')
         .where({ id: runId })
@@ -512,6 +543,15 @@ export function createDeploy(ctx) {
     }
   }
 
+  /** What the next deploy would make, for each kind of release (shown before anyone chooses). */
+  async function versionInfo() {
+    const current = currentVersion(await ctx.deployReleases.latestVersion(), ctx.version);
+    return {
+      current,
+      next: Object.fromEntries(BUMPS.map((k) => [k, bumpVersion(current, k)])),
+    };
+  }
+
   return {
     /** Waits for a running deploy (tests, and a clean shutdown). */
     async idle() {
@@ -527,6 +567,7 @@ export function createDeploy(ctx) {
         runs,
         available: await available(),
         conflicts: await ctx.deploySync.openConflictCount(),
+        version: await versionInfo(),
         notes: {
           count: (await ctx.deployReleases.list()).length,
           unread: await ctx.deployReleases.unread(),
@@ -547,7 +588,7 @@ export function createDeploy(ctx) {
 
     /**
      * Starts a deploy. Returns the new run at once; the work continues in the background and the row turns done or failed.
-     * @param {{ themes?: string[], plugins?: string[], siteTree?: boolean, data?: boolean, media?: boolean, title?: string, notes?: string }} include
+     * @param {{ themes?: string[], plugins?: string[], siteTree?: boolean, data?: boolean, media?: boolean, title?: string, notes?: string, bump?: string }} include
      */
     async start(include, actor) {
       const url = settings.get('deploy.repo_url');
@@ -576,6 +617,8 @@ export function createDeploy(ctx) {
         media: include.media !== false,
         title: String(include.title ?? '').slice(0, 200),
         notes: String(include.notes ?? '').slice(0, 4000),
+        // A deploy nobody classified (the scheduler, an old client) is an issue fix: the smallest claim.
+        bump: BUMPS.includes(include.bump ?? '') ? include.bump : 'fix',
       };
       const id = await insertGetId(db('deploy_runs'), {
         status: 'running',

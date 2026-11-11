@@ -23,6 +23,7 @@ const runBody = z.object({
   media: z.boolean().optional(),
   title: z.string().max(200).optional(),
   notes: z.string().max(4000).optional(),
+  bump: z.enum(['major', 'minor', 'fix']).optional(),
 });
 
 /** Operations → Deploy: choose a repository and branch, push this installation's code to it, see past deploys. */
