@@ -1,6 +1,6 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { makeNode } from './helpers.js';
+import { makeNode, startNode, tmpDb } from './helpers.js';
 import {
   createAiModels,
   parseModelList,
@@ -74,4 +74,28 @@ test('the Refresh button under Settings → AI reports a missing key plainly', a
   assert.equal(r.ok, false);
   assert.match(r.message, /API key/);
   await set({ models_source: 'builtin' });
+});
+
+test('a saved model that is not in the built-in list survives a restart', async () => {
+  // Start-up reads settings before the refreshed list reaches the dropdown; that used to reject the saved choice
+  // ("stored value unreadable") and silently fall back to the default model.
+  const db = tmpDb();
+  const first = await startNode({ dbUrl: db.url, seed: true });
+  const save = (values) => first.ctx.settings.update('ai', { values }, null, { internal: true });
+  await save({
+    model_catalog: {
+      source: 'api',
+      at: Date.now(),
+      models: [{ value: 'claude-new-9', label: 'New 9' }],
+    },
+  });
+  await save({ model: 'claude-new-9' });
+  await first.close();
+  const second = await startNode({ dbUrl: db.url });
+  try {
+    assert.equal(second.ctx.settings.get('ai.model'), 'claude-new-9');
+  } finally {
+    await second.close();
+    db.cleanup();
+  }
 });

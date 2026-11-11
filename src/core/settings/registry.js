@@ -122,6 +122,14 @@ export function createRegistry() {
         throw new Error(`Unknown type "${raw.type}" for ${namespace}.${key}`);
       const f = { label: key, ...raw, key };
       f.validator = buildValidator(`${namespace}.${key}`, f);
+      // A saved choice is read at start-up BEFORE the refreshed list reaches `options`, so reading it back checks the
+      // shape only; membership is enforced when someone saves (`validator`).
+      if (f.type === 'select' && f.dynamicOptions)
+        f.storedValidator = buildValidator(`${namespace}.${key}`, {
+          ...f,
+          type: 'string',
+          max: 100,
+        });
       if (f.default === undefined) {
         f.default = {
           string: '',

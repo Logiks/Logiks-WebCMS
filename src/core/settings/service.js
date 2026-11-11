@@ -210,7 +210,7 @@ export class SettingsService {
           const json = row.is_secret
             ? this.crypto.decrypt(row.value, `${def.namespace}.${f.key}`)
             : row.value;
-          value = f.validator(JSON.parse(json));
+          value = (f.storedValidator ?? f.validator)(JSON.parse(json));
           source = 'db';
         } catch (e) {
           this.log.error(
