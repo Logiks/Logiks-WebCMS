@@ -68,6 +68,72 @@ function coerce(value, sqlType) {
 export function createDbms(ctx) {
   const { db, dialect, audit } = ctx;
 
+  /** What each engine can say about its tables without scanning them all (SQLite counts, being a single file). */
+  async function tableFacts(names) {
+    const out = new Map();
+    const rowsOf = (r) => (dialect.kind === 'mysql' ? r[0] : dialect.kind === 'pg' ? r.rows : r);
+    try {
+      if (dialect.kind === 'mysql') {
+        const rows = rowsOf(
+          await db.raw(
+            'select table_name as name, engine, table_rows as r, data_length + index_length as b from information_schema.tables where table_schema = database() and table_type = ?',
+            ['BASE TABLE'],
+          ),
+        );
+        for (const r of rows)
+          out.set(r.name ?? r.NAME ?? r.TABLE_NAME, {
+            engine: r.engine ?? r.ENGINE ?? null,
+            rows: r.r === null || r.r === undefined ? null : Number(r.r ?? r.R),
+            approx: true,
+            bytes: r.b === null || r.b === undefined ? null : Number(r.b ?? r.B),
+          });
+      } else if (dialect.kind === 'pg') {
+        const rows = rowsOf(
+          await db.raw(
+            "select c.relname as name, coalesce(am.amname, 'heap') as engine, greatest(c.reltuples, 0)::bigint as r, pg_total_relation_size(c.oid) as b from pg_class c join pg_namespace n on n.oid = c.relnamespace left join pg_am am on am.oid = c.relam where n.nspname = current_schema() and c.relkind in ('r', 'p')",
+          ),
+        );
+        for (const r of rows)
+          out.set(r.name, {
+            engine: r.engine,
+            rows: Number(r.r),
+            approx: true,
+            bytes: Number(r.b),
+          });
+      } else {
+        const sizes = new Map();
+        try {
+          // dbstat is a SQLite option; where it is missing the size is simply not shown.
+          const owner = new Map(
+            rowsOf(await db.raw('select name, tbl_name from sqlite_master')).map((r) => [
+              r.name,
+              r.tbl_name,
+            ]),
+          );
+          for (const r of rowsOf(
+            await db.raw('select name, sum(pgsize) as b from dbstat group by name'),
+          )) {
+            const t = owner.get(r.name) ?? r.name;
+            sizes.set(t, (sizes.get(t) ?? 0) + Number(r.b));
+          }
+        } catch {
+          /* no dbstat */
+        }
+        for (const n of names) {
+          out.set(n, {
+            engine: 'SQLite',
+            rows: Number((await db(n).count({ n: '*' }).first()).n),
+            approx: false,
+            bytes: sizes.get(n) ?? null,
+          });
+        }
+      }
+    } catch {
+      /* the list still works, with dashes */
+    }
+    return out;
+  }
+
   function checkIdent(name, field) {
     if (!IDENT.test(name))
       throw new HttpError(422, 'invalid_input', `"${name}" isn't a valid name.`, { field });
@@ -86,9 +152,75 @@ export function createDbms(ctx) {
   const svc = {
     typeLabels: TYPE_LABELS,
 
-    /** Every table/view (minus the ones the structured UI never shows) — the table list screen. */
+    /**
+     * Every table/view (minus the ones the structured UI never shows) with what the list screen shows: the number of
+     * records (exact on SQLite, the engine's own estimate on MySQL/PostgreSQL, marked `approx`), the storage engine, and the
+     * size on disk. A figure an engine does not offer is null (the screen shows a dash).
+     */
     async listTables() {
-      return (await dialect.listTables()).filter((t) => !SENSITIVE_TABLES.has(t.name));
+      const base = (await dialect.listTables()).filter((t) => !SENSITIVE_TABLES.has(t.name));
+      const facts = await tableFacts(base.filter((t) => !t.view).map((t) => t.name));
+      return base.map((t) => ({
+        name: t.name,
+        view: !!t.view,
+        engine: t.view ? null : (facts.get(t.name)?.engine ?? null),
+        rows: t.view ? null : (facts.get(t.name)?.rows ?? null),
+        approx: !t.view && !!facts.get(t.name)?.approx,
+        bytes: t.view ? null : (facts.get(t.name)?.bytes ?? null),
+      }));
+    },
+
+    /**
+     * Keeps a table in good shape: `optimize` rebuilds it and its indexes where the engine can (MySQL OPTIMIZE TABLE, PostgreSQL
+     * VACUUM ANALYZE, SQLite REINDEX + ANALYZE: SQLite reclaims space only for the whole file), `analyze` refreshes the figures the
+     * query planner uses. Neither changes a record. Needs `dbms.write`, and is refused for the tables the browser hides.
+     * @param {string} table @param {'optimize'|'analyze'} action
+     */
+    async maintain(table, action, actor) {
+      if (!actor?.can('dbms.write')) throw forbidden();
+      checkEditable(table);
+      if (!['optimize', 'analyze'].includes(action))
+        throw new HttpError(422, 'invalid_input', 'Choose optimise or analyse.', {
+          field: 'action',
+        });
+      const known = (await dialect.listTables()).find((t) => t.name === table);
+      if (!known) throw notFound('That table');
+      if (known.view)
+        throw new HttpError(
+          422,
+          'invalid_input',
+          `“${table}” is a view, which has nothing to optimise.`,
+        );
+      let message;
+      if (dialect.kind === 'mysql') {
+        const verb = action === 'optimize' ? 'optimize' : 'analyze';
+        const [rows] = await db.raw(`${verb} table ??`, [table]);
+        const bad = rows.find((r) => String(r.Msg_type).toLowerCase() === 'error');
+        if (bad) throw new HttpError(500, 'maintenance_failed', String(bad.Msg_text));
+        const note = rows.find((r) => String(r.Msg_type).toLowerCase() === 'note');
+        message =
+          action === 'optimize'
+            ? `Optimised${note ? ` (${String(note.Msg_text).replace(/\.$/, '')})` : ''}.`
+            : 'Analysed.';
+      } else if (dialect.kind === 'pg') {
+        await db.raw(action === 'optimize' ? 'vacuum (analyze) ??' : 'analyze ??', [table]);
+        message = action === 'optimize' ? 'Cleaned up and analysed.' : 'Analysed.';
+      } else {
+        if (action === 'optimize') await db.raw('reindex ??', [table]);
+        await db.raw('analyze ??', [table]);
+        message =
+          action === 'optimize'
+            ? 'Indexes rebuilt and analysed. SQLite gives space back for the whole file only, not per table.'
+            : 'Analysed.';
+      }
+      await audit.log({
+        actor,
+        action: 'dbms.table_maintained',
+        entity: 'table',
+        entityId: table,
+        meta: { action },
+      });
+      return { table, action, message };
     },
 
     /** Columns + indexes. Read-only, so a sensitive table's STRUCTURE (not its data) can still be inspected. */

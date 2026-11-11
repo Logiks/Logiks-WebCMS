@@ -53,6 +53,8 @@ amber is behind and will catch up on its own (it also polls). A server marked **
 
 **System → Database** is a console for people who know SQL.
 
+**The table list** shows each table's type, storage engine, number of records and size. Counts marked with `~` are the database's own estimates (exact on SQLite). **Optimise** rebuilds a table's storage and indexes, and **Analyse** refreshes the figures the database uses to plan queries; neither changes a record, and you can run them for several ticked tables at once. There is no Drop button in the list. Click a table to open it: **Structure** shows its columns and indexes, **Data** its records (View, Edit or Delete one, or add a new one), and **Editor** is the form for a new, edited or viewed record.
+
 **Export and import tables.** On the Tables tab, tick tables and choose **Export selected** to download a .zip with their structure and, if "Include records" is ticked, their records (passwords and keys are left out). **Import** reads such a file, shows what it would do for each table, and only then adds it. An import only adds: a missing table is created, missing columns are added, and records that are not already there are added. Nothing is deleted or replaced, and a record already on this server is kept as it is. Tables that hold sensitive records (users, settings, roles…) need the SQL console permission to export or import.
 
 - Browse tables and views, see their structure and indexes, add, edit and delete rows, create or drop tables.

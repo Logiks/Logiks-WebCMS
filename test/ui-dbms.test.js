@@ -41,7 +41,7 @@ test('sensitive tables are hidden from the table list', async () => {
   assert.match(page().textContent, /entries/);
 });
 
-test('create a table, add a record, edit it, delete it, then drop the table', async () => {
+test('create a table, then use its Structure, Data and Editor tabs: add, view, edit and delete a record', async () => {
   b.go('#/dbms');
   await wait(() => page());
   const newTableBtn = () =>
@@ -72,70 +72,96 @@ test('create a table, add a record, edit it, delete it, then drop the table', as
   b.click(createBtn());
   await wait(() => /ui_dbms_widgets/.test(page().textContent));
 
-  // open it
-  const link = () =>
-    [...page().querySelectorAll('a')].find((a) => a.textContent === 'ui_dbms_widgets');
-  await wait(() => link());
-  b.click(link());
+  // The list: what each table holds, with maintenance, and no way to drop or truncate from it.
+  const widgetsRow = () =>
+    [...page().querySelectorAll('[data-tables] tbody tr')].find((tr) =>
+      /ui_dbms_widgets/.test(tr.textContent),
+    );
+  await wait(() => widgetsRow());
+  assert.match(widgetsRow().textContent, /Table/);
+  assert.match(
+    widgetsRow().textContent,
+    new RegExp({ sqlite: 'SQLite', mysql: 'InnoDB', pg: 'heap' }[node.ctx.dialect.kind]),
+  );
+  assert.ok(widgetsRow().querySelector('[data-optimize]'), 'Optimise is offered');
+  assert.ok(widgetsRow().querySelector('[data-analyze]'), 'Analyse is offered');
+  const labels = [...page().querySelectorAll('button')].map((x) => x.textContent.trim());
+  assert.ok(
+    !labels.includes('Drop') && !labels.includes('Truncate'),
+    'no drop or truncate in the list',
+  );
+  b.click(widgetsRow().querySelector('[data-optimize]'));
+  await wait(() => /ui_dbms_widgets: /.test(b.text()) || true);
+
+  // open it: it opens on Data, and the three tabs are there
+  b.click([...widgetsRow().querySelectorAll('a')].find((a) => a.textContent === 'ui_dbms_widgets'));
+  await wait(() => page().querySelector('[data-table-tabs]'));
+  const tab = (name) => page().querySelector(`[data-tab="${name}"]`);
+  const pane = (name) => page().querySelector(`[data-pane="${name}"]`);
+  assert.deepEqual(
+    [...page().querySelectorAll('[data-table-tabs] .nav-link')].map(
+      (x) => x.textContent.trim().split(' ')[0],
+    ),
+    ['Structure', 'Data', 'Editor'],
+  );
+  assert.ok(tab('data').classList.contains('active'));
+  assert.ok(b.visible(pane('data')) && !b.visible(pane('structure')) && !b.visible(pane('editor')));
+
+  // Structure: columns and indexes
+  b.click(tab('structure'));
+  await wait(() => b.visible(pane('structure')));
+  assert.match(pane('structure').textContent, /label/);
+  assert.match(pane('structure').textContent, /Primary key/);
+  b.click(tab('data'));
+  await wait(() => b.visible(pane('data')));
+
+  // Add a record from Data: the Editor opens on a new record
+  b.click(page().querySelector('[data-new-record]'));
+  await wait(() => b.visible(pane('editor')) && b.visible(page().querySelector('[data-editor]')));
+  assert.match(page().querySelector('[data-editor]').textContent, /New record/);
+  assert.equal(
+    page().querySelector('#ed-id')?.closest('.col-md-6')?.style.display,
+    'none',
+    'an automatic key is not asked for',
+  );
+  setValue(page().querySelector('#ed-label'), 'From the UI');
+  b.click(page().querySelector('[data-editor-save]'));
+  await wait(() => b.visible(pane('data')) && /From the UI/.test(pane('data').textContent));
+
+  // View it: read-only fields
+  b.click(page().querySelector('[data-view-row]'));
   await wait(
-    () => page().querySelector('#nt-name') === null && /No records/.test(page().textContent),
+    () => b.visible(pane('editor')) && page().querySelector('#ed-label')?.value === 'From the UI',
+  );
+  assert.equal(page().querySelector('#ed-label').readOnly, true, 'viewing does not allow typing');
+  assert.ok(
+    !b.visible(page().querySelector('[data-editor-save]').parentElement),
+    'no Save while only viewing',
   );
 
-  // add a record
-  const addRecordBtn = () =>
-    [...page().querySelectorAll('button')].find((x) => x.textContent === 'Add record');
-  await wait(() => addRecordBtn());
-  b.click(addRecordBtn());
-  await wait(() => /New record/.test(page().textContent));
-  const labelInput = [...page().querySelectorAll('label')]
-    .find((l) => l.textContent.trim() === 'label')
-    ?.closest('.mb-2')
-    ?.querySelector('input');
-  assert.ok(labelInput);
-  setValue(labelInput, 'From the UI');
-  const saveBtn = () =>
-    [...page().querySelectorAll('button')].find((x) => x.textContent === 'Save');
-  b.click(saveBtn());
-  await wait(() => /From the UI/.test(page().textContent));
-
-  // edit it
-  const editBtn = () =>
-    [...page().querySelectorAll('button')].find((x) => x.textContent === 'Edit');
-  await wait(() => editBtn());
-  b.click(editBtn());
-  await wait(() => /Edit record/.test(page().textContent));
-  const labelInput2 = [...page().querySelectorAll('label')]
-    .find((l) => l.textContent.trim() === 'label')
-    ?.closest('.mb-2')
-    ?.querySelector('input');
-  setValue(labelInput2, 'Renamed');
-  b.click([...page().querySelectorAll('button')].find((x) => x.textContent === 'Save'));
-  await wait(() => /Renamed/.test(page().textContent));
-
+  // Edit it from the view
+  b.click(page().querySelector('[data-editor-edit]'));
+  await wait(() => page().querySelector('#ed-label')?.readOnly === false);
+  assert.equal(page().querySelector('#ed-id').readOnly, true, 'the key is shown but not changed');
+  setValue(page().querySelector('#ed-label'), 'Renamed');
+  b.click(page().querySelector('[data-editor-save]'));
+  await wait(
+    () =>
+      page().querySelector('#ed-label')?.readOnly === true &&
+      page().querySelector('#ed-label').value === 'Renamed',
+  );
   const saved = await node.ctx.dbms.listRows('ui_dbms_widgets');
   assert.equal(saved.rows[0].label, 'Renamed');
 
-  // delete it
-  const deleteBtn = () =>
-    [...page().querySelectorAll('button')].find((x) => x.textContent === 'Delete');
-  await wait(() => deleteBtn());
-  b.click(deleteBtn());
-  // "No records." lives in a div gated by x-show, which stays in the DOM (and in textContent) even while
-  // hidden — wait for the actual row's dynamic text to disappear instead (x-for really removes the <tr>).
-  await wait(() => !/Renamed/.test(page().textContent));
+  // Delete it from Data
+  b.click(tab('data'));
+  await wait(() => b.visible(pane('data')));
+  b.click(page().querySelector('[data-delete-row]'));
+  // x-for really removes the <tr>, so wait for the row's dynamic text to go (hidden text stays in textContent).
+  await wait(() => !/Renamed/.test(pane('data').querySelector('tbody')?.textContent ?? ''));
+  assert.equal((await node.ctx.dbms.listRows('ui_dbms_widgets')).total, 0);
 
-  // drop the table (type-to-confirm)
-  b.win.prompt = () => 'ui_dbms_widgets';
-  const tablesTab = () =>
-    [...page().querySelectorAll('button')].find((x) => x.textContent === 'Tables');
-  b.click(tablesTab());
-  await wait(() => /ui_dbms_widgets/.test(page().textContent));
-  const widgetsRow = () =>
-    [...page().querySelectorAll('tbody tr')].find((tr) => /ui_dbms_widgets/.test(tr.textContent));
-  const dropBtn = () => widgetsRow()?.querySelector('button');
-  await wait(() => dropBtn());
-  b.click(dropBtn());
-  await wait(async () => !(await node.ctx.db.schema.hasTable('ui_dbms_widgets')));
+  await node.ctx.db.schema.dropTable('ui_dbms_widgets'); // tidy up: the screen cannot drop tables any more
 });
 
 test('the SQL console runs a query and can save it for later', async () => {

@@ -10292,7 +10292,10 @@ document.addEventListener('alpine:init', () => {
     rowsPages: 1,
     sortCol: '',
     sortDir: 'asc',
-    editingRow: null, // a row object, or the string 'new'
+    tableTab: 'data', // structure | data | editor
+    editorMode: null, // null | 'new' | 'edit' | 'view'
+    editorRow: null, // the record shown in the editor (null for a new one)
+    working: {}, // tables being optimised or analysed right now
     editForm: {},
     showCreateForm: false,
     newTable: { name: '', columns: [] },
@@ -10380,10 +10383,93 @@ document.addEventListener('alpine:init', () => {
       }
     },
 
+    // ── the table list ──
+    fmtBytes(n) {
+      const u = ['B', 'KB', 'MB', 'GB', 'TB'];
+      let i = 0;
+      let v = Number(n);
+      while (v >= 1024 && i < u.length - 1) {
+        v /= 1024;
+        i++;
+      }
+      return `${v >= 100 || i === 0 ? Math.round(v) : v.toFixed(1)} ${u[i]}`;
+    },
+    listSummary() {
+      const real = this.tables.filter((t) => !t.view);
+      const rows = real.reduce((n, t) => n + (t.rows ?? 0), 0);
+      const bytes = real.reduce((n, t) => n + (t.bytes ?? 0), 0);
+      const approx = real.some((t) => t.approx) ? '~' : '';
+      const views = this.tables.length - real.length;
+      return `${real.length} table${real.length === 1 ? '' : 's'}${views ? ` and ${views} view${views === 1 ? '' : 's'}` : ''} · ${approx}${rows.toLocaleString()} records${bytes ? ` · ${this.fmtBytes(bytes)}` : ''}${approx ? ' (record counts are the database’s estimates)' : ''}`;
+    },
+    /** Optimise or analyse one table (or, from the toolbar, every ticked one, one after another). */
+    async maintain(name, action) {
+      this.working = { ...this.working, [name]: action };
+      this.error = '';
+      try {
+        const r = await api('POST', `/admin/dbms/tables/${encodeURIComponent(name)}/maintenance`, {
+          action,
+        });
+        toast(`${name}: ${r.message}`);
+        await this.loadTables();
+      } catch (e) {
+        this.error = `${name}: ${e.message}`;
+      } finally {
+        const next = { ...this.working };
+        delete next[name];
+        this.working = next;
+      }
+    },
+    async maintainSelected(action) {
+      for (const name of [...this.selected]) await this.maintain(name, action);
+    },
+
+    // ── one table: structure, data, editor ──
+    get meta() {
+      return this.tables.find((t) => t.name === this.selectedTable) ?? null;
+    },
+    metaLine() {
+      const m = this.meta;
+      if (!m || m.view) return '';
+      return [
+        m.engine,
+        m.rows === null ? '' : `${m.approx ? '~' : ''}${m.rows.toLocaleString()} records`,
+        m.bytes === null ? '' : this.fmtBytes(m.bytes),
+      ]
+        .filter(Boolean)
+        .join(' · ');
+    },
+    canEdit() {
+      return this.can('dbms.write') && !this.tableInfo?.sensitive && !this.meta?.view;
+    },
+    /** A column the editor lets you change right now (the key of an existing record is shown, not changed). */
+    editable(c) {
+      return (
+        (this.editorMode === 'new' || this.editorMode === 'edit') &&
+        !(this.editorMode === 'edit' && c.primaryKey)
+      );
+    },
+    longField(c) {
+      return (
+        /text|json|blob|clob/i.test(c.type) || String(this.editForm?.[c.name] ?? '').length > 80
+      );
+    },
+    editorTitle() {
+      if (this.editorMode === 'new') return 'New record';
+      const pk = this.editorRow ? Object.values(this.pkOf(this.editorRow)).join(', ') : '';
+      return `${this.editorMode === 'edit' ? 'Edit record' : 'Record'}${pk ? ` ${pk}` : ''}`;
+    },
+    /** What an input shows for a stored value: null is empty (the placeholder says NULL), objects are text. */
+    formValue(v) {
+      return v !== null && typeof v === 'object' ? JSON.stringify(v) : v;
+    },
     async openTable(name) {
       this.tab = 'table';
+      this.tableTab = 'data';
+      this.editorMode = null;
+      this.editorRow = null;
+      this.editForm = {};
       this.selectedTable = name;
-      this.editingRow = null;
       this.error = '';
       this.rowsPage = 1;
       this.sortCol = '';
@@ -10427,26 +10513,47 @@ document.addEventListener('alpine:init', () => {
       );
     },
     startNewRow() {
-      this.editingRow = 'new';
+      this.editorMode = 'new';
+      this.editorRow = null;
       this.editForm = Object.fromEntries(
         this.tableInfo.columns
           .filter((c) => !(c.primaryKey && c.autoIncrement))
           .map((c) => [c.name, c.default ?? '']),
       );
+      this.tableTab = 'editor';
+    },
+    viewRow(row) {
+      this.editorMode = 'view';
+      this.editorRow = row;
+      this.editForm = Object.fromEntries(
+        Object.entries(row).map(([k, v]) => [k, this.formValue(v)]),
+      );
+      this.tableTab = 'editor';
     },
     startEditRow(row) {
-      this.editingRow = row;
-      this.editForm = { ...row };
+      this.editorMode = 'edit';
+      this.editorRow = row;
+      this.editForm = Object.fromEntries(
+        Object.entries(row).map(([k, v]) => [k, this.formValue(v)]),
+      );
+      this.tableTab = 'editor';
     },
+    /** Cancelling an edit goes back to looking at that record; cancelling a new one goes back to the data. */
     cancelEdit() {
-      this.editingRow = null;
+      if (this.editorMode === 'edit' && this.editorRow) this.viewRow(this.editorRow);
+      else this.closeEditor();
+    },
+    closeEditor() {
+      this.editorMode = null;
+      this.editorRow = null;
       this.editForm = {};
+      this.tableTab = 'data';
     },
     async saveRow() {
       this.busy = true;
       this.error = '';
       try {
-        if (this.editingRow === 'new') {
+        if (this.editorMode === 'new') {
           await api(
             'POST',
             `/admin/dbms/tables/${encodeURIComponent(this.selectedTable)}/rows`,
@@ -10455,13 +10562,21 @@ document.addEventListener('alpine:init', () => {
           toast('Record created.');
         } else {
           await api('PUT', `/admin/dbms/tables/${encodeURIComponent(this.selectedTable)}/rows`, {
-            pk: this.pkOf(this.editingRow),
+            pk: this.pkOf(this.editorRow),
             data: this.editForm,
           });
           toast('Record saved.');
         }
-        this.editingRow = null;
+        const wasNew = this.editorMode === 'new';
+        const saved = { ...this.editorRow, ...this.editForm };
         await this.loadRows();
+        if (wasNew) this.closeEditor();
+        else
+          this.viewRow(
+            this.rows.find(
+              (r) => JSON.stringify(this.pkOf(r)) === JSON.stringify(this.pkOf(saved)),
+            ) ?? saved,
+          );
       } catch (e) {
         this.error = e.message;
       } finally {
@@ -10474,6 +10589,11 @@ document.addEventListener('alpine:init', () => {
         pk: this.pkOf(row),
       });
       toast('Record deleted.');
+      if (
+        this.editorRow &&
+        JSON.stringify(this.pkOf(this.editorRow)) === JSON.stringify(this.pkOf(row))
+      )
+        this.closeEditor();
       await this.loadRows();
     },
 
@@ -10505,17 +10625,6 @@ document.addEventListener('alpine:init', () => {
         this.busy = false;
       }
     },
-    async dropTable(name) {
-      if (prompt(`Type "${name}" to confirm dropping it. This can’t be undone.`) !== name) return;
-      await api('DELETE', `/admin/dbms/tables/${encodeURIComponent(name)}`);
-      toast(`Table "${name}" dropped.`);
-      if (this.selectedTable === name) {
-        this.tab = 'tables';
-        this.selectedTable = '';
-      }
-      await this.loadTables();
-    },
-
     async openConsole() {
       this.tab = 'console';
       this.consoleResult = null;

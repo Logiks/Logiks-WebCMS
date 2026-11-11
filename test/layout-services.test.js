@@ -1,30 +1,8 @@
 /* global document, scrollY, innerWidth -- the page.evaluate/waitForFunction callbacks run inside the browser */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
-import { startNode, ADMIN } from './helpers.js';
-
-/**
- * Layout, as a real browser draws it (jsdom has no layout engine, so it cannot see a column fall below another or a row wrap).
- * Needs `playwright-core` and a Chrome/Chromium; without one the test is skipped and says so.
- */
-const CANDIDATES = [
-  process.env.CHROME_PATH,
-  '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-  '/usr/bin/google-chrome',
-  '/usr/bin/google-chrome-stable',
-  '/usr/bin/chromium',
-  '/usr/bin/chromium-browser',
-].filter(Boolean);
-const chrome = CANDIDATES.find((p) => fs.existsSync(p));
-let playwright = null;
-try {
-  playwright = await import('playwright-core');
-} catch {
-  /* not installed */
-}
-const skip =
-  !chrome || !playwright ? 'needs playwright-core and a Chrome/Chromium on this machine' : false;
+import { startNode } from './helpers.js';
+import { chrome, playwright, skipBrowser as skip, adminPage } from './helpers-browser.js';
 
 test(
   'Service editor, in a real browser: the preview sits beside the form and every Where condition stays on one line',
@@ -34,13 +12,7 @@ test(
     await node.ctx.settings.update('features', { values: { public_api: true, services: true } });
     const browser = await playwright.chromium.launch({ executablePath: chrome });
     try {
-      const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
-      await page.goto(`${node.url}/admin/`);
-      await page.fill('#email', ADMIN.email);
-      await page.fill('#pw', ADMIN.password);
-      await page.press('#pw', 'Enter');
-      await page.waitForSelector('.shell');
-      await page.goto(`${node.url}/admin/#/services/new`);
+      const page = await adminPage(browser, node, { hash: '/services/new' });
       await page.waitForSelector('#s-name');
       await page.click('label[for=src-table]');
       await page.waitForFunction(() =>

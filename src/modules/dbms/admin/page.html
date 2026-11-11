@@ -35,6 +35,10 @@
             <div class="d-flex flex-wrap align-items-center gap-2 mb-2" x-show="tables.length">
               <a class="btn btn-outline-secondary btn-sm" data-export :href="selected.length ? exportUrl() : null" :class="{disabled: !selected.length}" :aria-disabled="!selected.length" x-text="'Export selected' + (selected.length ? ' (' + selected.length + ')' : '')"></a>
               <div class="form-check mb-0"><input class="form-check-input" type="checkbox" id="exp-data" x-model="withRecords"><label class="form-check-label small" for="exp-data">Include records</label></div>
+              <span class="btn-group btn-group-sm" role="group" aria-label="Maintenance for the ticked tables" x-show="can('dbms.write')">
+                <button type="button" class="btn btn-sm btn-outline-secondary" data-optimize-selected :disabled="busy || !selected.length" @click="maintainSelected('optimize')" x-text="'Optimise selected' + (selected.length ? ' (' + selected.length + ')' : '')"></button>
+                <button type="button" class="btn btn-sm btn-outline-secondary" :disabled="busy || !selected.length" @click="maintainSelected('analyze')">Analyse</button>
+              </span>
               <label class="btn btn-outline-secondary btn-sm mb-0 ms-auto" x-show="can('dbms.write')" :class="{disabled: busy}">Import<input type="file" hidden accept=".zip,application/zip" data-import @change="pickImport($event)"></label>
             </div>
             <div class="small muted mb-2" x-show="tables.length">Export makes a .zip of the chosen tables (structure, and records if ticked; passwords and keys are left out). Import reads such a file and only adds: missing tables, columns and records. Nothing is deleted or replaced.</div>
@@ -59,75 +63,139 @@
 
             <div class="panel">
               <div class="empty" x-show="loaded && !tables.length">No tables.</div>
-              <table class="table" x-show="tables.length"><thead><tr><th style="width:2rem"><input class="form-check-input" type="checkbox" aria-label="Select all tables" :checked="selected.length > 0 && selected.length === tables.filter(t => !t.view).length" @change="toggleAll($event.target.checked)"></th><th>Name</th><th></th><th></th></tr></thead><tbody>
-                <template x-for="t in tables" :key="t.name"><tr>
-                  <td><input class="form-check-input" type="checkbox" :aria-label="'Select ' + t.name" :value="t.name" x-model="selected" x-show="!t.view"></td>
-                  <td class="mono"><a href="#" @click.prevent="openTable(t.name)" x-text="t.name"></a></td>
-                  <td class="muted small" x-text="t.view ? 'View' : ''"></td>
-                  <td class="text-end"><button class="btn btn-sm btn-outline-danger" type="button" x-show="can('dbms.write') && !t.view" @click="dropTable(t.name)">Drop</button></td>
-                </tr></template>
-              </tbody></table>
+              <div class="px-3 py-2 small muted border-bottom" x-show="tables.length" data-list-summary x-text="listSummary()"></div>
+              <div class="table-responsive" x-show="tables.length">
+                <table class="table table-hover align-middle mb-0" data-tables><thead><tr>
+                  <th style="width:2rem"><input class="form-check-input" type="checkbox" aria-label="Select all tables" :checked="selected.length > 0 && selected.length === tables.filter(t => !t.view).length" @change="toggleAll($event.target.checked)"></th>
+                  <th>Name</th><th>Type</th><th>Engine</th><th class="text-end">Records</th><th class="text-end">Size</th><th class="text-end" x-show="can('dbms.write')">Maintenance</th>
+                </tr></thead><tbody>
+                  <template x-for="t in tables" :key="t.name"><tr>
+                    <td><input class="form-check-input" type="checkbox" :aria-label="'Select ' + t.name" :value="t.name" x-model="selected" x-show="!t.view"></td>
+                    <td class="mono"><a href="#" @click.prevent="openTable(t.name)" x-text="t.name"></a></td>
+                    <td class="small"><span class="tag" :class="t.view ? '' : 'ok'" x-text="t.view ? 'View' : 'Table'"></span></td>
+                    <td class="small muted" x-text="t.engine || '–'"></td>
+                    <td class="small text-end text-nowrap" x-text="t.rows === null ? '–' : (t.approx ? '~' : '') + t.rows.toLocaleString()"></td>
+                    <td class="small text-end text-nowrap" x-text="t.bytes === null ? '–' : fmtBytes(t.bytes)"></td>
+                    <td class="text-end text-nowrap" x-show="can('dbms.write')">
+                      <span class="btn-group btn-group-sm" role="group" :aria-label="'Maintenance for ' + t.name" x-show="!t.view">
+                        <button class="btn btn-sm btn-outline-secondary" type="button" data-optimize :disabled="busy || !!working[t.name]" @click="maintain(t.name, 'optimize')">Optimise</button>
+                        <button class="btn btn-sm btn-outline-secondary" type="button" data-analyze :disabled="busy || !!working[t.name]" @click="maintain(t.name, 'analyze')">Analyse</button>
+                      </span>
+                    </td>
+                  </tr></template>
+                </tbody></table>
+              </div>
             </div>
           </div>
         </template>
 
         <template x-if="tab === 'table' && tableInfo">
           <div>
-            <div class="panel mb-3">
-              <div class="panel-h d-flex justify-content-between align-items-center"><span>Structure</span><span class="small fw-normal"><a data-export-table :href="exportUrl([selectedTable])">Export this table</a> · <a :href="exportUrl([selectedTable], false)">structure only</a></span></div>
-              <table class="table mb-0"><thead><tr><th>Column</th><th>Type</th><th>Nullable</th><th>Default</th><th></th></tr></thead><tbody>
-                <template x-for="c in tableInfo.columns" :key="c.name"><tr>
-                  <td class="mono small" x-text="c.name"></td>
-                  <td class="muted small" x-text="c.type"></td>
-                  <td class="muted small" x-text="c.nullable ? 'Yes' : 'No'"></td>
-                  <td class="muted small" x-text="c.default ?? '–'"></td>
-                  <td><span class="tag ok" x-show="c.primaryKey">Primary key</span> <span class="tag" x-show="c.autoIncrement">Auto-increment</span></td>
-                </tr></template>
-              </tbody></table>
-              <div class="p-2 small muted" x-show="tableInfo.indexes.length">Indexes: <template x-for="idx in tableInfo.indexes" :key="idx.name"><span class="mono me-3" x-text="idx.name + ' (' + idx.columns.join(', ') + (idx.unique ? ', unique' : '') + ')'"></span></template></div>
-            </div>
-
-            <div class="d-flex justify-content-between align-items-center mb-2">
-              <span class="muted small" x-text="rowsTotal + ' record' + (rowsTotal === 1 ? '' : 's')"></span>
-              <button class="btn btn-sm btn-primary" type="button" x-show="can('dbms.write') && !tableInfo.sensitive" @click="startNewRow()">Add record</button>
+            <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+              <h2 class="h5 mono mb-0" x-text="selectedTable"></h2>
+              <span class="tag" :class="meta && meta.view ? '' : 'ok'" x-text="meta && meta.view ? 'View' : 'Table'"></span>
+              <span class="small muted" x-text="metaLine()"></span>
+              <span class="ms-auto small"><a data-export-table :href="exportUrl([selectedTable])">Export this table</a> · <a :href="exportUrl([selectedTable], false)">structure only</a></span>
             </div>
             <div class="alert alert-warning" role="alert" x-show="tableInfo.sensitive">This table is only editable through the SQL console.</div>
 
-            <div class="panel p-3 mb-3" x-show="editingRow">
-              <div class="panel-h" x-text="editingRow === 'new' ? 'New record' : 'Edit record'"></div>
-              <template x-for="c in (tableInfo?.columns || [])" :key="c.name">
-                <div class="mb-2" x-show="!(editingRow !== 'new' && c.primaryKey)">
-                  <label class="form-label small" x-text="c.name"></label>
-                  <template x-if="/bool/i.test(c.type)"><div class="form-check"><input class="form-check-input" type="checkbox" x-model="editForm[c.name]"></div></template>
-                  <template x-if="!/bool/i.test(c.type)"><input class="form-control form-control-sm" x-model="editForm[c.name]"></template>
+            <ul class="nav nav-tabs mb-3" role="tablist" aria-label="Table views" data-table-tabs>
+              <li class="nav-item"><button type="button" class="nav-link" :class="{active: tableTab === 'structure'}" role="tab" :aria-selected="tableTab === 'structure'" data-tab="structure" @click="tableTab = 'structure'">Structure</button></li>
+              <li class="nav-item"><button type="button" class="nav-link" :class="{active: tableTab === 'data'}" role="tab" :aria-selected="tableTab === 'data'" data-tab="data" @click="tableTab = 'data'">Data <span class="badge text-bg-light" x-text="rowsTotal.toLocaleString()"></span></button></li>
+              <li class="nav-item"><button type="button" class="nav-link" :class="{active: tableTab === 'editor'}" role="tab" :aria-selected="tableTab === 'editor'" data-tab="editor" @click="tableTab = 'editor'">Editor<span class="small muted" x-show="editorMode" x-text="' · ' + ({ new: 'new record', edit: 'editing', view: 'viewing' })[editorMode]"></span></button></li>
+            </ul>
+
+            <div x-show="tableTab === 'structure'" data-pane="structure">
+              <div class="panel mb-3">
+                <div class="table-responsive">
+                  <table class="table mb-0"><thead><tr><th>Column</th><th>Type</th><th>Nullable</th><th>Default</th><th></th></tr></thead><tbody>
+                    <template x-for="c in tableInfo.columns" :key="c.name"><tr>
+                      <td class="mono small" x-text="c.name"></td>
+                      <td class="muted small" x-text="c.type"></td>
+                      <td class="muted small" x-text="c.nullable ? 'Yes' : 'No'"></td>
+                      <td class="muted small" x-text="c.default ?? '–'"></td>
+                      <td><span class="tag ok" x-show="c.primaryKey">Primary key</span> <span class="tag" x-show="c.autoIncrement">Auto-increment</span></td>
+                    </tr></template>
+                  </tbody></table>
                 </div>
-              </template>
-              <div class="d-flex gap-2 mt-2">
-                <button class="btn btn-primary btn-sm" type="button" :disabled="busy" @click="saveRow()">Save</button>
-                <button class="btn btn-outline-secondary btn-sm" type="button" @click="cancelEdit()">Cancel</button>
+              </div>
+              <div class="panel" x-show="tableInfo.indexes.length">
+                <div class="panel-h">Indexes</div>
+                <div class="table-responsive">
+                  <table class="table mb-0"><thead><tr><th>Name</th><th>Columns</th><th>Unique</th></tr></thead><tbody>
+                    <template x-for="idx in tableInfo.indexes" :key="idx.name"><tr>
+                      <td class="mono small" x-text="idx.name"></td>
+                      <td class="mono small" x-text="idx.columns.join(', ')"></td>
+                      <td class="small" x-text="idx.unique ? 'Yes' : 'No'"></td>
+                    </tr></template>
+                  </tbody></table>
+                </div>
               </div>
             </div>
 
-            <div class="panel">
-              <div class="empty" x-show="!rows.length">No records.</div>
-              <div class="table-responsive" x-show="rows.length">
-                <table class="table mb-0"><thead><tr>
-                  <template x-for="c in tableInfo.columns" :key="c.name"><th><a href="#" @click.prevent="sortBy(c.name)" x-text="c.name + (sortCol === c.name ? (sortDir === 'asc' ? ' ↑' : ' ↓') : '')"></a></th></template>
-                  <th></th>
-                </tr></thead><tbody>
-                  <template x-for="(row, i) in rows" :key="i"><tr>
-                    <template x-for="c in tableInfo.columns" :key="c.name"><td class="small" x-text="show(row[c.name])"></td></template>
-                    <td class="text-end text-nowrap">
-                      <button class="btn btn-sm btn-outline-secondary" type="button" x-show="can('dbms.write') && !tableInfo.sensitive" @click="startEditRow(row)">Edit</button>
-                      <button class="btn btn-sm btn-outline-danger" type="button" x-show="can('dbms.write') && !tableInfo.sensitive" @click="deleteRow(row)">Delete</button>
-                    </td>
-                  </tr></template>
-                </tbody></table>
+            <div x-show="tableTab === 'data'" data-pane="data">
+              <div class="d-flex justify-content-between align-items-center mb-2">
+                <span class="muted small" x-text="rowsTotal.toLocaleString() + ' record' + (rowsTotal === 1 ? '' : 's')"></span>
+                <button class="btn btn-sm btn-primary" type="button" data-new-record x-show="canEdit()" @click="startNewRow()">Add record</button>
               </div>
-              <div class="d-flex justify-content-between align-items-center p-2" x-show="rowsPages > 1">
-                <button class="btn btn-sm btn-outline-secondary" type="button" :disabled="rowsPage <= 1" @click="changePage(rowsPage - 1)">Newer</button>
-                <span class="muted small" x-text="'Page ' + rowsPage + ' of ' + rowsPages"></span>
-                <button class="btn btn-sm btn-outline-secondary" type="button" :disabled="rowsPage >= rowsPages" @click="changePage(rowsPage + 1)">Older</button>
+              <div class="panel">
+                <div class="empty" x-show="!rows.length">No records.</div>
+                <div class="table-responsive" x-show="rows.length">
+                  <table class="table table-hover align-middle mb-0" data-rows><thead><tr>
+                    <template x-for="c in tableInfo.columns" :key="c.name"><th><a href="#" @click.prevent="sortBy(c.name)" x-text="c.name + (sortCol === c.name ? (sortDir === 'asc' ? ' ↑' : ' ↓') : '')"></a></th></template>
+                    <th></th>
+                  </tr></thead><tbody>
+                    <template x-for="(row, i) in rows" :key="i"><tr>
+                      <template x-for="c in tableInfo.columns" :key="c.name"><td class="small" x-text="show(row[c.name])"></td></template>
+                      <td class="text-end text-nowrap">
+                        <span class="btn-group btn-group-sm" role="group" aria-label="Record actions">
+                          <button class="btn btn-sm btn-outline-secondary" type="button" data-view-row @click="viewRow(row)">View</button>
+                          <button class="btn btn-sm btn-outline-secondary" type="button" data-edit-row x-show="canEdit()" @click="startEditRow(row)">Edit</button>
+                          <button class="btn btn-sm btn-outline-danger" type="button" data-delete-row x-show="canEdit()" @click="deleteRow(row)">Delete</button>
+                        </span>
+                      </td>
+                    </tr></template>
+                  </tbody></table>
+                </div>
+                <div class="d-flex justify-content-between align-items-center p-2" x-show="rowsPages > 1">
+                  <button class="btn btn-sm btn-outline-secondary" type="button" :disabled="rowsPage <= 1" @click="changePage(rowsPage - 1)">Newer</button>
+                  <span class="muted small" x-text="'Page ' + rowsPage + ' of ' + rowsPages"></span>
+                  <button class="btn btn-sm btn-outline-secondary" type="button" :disabled="rowsPage >= rowsPages" @click="changePage(rowsPage + 1)">Older</button>
+                </div>
+              </div>
+            </div>
+
+            <div x-show="tableTab === 'editor'" data-pane="editor">
+              <div class="panel p-4 text-center" x-show="!editorMode" data-editor-empty>
+                <p class="muted mb-3">Choose a record in <strong>Data</strong> to look at or change it, or start a new one.</p>
+                <button class="btn btn-primary btn-sm" type="button" x-show="canEdit()" @click="startNewRow()">New record</button>
+                <button class="btn btn-outline-secondary btn-sm" type="button" @click="tableTab = 'data'">Go to Data</button>
+              </div>
+              <div class="panel p-3" x-show="editorMode" data-editor>
+                <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
+                  <h3 class="h6 mb-0" x-text="editorTitle()"></h3>
+                  <span class="ms-auto d-flex gap-2">
+                    <button class="btn btn-sm btn-outline-secondary" type="button" x-show="editorMode === 'view' && canEdit()" data-editor-edit @click="startEditRow(editorRow)">Edit</button>
+                    <button class="btn btn-sm btn-outline-danger" type="button" x-show="editorMode === 'view' && canEdit()" @click="deleteRow(editorRow)">Delete</button>
+                  </span>
+                </div>
+                <div class="row g-3">
+                  <template x-for="c in tableInfo.columns" :key="c.name">
+                    <div :class="longField(c) ? 'col-12' : 'col-md-6'" x-show="!(editorMode === 'new' && c.primaryKey && c.autoIncrement)">
+                      <label class="form-label small mb-1" :for="'ed-' + c.name"><span class="mono" x-text="c.name"></span> <span class="muted" x-text="c.type"></span> <span class="tag ok" x-show="c.primaryKey">Primary key</span><span class="muted" x-show="c.nullable && !c.primaryKey"> · optional</span></label>
+                      <template x-if="/bool/i.test(c.type)"><div class="form-check"><input class="form-check-input" type="checkbox" :id="'ed-' + c.name" x-model="editForm[c.name]" :disabled="!editable(c)"></div></template>
+                      <template x-if="!/bool/i.test(c.type) && longField(c)"><textarea class="form-control form-control-sm mono" rows="5" :id="'ed-' + c.name" x-model="editForm[c.name]" :readonly="!editable(c)" :placeholder="editorMode === 'view' && editForm[c.name] === null ? 'NULL' : ''"></textarea></template>
+                      <template x-if="!/bool/i.test(c.type) && !longField(c)"><input class="form-control form-control-sm" :id="'ed-' + c.name" x-model="editForm[c.name]" :readonly="!editable(c)" :placeholder="editorMode === 'view' && editForm[c.name] === null ? 'NULL' : ''"></template>
+                    </div>
+                  </template>
+                </div>
+                <div class="d-flex gap-2 mt-3" x-show="editorMode === 'new' || editorMode === 'edit'">
+                  <button class="btn btn-primary btn-sm" type="button" data-editor-save :disabled="busy" @click="saveRow()">Save</button>
+                  <button class="btn btn-outline-secondary btn-sm" type="button" data-editor-cancel @click="cancelEdit()">Cancel</button>
+                </div>
+                <div class="d-flex gap-2 mt-3" x-show="editorMode === 'view'">
+                  <button class="btn btn-outline-secondary btn-sm" type="button" @click="closeEditor()">Back to data</button>
+                </div>
               </div>
             </div>
           </div>

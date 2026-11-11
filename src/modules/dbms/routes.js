@@ -86,6 +86,18 @@ export default function dbmsRoutes(ctx) {
     },
   );
 
+  // Optimise or analyse a table (service.js `maintain`): changes no record, only how the table is stored.
+  const maintainBody = z.object({ action: z.enum(['optimize', 'analyze']) });
+  r.post(
+    '/dbms/tables/:table/maintenance',
+    requirePermission('dbms.write'),
+    docs({ body: maintainBody }),
+    async (req, res) => {
+      const { action } = parse(maintainBody, req.body);
+      res.json(await dbms.maintain(req.params.table, action, actorOf(req)));
+    },
+  );
+
   r.delete('/dbms/tables/:table', requirePermission('dbms.write'), async (req, res) => {
     await dbms.dropTable(req.params.table, actorOf(req));
     res.status(204).end();
