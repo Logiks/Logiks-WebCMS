@@ -2217,7 +2217,6 @@ document.addEventListener('alpine:init', () => {
       if (u?.status === 'failed') return { label: 'Failed', tone: 'warn' };
       if (!g) return { label: 'Reading…', tone: '' };
       if (!g.supported) return { label: 'Not a git checkout', tone: '' };
-      if (g.blocker === 'dirty') return { label: 'Local changes', tone: 'warn' };
       if (n.commit && g.headFull !== n.commit) return { label: 'Restart needed', tone: 'warn' };
       if (g.behind > 0)
         return { label: `${g.behind} update${g.behind === 1 ? '' : 's'} available`, tone: 'warn' };
@@ -2236,8 +2235,6 @@ document.addEventListener('alpine:init', () => {
       if (this.restarting[n.id]) return 'Waiting for the server to drain, stop and start again.';
       if (u?.message && u.status !== 'idle') return u.message;
       if (g && !g.supported) return g.message;
-      if (g?.blocker === 'dirty')
-        return 'This checkout has uncommitted changes to tracked files. Commit or stash them before updating.';
       return '';
     },
     incoming(n) {

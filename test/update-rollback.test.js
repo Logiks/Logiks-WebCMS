@@ -178,7 +178,7 @@ test('rollback with restart asks the process to restart once; the database lists
   }
 });
 
-test('rollback refuses local changes, an unknown point, a point from another server and the version already running', async () => {
+test('rollback sets local edits aside instead of refusing, and keeps them when they no longer apply', async () => {
   const repos = makeRepos();
   const node = await nodeFor(repos.server);
   try {
@@ -187,13 +187,26 @@ test('rollback refuses local changes, an unknown point, a point from another ser
     const [point] = await node.ctx.updates.restorePoints();
 
     fs.writeFileSync(path.join(repos.server, 'app.txt'), 'edited here');
-    let snap = await run(node, 'rollback', { pointId: point.id });
-    assert.equal(snap.status, 'failed');
-    assert.match(snap.message, /would discard them/);
-    assert.equal(fs.readFileSync(path.join(repos.server, 'app.txt'), 'utf8'), 'edited here');
-    git(repos.server, 'checkout', '--', 'app.txt');
+    const snap = await run(node, 'rollback', { pointId: point.id });
+    assert.notEqual(snap.status, 'failed', snap.message);
+    assert.match(snap.message, /git stash/i);
+    assert.match(git(repos.server, 'stash', 'list'), /local changes set aside/);
+    assert.equal(fs.readFileSync(path.join(repos.server, 'app.txt'), 'utf8'), 'v1');
+  } finally {
+    await node.close();
+    repos.cleanup();
+  }
+});
 
-    snap = await run(node, 'rollback', { pointId: 99999 });
+test('rollback refuses an unknown point, a point from another server and the version already running', async () => {
+  const repos = makeRepos();
+  const node = await nodeFor(repos.server);
+  try {
+    repos.push({ 'app.txt': 'v2' }, 'Second');
+    await run(node, 'apply');
+    const [point] = await node.ctx.updates.restorePoints();
+
+    let snap = await run(node, 'rollback', { pointId: 99999 });
     assert.match(snap.message, /not on this server/);
 
     await node.ctx
@@ -213,7 +226,7 @@ test('rollback refuses local changes, an unknown point, a point from another ser
       .update({ from_commit: repos.head(repos.server) });
     snap = await run(node, 'rollback', { pointId: point.id });
     assert.match(snap.message, /Nothing to roll back/);
-    assert.equal((await actions(node)).filter((a) => a === 'updates.rollback_failed').length, 4);
+    assert.equal((await actions(node)).filter((a) => a === 'updates.rollback_failed').length, 3);
   } finally {
     await node.close();
     repos.cleanup();

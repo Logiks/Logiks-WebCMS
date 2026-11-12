@@ -100,7 +100,7 @@ export function createUpdatesService({
   };
 
   /** Runs a program without a shell; resolves (never rejects) with its exit code and redacted output. */
-  function run(cmd, args, { timeoutMs = 60_000 } = {}) {
+  function run(cmd, args, { timeoutMs = 60_000, onOutput = null } = {}) {
     return new Promise((/** @type {(v: any) => void} */ resolve) => {
       let out = '';
       let timedOut = false;
@@ -115,6 +115,7 @@ export function createUpdatesService({
         return resolve({ code: -1, out: e.message, missing: e.code === 'ENOENT' });
       }
       const take = (b) => {
+        onOutput?.(String(b));
         out += b;
         if (out.length > 64_000) out = out.slice(-32_000);
       };
@@ -140,6 +141,18 @@ export function createUpdatesService({
     });
   }
   const git = (...args) => run('git', args);
+
+  /** Shows what `npm ci` is doing on the Updates page (at most once a second), so a slow install doesn't look like a hang. */
+  function installProgress() {
+    let last = 0;
+    return (chunk) => {
+      const line = redact(chunk).trim().split('\n').filter(Boolean).pop();
+      if (!line || Date.now() - last < 1000) return;
+      last = Date.now();
+      alive();
+      set({ step: `Installing dependencies: ${line.replace(/^npm /, '').slice(0, 100)}` });
+    };
+  }
 
   /** One file as it is at a commit, whole (`run` keeps only the tail of long output, and a lockfile is long). */
   const showFile = (ref, file) =>
@@ -171,26 +184,32 @@ export function createUpdatesService({
   }
 
   /**
-   * `npm install` (run by hand, or by an older npm) rewrites these two files without anyone meaning to change the code, and the
-   * update reinstalls with `npm ci` anyway. So they never count as "local changes"; before the code moves they are set aside
-   * in a git stash (kept, never dropped) so an incoming change to them can't conflict.
+   * Local edits to tracked files (typically `npm install` rewriting package.json / package-lock.json, or a hand edit) must not
+   * make an admin run git commands. They are stashed before the code moves and popped right after; when they no longer apply
+   * on top of the new code, the checkout is cleaned and they stay in the stash (never dropped), with a note in the result.
    */
-  const DEPENDENCY_FILES = ['package.json', 'package-lock.json'];
-  const dependencyExcludes = DEPENDENCY_FILES.map((f) => `:(exclude)${f}`);
-
-  async function stashDependencyFiles() {
-    const changed = (
-      await git('status', '--porcelain', '--untracked-files=no', '--', ...DEPENDENCY_FILES)
-    ).out;
-    if (changed === '') return;
-    await git(
+  async function stashLocal() {
+    const spec = ['.', ...mirrorPathspec()];
+    if ((await git('status', '--porcelain', '--untracked-files=no', '--', ...spec)).out === '')
+      return false;
+    const r = await git(
       'stash',
       'push',
       '-m',
-      'CMS update: local package.json / package-lock.json changes',
+      'CMS update: local changes set aside',
       '--',
-      ...DEPENDENCY_FILES,
+      ...spec,
     );
+    return r.code === 0 && !/No local changes/i.test(r.out);
+  }
+
+  /** @returns {Promise<string>} a sentence for the result message ('' when nothing was stashed) */
+  async function restoreLocal(stashed) {
+    if (!stashed) return '';
+    if ((await git('stash', 'pop')).code === 0)
+      return ' Your local changes to tracked files were put back.';
+    await git('reset', '--hard', 'HEAD'); // a failed pop leaves conflict markers; the stash itself is kept
+    return ' Your local changes to tracked files no longer apply on top of this version, so they were left in "git stash" (see git stash list).';
   }
 
   /** Reads the checkout. `git` is fast and local here; nothing touches the network. */
@@ -229,17 +248,7 @@ export function createUpdatesService({
     // is not a change anyone made to the code, so it never counts as "local changes".
     const mirror = mirrorPathspec();
     const dirty =
-      (
-        await git(
-          'status',
-          '--porcelain',
-          '--untracked-files=no',
-          '--',
-          '.',
-          ...mirror,
-          ...dependencyExcludes,
-        )
-      ).out !== '';
+      (await git('status', '--porcelain', '--untracked-files=no', '--', '.', ...mirror)).out !== '';
     const url = { code: 0, out: redact(sourceUrl) };
 
     const info = {
@@ -264,7 +273,6 @@ export function createUpdatesService({
       blocker: null,
     };
     if (!branch) info.blocker = 'detached';
-    else if (dirty) info.blocker = 'dirty';
 
     if (branch) {
       const ref = `refs/remotes/${remote}/${sourceBranch}`;
@@ -313,8 +321,6 @@ export function createUpdatesService({
     ({
       detached:
         'This server is on a detached commit, not a branch. Check out a branch (git checkout <branch>) and try again.',
-      dirty:
-        'This checkout has uncommitted changes to tracked files, and updating would overwrite them. Commit or stash them (git stash), then try again.',
       diverged:
         "This checkout has commits that aren't on the remote, so it can't fast-forward. Push or remove them, then try again.",
     })[g.blocker];
@@ -433,8 +439,8 @@ export function createUpdatesService({
       set({ step: 'Installing dependencies' });
       const r = await run(
         'npm',
-        ['ci', '--no-audit', '--no-fund', ...(env.isProd ? ['--omit=dev'] : [])],
-        { timeoutMs: 15 * 60_000 },
+        ['ci', '--no-audit', '--no-fund', '--loglevel=http', ...(env.isProd ? ['--omit=dev'] : [])],
+        { timeoutMs: 15 * 60_000, onOutput: installProgress() },
       );
       if (r.code !== 0)
         throw new StepError(
@@ -642,7 +648,7 @@ export function createUpdatesService({
       let g = await readGit();
       if (!g.supported) throw new StepError(g.message);
       from = g.headFull;
-      if (['detached', 'dirty'].includes(g.blocker)) throw new StepError(blockerMessage(g));
+      if (g.blocker === 'detached') throw new StepError(blockerMessage(g));
 
       set({ step: 'Fetching from the remote' });
       await fetchRemote(g);
@@ -651,6 +657,7 @@ export function createUpdatesService({
       if (g.blocker) throw new StepError(blockerMessage(g));
 
       let pulled = false;
+      let localNote = '';
       let point = null;
       let imported = null;
       if (g.behind > 0) {
@@ -668,13 +675,16 @@ export function createUpdatesService({
         // The mirror is derived from the database and rewritten after the merge, so a stale copy must not block it.
         for (const spec of mirrorPathspec())
           await git('checkout', '--', spec.replace(':(exclude)', ''));
-        await stashDependencyFiles();
+        const stashed = await stashLocal();
         set({ step: `Applying ${g.behind} update${g.behind === 1 ? '' : 's'}` });
         const m = await git('merge', '--ff-only', `refs/remotes/${g.remote}/${g.sourceBranch}`);
-        if (m.code !== 0)
+        if (m.code !== 0) {
+          await restoreLocal(stashed);
           throw new StepError(
             `Git couldn't apply the update: ${lastLine(m.out)}. Nothing was changed.`,
           );
+        }
+        localNote = await restoreLocal(stashed);
         done('merge');
         pulled = true;
         // Recorded right after the merge and before install/migrate: those are the steps that can fail, and the point is
@@ -734,7 +744,7 @@ export function createUpdatesService({
         ? ` Not everything came across: ${imported.problems.slice(0, 3).join('; ')}${imported.problems.length > 3 ? ` (and ${imported.problems.length - 3} more)` : ''}.`
         : '';
       const message = pulled
-        ? `Updated to ${after.head}${detail}.${problems}${willRestart ? '' : ' Restart this server to run it.'}`
+        ? `Updated to ${after.head}${detail}.${problems}${localNote}${willRestart ? '' : ' Restart this server to run it.'}`
         : runningOld
           ? `Already at ${after.head}${detail}, but this server is still running an older version.${willRestart ? '' : ' Restart it.'}`
           : 'Already up to date.';
@@ -862,12 +872,7 @@ export function createUpdatesService({
       set({ op: 'rollback', status: 'running', step: 'Checking the checkout', message: null });
       const g = await readGit();
       if (!g.supported) throw new StepError(g.message);
-      if (['detached', 'dirty'].includes(g.blocker))
-        throw new StepError(
-          g.blocker === 'dirty'
-            ? 'This checkout has uncommitted changes to tracked files, and rolling back would discard them. Commit or stash them (git stash), then try again.'
-            : blockerMessage(g),
-        );
+      if (g.blocker === 'detached') throw new StepError(blockerMessage(g));
       const point = await db('update_restore_points')
         .where({ id: Number(pointId), server_key: serverKey })
         .first();
@@ -891,10 +896,13 @@ export function createUpdatesService({
       const { needsInstall, needsMigrate } = await classifyBetween(changed, target, 'HEAD');
 
       set({ step: `Putting back ${target.slice(0, 7)}` });
-      await stashDependencyFiles();
+      const stashed = await stashLocal();
       const reset = await git('reset', '--hard', target);
-      if (reset.code !== 0)
+      if (reset.code !== 0) {
+        await restoreLocal(stashed);
         throw new StepError(`Git couldn't go back: ${lastLine(reset.out)}. Nothing was changed.`);
+      }
+      const localNote = await restoreLocal(stashed);
       const steps = ['reset'];
       // Whatever an update was waiting to verify is moot now.
       clearPending(appRoot);
@@ -904,8 +912,14 @@ export function createUpdatesService({
         set({ step: 'Installing dependencies' });
         const r = await run(
           'npm',
-          ['ci', '--no-audit', '--no-fund', ...(env.isProd ? ['--omit=dev'] : [])],
-          { timeoutMs: 15 * 60_000 },
+          [
+            'ci',
+            '--no-audit',
+            '--no-fund',
+            '--loglevel=http',
+            ...(env.isProd ? ['--omit=dev'] : []),
+          ],
+          { timeoutMs: 15 * 60_000, onOutput: installProgress() },
         );
         if (r.code !== 0)
           throw new StepError(
@@ -947,7 +961,7 @@ export function createUpdatesService({
           status: 'done',
           step: null,
           git: after,
-          message: `Rolled back to ${target.slice(0, 7)}.${note} Restart this server to run it.`,
+          message: `Rolled back to ${target.slice(0, 7)}.${note}${localNote} Restart this server to run it.`,
         });
     } catch (e) {
       await fail('rollback', actor, e);

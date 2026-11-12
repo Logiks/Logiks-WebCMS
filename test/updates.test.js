@@ -302,55 +302,51 @@ test('a manual restart works, and reports honestly when the process cannot resta
   }
 });
 
-test('local changes to tracked files block an update and are left exactly as they were', async () => {
+test('local edits to tracked files are stashed and put back around an update, with no git commands for the admin', async () => {
   const repos = makeRepos();
   const node = await nodeFor(repos.server);
   try {
-    fs.writeFileSync(path.join(repos.server, 'src/cli/index.js'), '// edited on the server');
-    fs.writeFileSync(path.join(repos.server, 'scratch.txt'), 'untracked files never block');
-    const before = repos.head(repos.server);
-    repos.push({ 'src/cli/index.js': '// upstream change' }, 'Conflicting change');
+    fs.writeFileSync(
+      path.join(repos.server, 'package.json'),
+      '{"name":"fixture","allowScripts":{}}',
+    );
+    fs.writeFileSync(path.join(repos.server, 'package-lock.json'), LOCK('9.9.9'));
+    fs.writeFileSync(path.join(repos.server, 'scratch.txt'), 'untracked files are never touched');
+    const next = repos.push({ 'src/cli/index.js': '// upstream change' }, 'Unrelated change');
 
     await node.ctx.updates.dispatch(self(node), 'apply', {}, null);
     await finished(node);
     const snap = node.ctx.updates.snapshot();
-    assert.equal(snap.status, 'failed');
-    assert.match(snap.message, /uncommitted changes.*commit or stash/i);
-    assert.equal(repos.head(repos.server), before);
+    assert.notEqual(snap.status, 'failed', snap.message);
+    assert.equal(repos.head(repos.server), next);
+    assert.match(snap.message, /local changes.*put back/i);
     assert.equal(
-      fs.readFileSync(path.join(repos.server, 'src/cli/index.js'), 'utf8'),
-      '// edited on the server',
+      fs.readFileSync(path.join(repos.server, 'package.json'), 'utf8'),
+      '{"name":"fixture","allowScripts":{}}',
     );
-    assert.ok((await auditActions(node)).includes('updates.apply_failed'));
+    assert.equal(git(repos.server, 'stash', 'list'), '');
   } finally {
     await node.close();
     repos.cleanup();
   }
 });
 
-test('npm-install edits to package.json and package-lock.json never block an update, and are kept in a stash', async () => {
+test('local edits that conflict with the incoming change do not block the update; they stay in the stash', async () => {
   const repos = makeRepos();
   const node = await nodeFor(repos.server);
   try {
-    fs.writeFileSync(path.join(repos.server, 'package.json'), '{"name":"fixture","edited":true}');
     fs.writeFileSync(path.join(repos.server, 'package-lock.json'), LOCK('9.9.9'));
-    const next = repos.push(
-      {
-        'package.json': '{"name":"fixture","version":"2.0.0","type":"module"}',
-        'package-lock.json': LOCK('2.0.0'),
-      },
-      'Dependency change',
-    );
+    const next = repos.push({ 'package-lock.json': LOCK('2.0.0') }, 'Dependency change');
 
     await node.ctx.updates.dispatch(self(node), 'apply', {}, null);
     await finished(node);
-    assert.notEqual(
-      node.ctx.updates.snapshot().status,
-      'failed',
-      node.ctx.updates.snapshot().message,
-    );
+    const snap = node.ctx.updates.snapshot();
+    assert.notEqual(snap.status, 'failed', snap.message);
     assert.equal(repos.head(repos.server), next);
-    assert.match(git(repos.server, 'stash', 'list'), /package\.json/);
+    assert.match(snap.message, /git stash/i);
+    assert.match(git(repos.server, 'stash', 'list'), /local changes set aside/);
+    assert.equal(git(repos.server, 'status', '--porcelain', '--untracked-files=no'), '');
+    assert.ok((await auditActions(node)).includes('updates.apply'));
   } finally {
     await node.close();
     repos.cleanup();
