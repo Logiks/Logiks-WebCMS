@@ -1,6 +1,6 @@
 import { execFile, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { createWriteStream, statSync } from 'node:fs';
+import fs, { createWriteStream, statSync } from 'node:fs';
 import fsp from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -164,6 +164,39 @@ export function createUpdatesService({
         (err, stdout) => resolve(err ? null : stdout),
       ),
     );
+
+  /**
+   * A file this server created by hand (say a `.nvmrc`) that the incoming commits also add would make `git merge` refuse
+   * ("untracked working tree files would be overwritten"). When the content is identical the local copy is simply removed (the
+   * update brings it back); otherwise it is renamed to `<name>.local-<time>` so nothing is lost.
+   * @returns {Promise<string[]>} the files that were renamed
+   */
+  async function clearUntrackedCollisions(ref) {
+    const added = (
+      await git('diff', '--name-only', '--relative', '--diff-filter=A', 'HEAD', ref)
+    ).out
+      .split('\n')
+      .filter(Boolean);
+    if (!added.length) return [];
+    const local = (await git('ls-files', '--others', '--', ...added)).out
+      .split('\n')
+      .filter(Boolean);
+    const renamed = [];
+    for (const f of local) {
+      const abs = path.join(appRoot, f);
+      try {
+        const incoming = await showFile(ref, `./${f}`);
+        if (incoming !== null && fs.readFileSync(abs, 'utf8') === incoming) fs.rmSync(abs);
+        else {
+          fs.renameSync(abs, `${abs}.local-${Date.now()}`);
+          renamed.push(f);
+        }
+      } catch {
+        // unreadable or already gone: git reports it if it still gets in the way
+      }
+    }
+    return renamed;
+  }
 
   /** `classifyChanges`, but a dependency file that only had its version bumped does not count as an install. */
   async function classifyBetween(files, from, to) {
@@ -675,6 +708,9 @@ export function createUpdatesService({
         // The mirror is derived from the database and rewritten after the merge, so a stale copy must not block it.
         for (const spec of mirrorPathspec())
           await git('checkout', '--', spec.replace(':(exclude)', ''));
+        const renamedLocal = await clearUntrackedCollisions(
+          `refs/remotes/${g.remote}/${g.sourceBranch}`,
+        );
         const stashed = await stashLocal();
         set({ step: `Applying ${g.behind} update${g.behind === 1 ? '' : 's'}` });
         const m = await git('merge', '--ff-only', `refs/remotes/${g.remote}/${g.sourceBranch}`);
@@ -684,7 +720,11 @@ export function createUpdatesService({
             `Git couldn't apply the update: ${lastLine(m.out)}. Nothing was changed.`,
           );
         }
-        localNote = await restoreLocal(stashed);
+        localNote =
+          (await restoreLocal(stashed)) +
+          (renamedLocal.length
+            ? ` Files you had created that the update also adds were renamed to <name>.local-<time>: ${renamedLocal.slice(0, 3).join(', ')}.`
+            : '');
         done('merge');
         pulled = true;
         // Recorded right after the merge and before install/migrate: those are the steps that can fail, and the point is

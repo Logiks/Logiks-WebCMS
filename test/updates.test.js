@@ -353,6 +353,35 @@ test('local edits that conflict with the incoming change do not block the update
   }
 });
 
+test('a file created by hand that the update also adds does not block it', async () => {
+  const repos = makeRepos();
+  const node = await nodeFor(repos.server);
+  try {
+    fs.writeFileSync(path.join(repos.server, '.nvmrc'), '24.21.0\n');
+    fs.writeFileSync(path.join(repos.server, 'notes.txt'), 'mine');
+    const next = repos.push(
+      { '.nvmrc': '24.21.0\n', 'notes.txt': 'theirs' },
+      'Adds .nvmrc and notes',
+    );
+
+    await node.ctx.updates.dispatch(self(node), 'apply', {}, null);
+    await finished(node);
+    const snap = node.ctx.updates.snapshot();
+    assert.notEqual(snap.status, 'failed', snap.message);
+    assert.equal(repos.head(repos.server), next);
+    // identical content: just replaced; different content: kept under a new name
+    assert.equal(fs.readFileSync(path.join(repos.server, '.nvmrc'), 'utf8'), '24.21.0\n');
+    assert.equal(fs.readFileSync(path.join(repos.server, 'notes.txt'), 'utf8'), 'theirs');
+    const kept = fs.readdirSync(repos.server).filter((f) => f.startsWith('notes.txt.local-'));
+    assert.equal(kept.length, 1);
+    assert.equal(fs.readFileSync(path.join(repos.server, kept[0]), 'utf8'), 'mine');
+    assert.match(snap.message, /notes\.txt/);
+  } finally {
+    await node.close();
+    repos.cleanup();
+  }
+});
+
 test('a checkout with its own commits is not fast-forwarded', async () => {
   const repos = makeRepos();
   const node = await nodeFor(repos.server);
