@@ -325,12 +325,25 @@ test('HTTP: reading needs deploy.read, saving the target and deploying need depl
   }
 });
 
+const localCopies = (dir) => {
+  const found = [];
+  const walk = (d) => {
+    for (const e of fs.readdirSync(d, { withFileTypes: true }))
+      if (e.isDirectory()) walk(path.join(d, e.name));
+      else if (e.name.endsWith('.local')) found.push(path.relative(dir, path.join(d, e.name)));
+  };
+  walk(dir);
+  return found.sort();
+};
+
 test('end to end: a production checkout pulls the deploy with Updates, keeps its own data, and its rewritten site mirror does not block the update', async () => {
   const fx = fixture();
   const dev = await nodeFor(fx);
   let prod;
   try {
     await dev.ctx.siteFiles.put('pages/hello.html', '<h1>v1</h1>', null);
+    await dev.ctx.siteFiles.put('pages/two.html', '<h1>two v1</h1>', null);
+    await dev.ctx.siteFiles.put('pages/gone.html', '<h1>gone</h1>', null);
     assert.equal((await deploy(dev)).status, 'done');
 
     // Production: a checkout of the deployment repository with its own data folder, whose site mirror lives inside it.
@@ -354,9 +367,13 @@ test('end to end: a production checkout pulls the deploy with Updates, keeps its
     assert.notEqual(git(server, 'status', '--porcelain', '--untracked-files=no'), '');
 
     await dev.ctx.siteFiles.put('pages/hello.html', '<h1>v2</h1>', null);
+    await dev.ctx.siteFiles.put('pages/two.html', '<h1>two v2</h1>', null);
+    await dev.ctx.siteFiles.put('pages/three.html', '<h1>three</h1>', null);
+    await dev.ctx.siteFiles.remove('pages/gone.html', null);
     fx.write('src/a.js', '// version 2');
     assert.equal((await deploy(dev)).status, 'done');
 
+    const localBefore = localCopies(path.join(server, 'public'));
     await prod.ctx.updates.dispatch(prod.env.nodeId, 'apply', {}, null);
     await until(() => ['done', 'failed'].includes(prod.ctx.updates.snapshot().status), {
       timeout: 30000,
@@ -368,6 +385,21 @@ test('end to end: a production checkout pulls the deploy with Updates, keeps its
       fs.readFileSync(path.join(server, 'public/pages/hello.html'), 'utf8'),
       '<h1>v2</h1>',
     );
+    // several changed pages in one update: every one arrives (a save must not overwrite the ones still waiting to be read)
+    for (const [f, h] of [
+      ['two', 'two v2'],
+      ['three', 'three'],
+    ]) {
+      assert.equal(
+        fs.readFileSync(path.join(server, `public/pages/${f}.html`), 'utf8'),
+        `<h1>${h}</h1>`,
+      );
+      assert.equal(prod.ctx.siteFiles.get(`pages/${f}.html`)?.content, `<h1>${h}</h1>`);
+    }
+    assert.ok(!prod.ctx.siteFiles.list().some((f) => f.path === 'pages/gone.html'));
+    // the update itself must not leave new hand-edit copies behind
+    const added = localCopies(path.join(server, 'public')).filter((f) => !localBefore.includes(f));
+    assert.deepEqual(added, []);
     assert.equal(
       fs.readFileSync(path.join(server, 'data/media/upload.jpg'), 'utf8'),
       'customer upload',

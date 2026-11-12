@@ -572,22 +572,34 @@ export function createUpdatesService({
     const siteFiles = getSiteFiles();
     if (settings.get('updates.import_site') && siteFiles) {
       const res = { written: 0, removed: 0 };
+      // Everything goes in ONE save. Each save makes this server rewrite its public/ mirror from the database, and a rewrite that
+      // runs while some incoming files are not saved yet sees them as hand edits: it keeps them as `<file>.local` and puts the old
+      // page back. After one save the database and the files just merged agree, so the mirror has nothing to change.
+      /** @type {{path: string, content: string}[]} */
+      const writes = [];
+      /** @type {string[]} */
+      const deletes = [];
       for (const c of changes.filter((x) => x.file.startsWith('public/'))) {
         const rel = c.file.slice('public/'.length);
         if (rel === '.site-mirror.json' || rel.endsWith('.local')) continue;
         try {
           if (c.status === 'D') {
-            if (siteFiles.list().some((f) => f.path === rel)) {
-              await siteFiles.remove(rel, actor);
-              res.removed++;
-            }
+            if (siteFiles.list().some((f) => f.path === rel)) deletes.push(rel);
           } else {
-            await siteFiles.put(rel, await fsp.readFile(path.join(root, c.file), 'utf8'), actor);
-            res.written++;
+            const content = await fsp.readFile(path.join(root, c.file), 'utf8');
+            siteFiles.validate(rel, content); // one bad page is reported, not allowed to stop the others
+            writes.push({ path: rel, content });
           }
         } catch (e) {
           out.problems.push(`${rel}: ${e.message}`);
         }
+      }
+      try {
+        const r = await siteFiles.apply({ writes, deletes }, actor);
+        res.written = r?.written?.length ?? writes.length;
+        res.removed = r?.removed?.length ?? deletes.length;
+      } catch (e) {
+        out.problems.push(`pages: ${e.message}`);
       }
       if (res.written || res.removed) out.pages = res;
     }
