@@ -170,6 +170,29 @@ export function createUpdatesService({
     return rel && !rel.startsWith('..') && !path.isAbsolute(rel) ? [`:(exclude)${rel}`] : [];
   }
 
+  /**
+   * `npm install` (run by hand, or by an older npm) rewrites these two files without anyone meaning to change the code, and the
+   * update reinstalls with `npm ci` anyway. So they never count as "local changes"; before the code moves they are set aside
+   * in a git stash (kept, never dropped) so an incoming change to them can't conflict.
+   */
+  const DEPENDENCY_FILES = ['package.json', 'package-lock.json'];
+  const dependencyExcludes = DEPENDENCY_FILES.map((f) => `:(exclude)${f}`);
+
+  async function stashDependencyFiles() {
+    const changed = (
+      await git('status', '--porcelain', '--untracked-files=no', '--', ...DEPENDENCY_FILES)
+    ).out;
+    if (changed === '') return;
+    await git(
+      'stash',
+      'push',
+      '-m',
+      'CMS update: local package.json / package-lock.json changes',
+      '--',
+      ...DEPENDENCY_FILES,
+    );
+  }
+
   /** Reads the checkout. `git` is fast and local here; nothing touches the network. */
   async function readGit() {
     const top = await git('rev-parse', '--show-toplevel');
@@ -206,7 +229,17 @@ export function createUpdatesService({
     // is not a change anyone made to the code, so it never counts as "local changes".
     const mirror = mirrorPathspec();
     const dirty =
-      (await git('status', '--porcelain', '--untracked-files=no', '--', '.', ...mirror)).out !== '';
+      (
+        await git(
+          'status',
+          '--porcelain',
+          '--untracked-files=no',
+          '--',
+          '.',
+          ...mirror,
+          ...dependencyExcludes,
+        )
+      ).out !== '';
     const url = { code: 0, out: redact(sourceUrl) };
 
     const info = {
@@ -635,6 +668,7 @@ export function createUpdatesService({
         // The mirror is derived from the database and rewritten after the merge, so a stale copy must not block it.
         for (const spec of mirrorPathspec())
           await git('checkout', '--', spec.replace(':(exclude)', ''));
+        await stashDependencyFiles();
         set({ step: `Applying ${g.behind} update${g.behind === 1 ? '' : 's'}` });
         const m = await git('merge', '--ff-only', `refs/remotes/${g.remote}/${g.sourceBranch}`);
         if (m.code !== 0)
@@ -857,6 +891,7 @@ export function createUpdatesService({
       const { needsInstall, needsMigrate } = await classifyBetween(changed, target, 'HEAD');
 
       set({ step: `Putting back ${target.slice(0, 7)}` });
+      await stashDependencyFiles();
       const reset = await git('reset', '--hard', target);
       if (reset.code !== 0)
         throw new StepError(`Git couldn't go back: ${lastLine(reset.out)}. Nothing was changed.`);

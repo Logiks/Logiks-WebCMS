@@ -306,13 +306,10 @@ test('local changes to tracked files block an update and are left exactly as the
   const repos = makeRepos();
   const node = await nodeFor(repos.server);
   try {
-    fs.writeFileSync(path.join(repos.server, 'package.json'), '{"name":"edited on the server"}');
+    fs.writeFileSync(path.join(repos.server, 'src/cli/index.js'), '// edited on the server');
     fs.writeFileSync(path.join(repos.server, 'scratch.txt'), 'untracked files never block');
     const before = repos.head(repos.server);
-    repos.push(
-      { 'package.json': '{"name":"fixture","version":"2.0.0","type":"module"}' },
-      'Conflicting change',
-    );
+    repos.push({ 'src/cli/index.js': '// upstream change' }, 'Conflicting change');
 
     await node.ctx.updates.dispatch(self(node), 'apply', {}, null);
     await finished(node);
@@ -321,10 +318,39 @@ test('local changes to tracked files block an update and are left exactly as the
     assert.match(snap.message, /uncommitted changes.*commit or stash/i);
     assert.equal(repos.head(repos.server), before);
     assert.equal(
-      fs.readFileSync(path.join(repos.server, 'package.json'), 'utf8'),
-      '{"name":"edited on the server"}',
+      fs.readFileSync(path.join(repos.server, 'src/cli/index.js'), 'utf8'),
+      '// edited on the server',
     );
     assert.ok((await auditActions(node)).includes('updates.apply_failed'));
+  } finally {
+    await node.close();
+    repos.cleanup();
+  }
+});
+
+test('npm-install edits to package.json and package-lock.json never block an update, and are kept in a stash', async () => {
+  const repos = makeRepos();
+  const node = await nodeFor(repos.server);
+  try {
+    fs.writeFileSync(path.join(repos.server, 'package.json'), '{"name":"fixture","edited":true}');
+    fs.writeFileSync(path.join(repos.server, 'package-lock.json'), LOCK('9.9.9'));
+    const next = repos.push(
+      {
+        'package.json': '{"name":"fixture","version":"2.0.0","type":"module"}',
+        'package-lock.json': LOCK('2.0.0'),
+      },
+      'Dependency change',
+    );
+
+    await node.ctx.updates.dispatch(self(node), 'apply', {}, null);
+    await finished(node);
+    assert.notEqual(
+      node.ctx.updates.snapshot().status,
+      'failed',
+      node.ctx.updates.snapshot().message,
+    );
+    assert.equal(repos.head(repos.server), next);
+    assert.match(git(repos.server, 'stash', 'list'), /package\.json/);
   } finally {
     await node.close();
     repos.cleanup();
