@@ -1,5 +1,5 @@
 /**
- * Token-aware sizing of the Assistant's context (D-133). The history sent to the model is kept inside a token budget
+ * Token-aware sizing of the Assistant's context (D-146). The history sent to the model is kept inside a token budget
  * instead of a fixed number of turns: many short turns all stay, a few huge ones are cut sooner. Nothing here calls
  * the API; sizes are estimates from characters, corrected by the real `usage` the API returned for the previous call.
  */

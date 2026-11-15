@@ -1,4 +1,3 @@
-import Anthropic from '@anthropic-ai/sdk';
 import { cachedSystem, cachedTools, withHistoryCache } from '../../core/ai-cache.js';
 import { problemsOf } from '../visual/service.js';
 import { now } from '../../core/db/index.js';
@@ -47,7 +46,7 @@ function renderedComponentNames(body) {
 
 /**
  * @param {any} ctx the whole platform context
- * @param {{client?: Anthropic}} [opts] `client` is injectable so tests can stub the Anthropic API entirely
+ * @param {{client?: any}} [opts] `client` is injectable so tests can stub the Anthropic API entirely
  *        (never spending real money) — production always omits it and builds a fresh client per call from
  *        `ai.anthropic_api_key`, the same settings namespace Plugin Editor uses (D-063).
  */
@@ -608,8 +607,8 @@ How a page is built here:
     async sendMessage(id, text, actor = null) {
       const trimmed = String(text ?? '').trim();
       if (!trimmed) throw new HttpError(422, 'invalid_input', 'Type a message first.');
-      const { anthropic_api_key, model } = settings.ns('ai');
-      if (!injectedClient && !anthropic_api_key)
+      const { model } = settings.ns('ai');
+      if (!ctx.aigov.configured('page-designer', { injected: injectedClient }))
         throw new HttpError(
           422,
           'ai_not_configured',
@@ -628,9 +627,11 @@ How a page is built here:
       const newRows = [{ role: 'user', content: trimmed }];
       messages.push(newRows[0]);
 
-      const rawClient = injectedClient ?? new Anthropic({ apiKey: anthropic_api_key });
-      const client =
-        ctx.aiUsage?.wrap(rawClient, { feature: 'page-designer', userId: actor?.id }) ?? rawClient;
+      const client = ctx.aigov.client({
+        feature: 'page-designer',
+        userId: actor?.id,
+        injected: injectedClient,
+      });
       const tools = toolsFor(session, actor, () => messages, { n: 0 });
       // The site's project type, quality standard and working method (D-082); the Designer works without them if unreadable.
       const guidance = await ctx.prompts

@@ -1,5 +1,5 @@
 import { cachedSystem, cachedTools, withHistoryCache } from '../../core/ai-cache.js';
-import Anthropic from '@anthropic-ai/sdk';
+import { pingAnthropic } from '../aigov/service.js';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { now } from '../../core/db/index.js';
@@ -53,7 +53,7 @@ function safePath(dir, p) {
   return abs;
 }
 
-/** @type {Anthropic.Tool[]} */
+/** @type {import('@anthropic-ai/sdk').Anthropic.Tool[]} */
 const TOOLS = [
   {
     name: 'list_files',
@@ -138,7 +138,7 @@ export function defineAiSettings(registry) {
   registry.define('ai', {
     title: 'AI',
     description:
-      'Credentials for AI-powered admin features (Applications → Plugin Editor). The key is sent only to Anthropic, from this server.',
+      'The Anthropic key and model, plus spending caps and prices for every AI task. Which model answers which task is set on the AI & data page. The key is sent only to the model provider, from this server.',
     order: 32,
     fields: {
       anthropic_api_key: {
@@ -172,20 +172,73 @@ export function defineAiSettings(registry) {
         help: 'Used when the source is a JSON file: a list like ["claude-opus-5"] or [{"value": "claude-opus-5", "label": "Claude Opus 5"}]. Relative paths start from the server’s working folder.',
       },
       model_catalog: { type: 'json', hidden: true, default: null },
+      // Spending caps, prices and routing for every AI task (D-146). Edited on Settings → AI & data, which checks them.
+      daily_token_cap: {
+        type: 'number',
+        label: 'Daily token cap (cloud models)',
+        default: 0,
+        min: 0,
+        help: 'Input plus output tokens per UTC day across every cloud call. 0 means no cap. Local models are never counted.',
+      },
+      monthly_token_cap: {
+        type: 'number',
+        label: 'Monthly token cap (cloud models)',
+        default: 0,
+        min: 0,
+        help: 'Same, per UTC month. 0 means no cap.',
+      },
+      daily_cost_cap: {
+        type: 'number',
+        int: false,
+        label: 'Daily cost cap (US dollars)',
+        default: 0,
+        min: 0,
+        help: 'Needs the prices below. 0 means no cap.',
+      },
+      monthly_cost_cap: {
+        type: 'number',
+        int: false,
+        label: 'Monthly cost cap (US dollars)',
+        default: 0,
+        min: 0,
+        help: 'Needs the prices below. 0 means no cap.',
+      },
+      default_price_in: {
+        type: 'number',
+        int: false,
+        label: 'Claude price per 1M input tokens (US dollars)',
+        default: 0,
+        min: 0,
+        help: 'Copy it from your Anthropic pricing page. Left at 0, costs show as 0 and cost caps never trigger; token caps still work. Also the price "saved by local models" is estimated with.',
+      },
+      default_price_out: {
+        type: 'number',
+        int: false,
+        label: 'Claude price per 1M output tokens (US dollars)',
+        default: 0,
+        min: 0,
+      },
+      local_timeout_seconds: {
+        type: 'number',
+        label: 'Local model timeout (seconds)',
+        default: 120,
+        min: 5,
+        max: 900,
+        help: 'A local model that has not answered by then counts as unavailable and the next profile in the route is tried.',
+      },
+      profiles: { type: 'json', label: 'Model profiles', default: [], hidden: true },
+      routes: { type: 'json', label: 'Routing table', default: {}, hidden: true },
     },
     tests: {
       connect: {
         label: 'Test connection',
         async run(v) {
           if (!v.anthropic_api_key) throw new Error('Enter an API key first.');
-          const client = new Anthropic({ apiKey: v.anthropic_api_key });
           try {
-            const msg = await client.messages.create({
+            const text = await pingAnthropic({
+              apiKey: v.anthropic_api_key,
               model: v.model || MODEL_DEFAULT,
-              max_tokens: 10,
-              messages: [{ role: 'user', content: 'Say OK.' }],
             });
-            const text = msg.content.find((b) => b.type === 'text')?.text ?? '';
             return {
               message: `Connected — ${v.model || MODEL_DEFAULT} answered "${text.trim()}".`,
             };
@@ -206,7 +259,7 @@ export function defineAiSettings(registry) {
  * The AI's files are not live until a human clicks Enable in Plugin Manager; this module only ever touches disk,
  * never the `plugins` DB table or the in-memory active-plugin registry.
  * @param {any} ctx the whole platform context
- * @param {{pluginsDir: string, client?: Anthropic}} opts `client` is injectable so tests can stub the Anthropic
+ * @param {{pluginsDir: string, client?: any}} opts `client` is injectable so tests can stub the Anthropic
  *        API entirely (never spending real money); production always omits it and builds a fresh client per call
  *        from `ai.anthropic_api_key`, since a settings change should take effect on the very next message.
  */
@@ -538,8 +591,8 @@ export function createPluginEditor(ctx, { pluginsDir, client: injectedClient }) 
     async sendMessage(id, text, actor = null) {
       const trimmed = String(text ?? '').trim();
       if (!trimmed) throw new HttpError(422, 'invalid_input', 'Type a message first.');
-      const { anthropic_api_key, model } = settings.ns('ai');
-      if (!injectedClient && !anthropic_api_key)
+      const { model } = settings.ns('ai');
+      if (!ctx.aigov.configured('plugin-editor', { injected: injectedClient }))
         throw new HttpError(
           422,
           'ai_not_configured',
@@ -558,9 +611,11 @@ export function createPluginEditor(ctx, { pluginsDir, client: injectedClient }) 
       const newRows = [{ role: 'user', content: trimmed }];
       messages.push(newRows[0]);
 
-      const rawClient = injectedClient ?? new Anthropic({ apiKey: anthropic_api_key });
-      const client =
-        ctx.aiUsage?.wrap(rawClient, { feature: 'plugin-editor', userId: actor?.id }) ?? rawClient;
+      const client = ctx.aigov.client({
+        feature: 'plugin-editor',
+        userId: actor?.id,
+        injected: injectedClient,
+      });
       const tools = toolsFor(session);
 
       for (let i = 0; i < MAX_ITERATIONS; i++) {

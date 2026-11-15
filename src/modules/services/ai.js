@@ -55,6 +55,7 @@ export function createAiServiceWriter(ctx, { client } = {}) {
               messages: [{ role: 'user', content: description }],
               maxTokens: 2000,
               feature: 'services',
+              json: true,
             }),
           ),
         );

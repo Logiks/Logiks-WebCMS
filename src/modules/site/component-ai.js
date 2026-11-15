@@ -36,7 +36,7 @@ Rules of the platform:
  * @param {{ client?: any }} [opts] `client` is injectable so tests never call the paid API.
  */
 export function createAiComponentWriter(ctx, { client: injectedClient } = {}) {
-  const { settings, siteFiles } = ctx;
+  const { siteFiles } = ctx;
   const ai = createAiOnce(ctx, { client: injectedClient });
 
   /** Splits the reply into the name the model chose and the file. Tolerates a code fence round the file. */
@@ -64,7 +64,7 @@ export function createAiComponentWriter(ctx, { client: injectedClient } = {}) {
   return {
     /** True when a key is set, so the screen can say so before the person writes a description. */
     available() {
-      return !!(injectedClient || settings.get('ai.anthropic_api_key'));
+      return ctx.aigov.configured('components', { injected: injectedClient });
     },
 
     /**

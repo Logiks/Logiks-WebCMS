@@ -1,5 +1,4 @@
 import { cachedSystem } from './ai-cache.js';
-import Anthropic from '@anthropic-ai/sdk';
 import { HttpError } from './http/errors.js';
 
 const MODEL_DEFAULT = 'claude-sonnet-5-5';
@@ -8,7 +7,7 @@ const MODEL_DEFAULT = 'claude-sonnet-5-5';
  * One question, one answer, with the key and model from Settings → AI. The "write it for me" buttons (components,
  * pages, services, SEO) use this instead of a chat session: nothing is saved here and no tools are involved, so a
  * caller validates the answer itself before anything reaches the site.
- * @param {{ settings: any, prompts?: any, aiUsage?: any }} ctx
+ * @param {{ settings: any, prompts?: any, aigov?: any }} ctx
  * @param {{ client?: any }} [opts] `client` is injectable so tests never call the paid API.
  */
 export function createAiOnce(ctx, { client: injected } = {}) {
@@ -21,19 +20,33 @@ export function createAiOnce(ctx, { client: injected } = {}) {
         .catch(() => '');
     },
     /**
-     * @param {{ system: string, messages: {role: 'user'|'assistant', content: string}[], maxTokens?: number, feature?: string }} q
+     * @param {{ system: string, messages: {role: 'user'|'assistant', content: string}[], maxTokens?: number, feature?: string,
+     *   json?: boolean, userId?: number|null }} q `json`: the answer must hold a JSON object, so an answer without one counts
+     *   as unusable and a routed fallback is tried (D-146).
      * @returns {Promise<string>} the text of the reply
      */
-    async ask({ system, messages, maxTokens = 16000, feature = 'ai-builder' }) {
-      const { anthropic_api_key, model } = ctx.settings.ns('ai');
-      if (!injected && !anthropic_api_key)
+    async ask({
+      system,
+      messages,
+      maxTokens = 16000,
+      feature = 'ai-builder',
+      json = false,
+      userId,
+    }) {
+      const { model } = ctx.settings.ns('ai');
+      if (!ctx.aigov.configured(feature, { injected }))
         throw new HttpError(
           422,
           'ai_not_configured',
           'Set an Anthropic API key under Settings → AI first.',
         );
-      const raw = injected ?? new Anthropic({ apiKey: anthropic_api_key });
-      const client = ctx.aiUsage?.wrap(raw, { feature }) ?? raw;
+      // Every model call goes through the gateway (D-146): it picks the profile, applies the caps and records the call.
+      const client = ctx.aigov.client({
+        feature,
+        userId,
+        injected,
+        validate: json ? ctx.aigov.jsonValid : undefined,
+      });
       try {
         const res = await client.messages.create({
           model: model || MODEL_DEFAULT,
@@ -43,6 +56,7 @@ export function createAiOnce(ctx, { client: injected } = {}) {
         });
         return res.content?.find((b) => b.type === 'text')?.text ?? '';
       } catch (e) {
+        if (e instanceof HttpError) throw e;
         throw new HttpError(
           502,
           'ai_failed',

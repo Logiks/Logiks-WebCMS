@@ -1669,6 +1669,7 @@ document.addEventListener('alpine:init', () => {
           items: [
             { id: 'settings', label: 'All settings', perm: 'settings.read' },
             { id: 'features', label: 'Features', perm: 'features.read' },
+            { id: 'aigov', label: 'AI & data', module: 'aigov', perm: 'aigov.manage' },
             // Plugin Editor is reached from a button inside Plugin Manager itself (not its own nav entry) — its
             // route stays reachable via syncRoute()'s special-case, the same way 'account' is.
             { id: 'plugins', label: 'Plugin Manager', perm: 'plugins.read' },
@@ -4733,6 +4734,213 @@ document.addEventListener('alpine:init', () => {
     },
     n(v) {
       return Number(v || 0).toLocaleString();
+    },
+  }));
+
+  // ───────── Settings → AI & data (D-146) ─────────
+  Alpine.data('aigovPage', () => ({
+    ...H,
+    tab: 'settings',
+    d: null,
+    rows: [],
+    set: {},
+    editing: null,
+    testMsg: null,
+    report: null,
+    statement: null,
+    from: '',
+    to: '',
+    recommendedProfile: '',
+    error: '',
+    busy: false,
+    async init() {
+      if (!(await this.mountFragment('aigov', 'page'))) return;
+      await this.load();
+      this.statement = await api('GET', '/admin/aigov/statement').catch(() => null);
+    },
+    async load() {
+      this.error = '';
+      try {
+        this.d = await api('GET', '/admin/aigov');
+        this.set = { ...this.d.settings };
+        this.rows = this.d.features.map((f) => {
+          const names = this.d.routes[f.id] ?? [];
+          return { ...f, first: names[0] ?? 'default', then: names[1] ?? '' };
+        });
+        this.recommendedProfile ||= this.d.profiles.find((p) => !p.implicit)?.name ?? '';
+      } catch (e) {
+        this.error = e.message;
+      }
+    },
+    async setTab(t) {
+      this.tab = t;
+      if (t === 'usage') await this.loadReport();
+      if (t === 'settings' && !this.statement)
+        this.statement = await api('GET', '/admin/aigov/statement').catch(() => null);
+    },
+    n(v) {
+      return Number(v || 0).toLocaleString();
+    },
+    money(v) {
+      return '$' + Number(v || 0).toFixed(2);
+    },
+    pct(v) {
+      return v === null || v === undefined ? '–' : Math.round(v * 100) + '%';
+    },
+    get customProfiles() {
+      return (this.d?.profiles ?? []).filter((p) => !p.implicit);
+    },
+    get routedCount() {
+      return this.rows.filter((r) => r.first !== 'default' || r.then).length;
+    },
+    optionsFor(row, allowNone) {
+      const list = [{ v: 'default', t: 'Claude (as in Settings → AI)' }];
+      for (const p of this.customProfiles)
+        if (!(row.tools && p.tools === false))
+          list.push({ v: p.name, t: p.name + (p.is_local ? ' (local)' : '') });
+      return allowNone ? [{ v: '', t: 'Nothing: fail with a clear error' }, ...list] : list;
+    },
+    async saveSettings() {
+      this.busy = true;
+      try {
+        await api('PUT', '/admin/aigov/settings', this.set);
+        toast('Saved.');
+        await this.load();
+      } catch (e) {
+        toast(e.message, 'error');
+      } finally {
+        this.busy = false;
+      }
+    },
+    newProfile() {
+      this.testMsg = null;
+      this.editing = {
+        isNew: true,
+        name: '',
+        provider: 'openai-compatible',
+        base_url: 'http://127.0.0.1:11434/v1',
+        model: '',
+        api_key: '',
+        is_local: true,
+        tools: true,
+        enabled: true,
+        price_in: 0,
+        price_out: 0,
+        hasKey: false,
+      };
+    },
+    editProfile(p) {
+      this.testMsg = null;
+      this.editing = { ...p, isNew: false, api_key: '' };
+    },
+    body() {
+      const e = this.editing;
+      const b = {
+        provider: e.provider,
+        base_url: e.base_url,
+        model: e.model,
+        is_local: !!e.is_local,
+        tools: !!e.tools,
+        enabled: !!e.enabled,
+        price_in: Number(e.price_in) || 0,
+        price_out: Number(e.price_out) || 0,
+      };
+      if (e.api_key) b.api_key = e.api_key;
+      return b;
+    },
+    async testProfile() {
+      this.testMsg = { pending: true };
+      try {
+        const r = await api(
+          'POST',
+          '/admin/aigov/profiles/' + encodeURIComponent(this.editing.name || 'draft') + '/test',
+          { draft: this.body() },
+        );
+        if (r.ok && r.toolsOk !== null && r.toolsOk !== undefined) this.editing.tools = r.toolsOk;
+        this.testMsg = {
+          ok: r.ok,
+          text:
+            r.message +
+            (r.toolsOk === false
+              ? ' This model did not call a tool, so tasks that need tools will not be offered for it.'
+              : r.toolsOk
+                ? ' It calls tools correctly.'
+                : ''),
+        };
+      } catch (e) {
+        this.testMsg = { ok: false, text: e.message };
+      }
+    },
+    async saveProfile() {
+      try {
+        await api(
+          'PUT',
+          '/admin/aigov/profiles/' + encodeURIComponent(this.editing.name),
+          this.body(),
+        );
+        toast('Profile saved.');
+        this.editing = null;
+        await this.load();
+      } catch (e) {
+        toast(e.message, 'error');
+      }
+    },
+    async deleteProfile(p) {
+      if (!confirm(`Delete the profile "${p.name}"?`)) return;
+      try {
+        await api('DELETE', '/admin/aigov/profiles/' + encodeURIComponent(p.name));
+        await this.load();
+      } catch (e) {
+        toast(e.message, 'error');
+      }
+    },
+    async saveRoutes() {
+      const routes = {};
+      for (const r of this.rows) {
+        const names = [r.first, r.then].filter(Boolean);
+        if (names.length === 1 && names[0] === 'default') continue; // plain Claude is "no route"
+        if (names.length) routes[r.id] = [...new Set(names)];
+      }
+      try {
+        await api('PUT', '/admin/aigov/routes', { routes });
+        toast('Routing saved.');
+        await this.load();
+      } catch (e) {
+        toast(e.message, 'error');
+      }
+    },
+    async applyRecommended() {
+      if (!this.recommendedProfile) return;
+      try {
+        await api('POST', '/admin/aigov/routes/recommended', { profile: this.recommendedProfile });
+        toast('Light tasks now try ' + this.recommendedProfile + ' first, then Claude.');
+        await this.load();
+      } catch (e) {
+        toast(e.message, 'error');
+      }
+    },
+    async resetAll() {
+      if (
+        !confirm('Send every task back to Claude? Your profiles stay; only the routing is cleared.')
+      )
+        return;
+      try {
+        await api('POST', '/admin/aigov/routes/reset', {});
+        toast('Every task is back on Claude.');
+        await this.load();
+      } catch (e) {
+        toast(e.message, 'error');
+      }
+    },
+    async loadReport() {
+      const q = {};
+      if (this.from) q.from = String(new Date(this.from).getTime());
+      if (this.to) q.to = String(new Date(this.to).getTime() + 86_400_000 - 1);
+      try {
+        this.report = await api('GET', '/admin/aigov/report?' + new URLSearchParams(q));
+      } catch (e) {
+        this.error = e.message;
+      }
     },
   }));
 
@@ -11187,6 +11395,8 @@ document.addEventListener('alpine:init', () => {
     'media-analytics': 'media usage unused files',
     'server-errors': 'server errors exceptions failures crashes 500 failed jobs log',
     'log-manager': 'logs prune retention delete old audit events keep days',
+    aigov:
+      'ai local ollama lm studio vllm model routing profiles caps quality privacy data reset claude',
     'ai-usage-text': 'ai cost tokens anthropic models calls log',
     'ai-usage-media': 'ai images generated openai google stability log',
     'ai-users-text': 'ai tokens per user messages prompts cost day week month report',

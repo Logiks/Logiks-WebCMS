@@ -160,6 +160,11 @@ export function defineCorePermissions(permissions) {
   permissions.define('AI Usage', {
     'aiusage.read': 'View the log of AI calls: providers, models, tokens and who made them',
   });
+  permissions.define('AI & data', {
+    // Decides which model sees the site's content, and holds the keys for them. Administrators only (D-146).
+    'aigov.manage':
+      'Set which AI models are used for which task, add local models, set spending caps and see AI quality reports (administrators only)',
+  });
   permissions.define('Database', {
     'dbms.read': 'Browse database tables, their data and structure',
     'dbms.write': 'Add, edit and delete records; create and drop tables',

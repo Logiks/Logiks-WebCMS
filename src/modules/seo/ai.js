@@ -72,6 +72,7 @@ export function createAiSeoWriter(ctx, { client } = {}) {
         messages: [{ role: 'user', content: user }],
         maxTokens: 3000,
         feature: 'seo',
+        json: true,
       });
       try {
         const out = shape.parse(jsonIn(raw));

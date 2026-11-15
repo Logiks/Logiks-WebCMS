@@ -1,4 +1,3 @@
-import Anthropic from '@anthropic-ai/sdk';
 import { now } from '../../core/db/index.js';
 import { HttpError, notFound } from '../../core/http/errors.js';
 import { withHistoryCache } from '../../core/ai-cache.js';
@@ -160,7 +159,7 @@ const sentChars = (m) =>
 
 /**
  * Index of the first message that is still sent. Without a budget: the start of the Nth most recent earlier turn.
- * With one (D-133): every earlier turn that fits. `floor` is where the last summary stopped; while the turns after it
+ * With one (D-146): every earlier turn that fits. `floor` is where the last summary stopped; while the turns after it
  * fit, the cut stays put (so the cached prefix stays valid), and once they don't it moves forward to a relaxed
  * target, so it jumps rarely instead of creeping on every turn. The newest earlier turn is always kept.
  * @param {{role: string, content: any}[]} messages
@@ -196,7 +195,7 @@ export function keptFrom(messages, currentStart, budget = 0, floor = 0) {
  * @param {number} currentStart index of this turn's user message
  * @param {Map<number, any>} [images] media id → image block for the current turn
  * @param {string} [summary]
- * @param {{budget?: number, floor?: number, overhead?: number, ratio?: number, stats?: any}} [fit] D-133: keep the
+ * @param {{budget?: number, floor?: number, overhead?: number, ratio?: number, stats?: any}} [fit] D-146: keep the
  *   request inside `budget` tokens. `overhead` is the system prompt and tools (tokens), `ratio` corrects the
  *   estimate by what the API last reported, `stats` receives `{tokens, stubbed}`.
  */
@@ -1064,8 +1063,8 @@ export function createAssistant(ctx, { client: injectedClient } = {}) {
      * Revert away). The person then improves the new text by hand or in the chat.
      */
     async rebuildRequirements(actor) {
-      const { anthropic_api_key, model } = settings.ns('ai');
-      if (!injectedClient && !anthropic_api_key)
+      const { model } = settings.ns('ai');
+      if (!ctx.aigov.configured('assistant.requirements', { injected: injectedClient }))
         throw new HttpError(
           422,
           'ai_not_configured',
@@ -1122,9 +1121,11 @@ export function createAssistant(ctx, { client: injectedClient } = {}) {
         .then((l) => l.map((x) => `${x.name} (${x.mode})`).join(', '))
         .catch(() => '');
       if (svcs) codebase.push(`Services: ${svcs}`);
-      const rawClient = injectedClient ?? new Anthropic({ apiKey: anthropic_api_key });
-      const client =
-        ctx.aiUsage?.wrap(rawClient, { feature: 'assistant', userId: actor?.id }) ?? rawClient;
+      const client = ctx.aigov.client({
+        feature: 'assistant.requirements',
+        userId: actor?.id,
+        injected: injectedClient,
+      });
       let res;
       try {
         res = await complete(client, {
@@ -1336,8 +1337,8 @@ export function createAssistant(ctx, { client: injectedClient } = {}) {
           'invalid_input',
           'That message is too long (20,000 characters at most).',
         );
-      const { anthropic_api_key, model: defaultModel } = settings.ns('ai');
-      if (!injectedClient && !anthropic_api_key)
+      const { model: defaultModel } = settings.ns('ai');
+      if (!ctx.aigov.configured('assistant', { injected: injectedClient }))
         throw new HttpError(
           422,
           'ai_not_configured',
@@ -1381,9 +1382,12 @@ export function createAssistant(ctx, { client: injectedClient } = {}) {
       messages.push(newRows[0]);
       const imageBlocks = new Map(pics.map((p) => [p.ref.mediaId, p.block]));
 
-      const rawClient = injectedClient ?? new Anthropic({ apiKey: anthropic_api_key });
-      const client =
-        ctx.aiUsage?.wrap(rawClient, { feature: 'assistant', userId: actor?.id }) ?? rawClient;
+      // Summaries are their own task, so they can be routed apart from the chat (D-146).
+      const summaryClient = ctx.aigov.client({
+        feature: 'assistant.summary',
+        userId: actor?.id,
+        injected: injectedClient,
+      });
       const usage = { input: 0, output: 0, cacheRead: 0 };
       // Older turns that are about to stop being sent are folded into the running summary first (cheaper model).
       const budget = Number(settings.get('assistant.context_tokens') || 0);
@@ -1395,7 +1399,7 @@ export function createAssistant(ctx, { client: injectedClient } = {}) {
           .filter((r) => Number(r.id) > Number(row.summary_upto || 0));
         if (fresh.length) {
           const next = await summarise(
-            client,
+            summaryClient,
             summary,
             messages.slice(cut - fresh.length, cut),
             usage,
@@ -1430,6 +1434,12 @@ export function createAssistant(ctx, { client: injectedClient } = {}) {
           log?.warn({ err: e.message }, 'assistant: prompts not available');
           return '';
         });
+      // A plain "how do I…" question is its own task; everything else is the chat. Each can be routed on its own.
+      const client = ctx.aigov.client({
+        feature: helpRoute ? 'assistant.help' : 'assistant',
+        userId: actor?.id,
+        injected: injectedClient,
+      });
       const system = helpRoute
         ? HELP_PROMPT
         : guidance

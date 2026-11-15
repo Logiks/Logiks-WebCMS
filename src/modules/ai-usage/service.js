@@ -52,11 +52,12 @@ function periodOf(day, period) {
 export function createAiUsage({ db, log, settings }) {
   /**
    * @param {{ provider: string, model?: string, feature: string, userId?: number|null, inputTokens?: number,
-   *   outputTokens?: number, cacheReadTokens?: number, units?: number, ok?: boolean, prompt?: string, turnKey?: string }} e
+   *   outputTokens?: number, cacheReadTokens?: number, units?: number, ok?: boolean, prompt?: string, turnKey?: string,
+   *   isLocal?: boolean, costMicro?: number, usable?: boolean, truncated?: boolean, latencyMs?: number, profile?: string }} e
    */
   async function record(e) {
     try {
-      await db('ai_usage_log').insert({
+      return await dialect(db).insertGetId(db('ai_usage_log'), {
         created_at: now(),
         provider: String(e.provider).slice(0, 32),
         model: String(e.model ?? '').slice(0, 100),
@@ -67,6 +68,13 @@ export function createAiUsage({ db, log, settings }) {
         cache_read_tokens: Number(e.cacheReadTokens) || 0,
         units: Number(e.units) || 0,
         ok: e.ok !== false,
+        // The gateway's own measurements (D-146). Defaults describe a plain successful cloud call.
+        is_local: !!e.isLocal,
+        cost_micro: Math.round(Number(e.costMicro) || 0),
+        usable: e.usable !== false,
+        truncated: !!e.truncated,
+        latency_ms: Math.round(Number(e.latencyMs) || 0),
+        profile: e.profile ? String(e.profile).slice(0, 60) : null,
         prompt: e.prompt ? String(e.prompt).slice(0, PROMPT_CHARS) : null,
         // The whole message, for the usage export. Off = only the 500-character excerpt above is kept.
         context:
@@ -77,11 +85,12 @@ export function createAiUsage({ db, log, settings }) {
       });
     } catch (err) {
       log?.warn({ err: err.message }, 'ai usage: call not recorded');
+      return null;
     }
   }
 
   /** Logs one finished Anthropic response (or failure) from a `messages` call. */
-  function fromAnthropic(meta, params, res, ok) {
+  function fromAnthropic(meta, params, res, ok, extra = {}) {
     const u = res?.usage ?? {};
     const msg = lastPersonMessage(params?.messages);
     return record({
@@ -92,7 +101,8 @@ export function createAiUsage({ db, log, settings }) {
             .digest('hex')
         : undefined,
       provider: 'anthropic',
-      model: res?.model || params?.model,
+      ...extra,
+      model: extra.model || res?.model || params?.model,
       feature: meta.feature,
       userId: meta.userId,
       // Cache writes are billed as input; cache reads are shown separately (same split the assistant uses).
@@ -115,6 +125,8 @@ export function createAiUsage({ db, log, settings }) {
 
   const svc = {
     record,
+    /** One call the gateway made: `extra` carries provider, model, profile, cost, latency and the quality flags. */
+    recordCall: fromAnthropic,
 
     /**
      * Wraps an Anthropic SDK client so each `messages.create` / `messages.stream().finalMessage()` is logged.

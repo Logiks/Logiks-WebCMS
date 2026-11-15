@@ -1,0 +1,164 @@
+<div class="page-head d-flex justify-content-between align-items-end flex-wrap gap-2">
+  <div><h1>AI &amp; data</h1><p>Which model answers which task, what each one is sent, and what it costs. Nothing changes until you route a task: every task starts on Claude.</p></div>
+</div>
+<div class="alert alert-danger" role="alert" x-show="error" x-text="error"></div>
+<div class="alert alert-warning" role="alert" x-show="d && d.disabled"><strong>AI is switched off on this server.</strong> The AI_DISABLED environment variable is set, so no AI feature works. Remove it and restart to turn AI back on.</div>
+
+<ul class="nav nav-tabs mb-3" role="tablist" aria-label="AI and data">
+  <li class="nav-item" role="presentation"><button type="button" class="nav-link" :class="{active: tab === 'settings'}" role="tab" :aria-selected="tab === 'settings'" @click="setTab('settings')">Settings</button></li>
+  <li class="nav-item" role="presentation"><button type="button" class="nav-link" :class="{active: tab === 'models'}" role="tab" :aria-selected="tab === 'models'" @click="setTab('models')">Models</button></li>
+  <li class="nav-item" role="presentation"><button type="button" class="nav-link" :class="{active: tab === 'usage'}" role="tab" :aria-selected="tab === 'usage'" @click="setTab('usage')">Usage</button></li>
+</ul>
+
+<!-- Settings -->
+<div x-show="tab === 'settings'" role="tabpanel">
+  <section class="panel p-3 mb-3" aria-label="Claude">
+    <h2 class="h6">Claude</h2>
+    <p class="small mb-1">API key: <strong x-text="d && d.keyIsSet ? 'set' : 'not set'"></strong> · model: <span class="mono" x-text="d ? d.model : '–'"></span>. <a href="#/settings/ai">Change the key and model under Settings → AI</a>.</p>
+    <p class="small muted mb-0">The master switch is the AI_DISABLED environment variable, on purpose: a signed-in admin cannot turn AI back on.</p>
+  </section>
+
+  <section class="panel p-3 mb-3" aria-label="Spending caps">
+    <h2 class="h6">Spending caps (cloud models only)</h2>
+    <p class="small muted">Local models are never counted. A cap of 0 means no cap. When a cap is reached, cloud calls stop with a clear message until the next day or month (UTC).</p>
+    <p class="small mb-3" x-show="d">Used today: <strong x-text="n(d && d.spend.day.tokens)"></strong> tokens · this month: <strong x-text="n(d && d.spend.month.tokens)"></strong> tokens<span x-show="d && d.spend.month.cost > 0"> (<span x-text="money(d && d.spend.month.cost)"></span>)</span>.</p>
+    <div class="row g-3">
+      <div class="col-sm-6 col-lg-3"><label class="form-label small" for="ag-dt">Daily token cap</label><input id="ag-dt" type="number" min="0" class="form-control" x-model.number="set.daily_token_cap"></div>
+      <div class="col-sm-6 col-lg-3"><label class="form-label small" for="ag-mt">Monthly token cap</label><input id="ag-mt" type="number" min="0" class="form-control" x-model.number="set.monthly_token_cap"></div>
+      <div class="col-sm-6 col-lg-3"><label class="form-label small" for="ag-dc">Daily cost cap (US$)</label><input id="ag-dc" type="number" min="0" step="0.01" class="form-control" x-model.number="set.daily_cost_cap"></div>
+      <div class="col-sm-6 col-lg-3"><label class="form-label small" for="ag-mc">Monthly cost cap (US$)</label><input id="ag-mc" type="number" min="0" step="0.01" class="form-control" x-model.number="set.monthly_cost_cap"></div>
+      <div class="col-sm-6 col-lg-3"><label class="form-label small" for="ag-pi">Claude price per 1M input tokens (US$)</label><input id="ag-pi" type="number" min="0" step="0.01" class="form-control" x-model.number="set.default_price_in"></div>
+      <div class="col-sm-6 col-lg-3"><label class="form-label small" for="ag-po">Claude price per 1M output tokens (US$)</label><input id="ag-po" type="number" min="0" step="0.01" class="form-control" x-model.number="set.default_price_out"></div>
+      <div class="col-sm-6 col-lg-3"><label class="form-label small" for="ag-to">Local model timeout (seconds)</label><input id="ag-to" type="number" min="5" max="900" class="form-control" x-model.number="set.local_timeout_seconds"></div>
+    </div>
+    <p class="small muted mt-2 mb-3">Copy the prices from your Anthropic pricing page. Left at 0, costs show as $0, cost caps never trigger and "saved by local models" cannot be estimated; token caps still work.</p>
+    <button type="button" class="btn btn-primary" :disabled="busy" @click="saveSettings()">Save settings</button>
+  </section>
+
+  <section class="panel p-3 mb-3" aria-label="What each task sends">
+    <h2 class="h6">What each task sends to a model</h2>
+    <template x-if="statement">
+      <div>
+        <p class="small mb-1"><strong>Never sent:</strong></p>
+        <ul class="small"><template x-for="t in statement.never" :key="t"><li x-text="t"></li></template></ul>
+        <p class="small mb-1"><strong>Always:</strong></p>
+        <ul class="small"><template x-for="t in statement.always" :key="t"><li x-text="t"></li></template></ul>
+        <template x-for="f in statement.features" :key="f.id">
+          <details class="mb-1"><summary class="small" x-text="f.label"></summary><ul class="small mb-1"><template x-for="t in f.sends" :key="t"><li x-text="t"></li></template></ul></details>
+        </template>
+      </div>
+    </template>
+    <button type="button" class="btn btn-outline-secondary btn-sm" x-show="!statement" @click="setTab('settings')">Show what is sent</button>
+  </section>
+</div>
+
+<!-- Models -->
+<div x-show="tab === 'models'" role="tabpanel">
+  <section class="panel p-3 mb-3" aria-label="Profiles">
+    <div class="d-flex justify-content-between align-items-center mb-2">
+      <h2 class="h6 mb-0">Model profiles</h2>
+      <button type="button" class="btn btn-outline-primary btn-sm" @click="newProfile()">Add a model</button>
+    </div>
+    <p class="small muted">Claude from Settings → AI is always there as "default". Add a local model (Ollama, LM Studio, vLLM or anything that speaks the OpenAI API) or another Anthropic key here.</p>
+    <table class="table table-sm mb-0"><thead><tr><th>Name</th><th>Model</th><th>Where</th><th>Tools</th><th></th></tr></thead><tbody>
+      <template x-for="p in (d ? d.profiles : [])" :key="p.name">
+        <tr>
+          <td x-text="p.name"></td>
+          <td class="mono small" x-text="p.model"></td>
+          <td class="small" x-text="p.implicit ? 'Cloud (Settings → AI)' : (p.is_local ? 'Local · ' : 'Cloud · ') + (p.provider === 'anthropic' ? 'Anthropic' : 'OpenAI-compatible') + (p.enabled === false ? ' · off' : '')"></td>
+          <td class="small" x-text="p.tools === false ? 'No' : 'Yes'"></td>
+          <td class="text-end text-nowrap">
+            <button type="button" class="btn btn-sm btn-outline-secondary" x-show="!p.implicit" @click="editProfile(p)">Edit</button>
+            <button type="button" class="btn btn-sm btn-outline-danger" x-show="!p.implicit" @click="deleteProfile(p)">Delete</button>
+          </td>
+        </tr>
+      </template>
+    </tbody></table>
+  </section>
+
+  <section class="panel p-3 mb-3" x-show="editing" aria-label="Edit profile">
+    <template x-if="editing">
+      <div>
+        <h2 class="h6" x-text="editing.isNew ? 'Add a model' : 'Edit ' + editing.name"></h2>
+        <div class="row g-3">
+          <div class="col-md-4"><label class="form-label small" for="pf-name">Name</label><input id="pf-name" class="form-control" x-model="editing.name" :disabled="!editing.isNew" placeholder="ollama"></div>
+          <div class="col-md-4"><label class="form-label small" for="pf-prov">Provider</label><select id="pf-prov" class="form-select" x-model="editing.provider"><option value="openai-compatible">OpenAI-compatible (Ollama, LM Studio, vLLM)</option><option value="anthropic">Anthropic</option></select></div>
+          <div class="col-md-4"><label class="form-label small" for="pf-model">Model name</label><input id="pf-model" class="form-control" x-model="editing.model" placeholder="llama3.1:8b"></div>
+          <div class="col-md-8"><label class="form-label small" for="pf-url">Server address</label><input id="pf-url" class="form-control" x-model="editing.base_url" placeholder="http://127.0.0.1:11434/v1"><div class="form-text">Ollama: http://127.0.0.1:11434/v1. Leave empty for Anthropic's own address.</div></div>
+          <div class="col-md-4"><label class="form-label small" for="pf-key">API key</label><input id="pf-key" type="password" autocomplete="off" class="form-control" x-model="editing.api_key" :placeholder="editing.hasKey ? 'A key is saved. Type to replace it.' : 'Optional for local servers'"><div class="form-text">Stored encrypted. Never shown again.</div></div>
+          <div class="col-md-3"><label class="form-label small" for="pf-pi">Price per 1M input tokens (US$)</label><input id="pf-pi" type="number" min="0" step="0.01" class="form-control" x-model.number="editing.price_in"></div>
+          <div class="col-md-3"><label class="form-label small" for="pf-po">Price per 1M output tokens (US$)</label><input id="pf-po" type="number" min="0" step="0.01" class="form-control" x-model.number="editing.price_out"></div>
+          <div class="col-md-6 d-flex flex-wrap gap-3 align-items-end">
+            <div class="form-check"><input id="pf-local" type="checkbox" class="form-check-input" x-model="editing.is_local"><label class="form-check-label small" for="pf-local">Runs on my own machine (not counted against caps)</label></div>
+            <div class="form-check"><input id="pf-tools" type="checkbox" class="form-check-input" x-model="editing.tools"><label class="form-check-label small" for="pf-tools">Supports tools</label></div>
+            <div class="form-check"><input id="pf-on" type="checkbox" class="form-check-input" x-model="editing.enabled"><label class="form-check-label small" for="pf-on">On</label></div>
+          </div>
+        </div>
+        <div class="mt-3 d-flex flex-wrap gap-2 align-items-center">
+          <button type="button" class="btn btn-primary" @click="saveProfile()">Save model</button>
+          <button type="button" class="btn btn-outline-secondary" @click="testProfile()">Test connection</button>
+          <button type="button" class="btn btn-link" @click="editing = null">Cancel</button>
+          <span class="small" role="status" :class="testMsg && testMsg.ok === false ? 'text-danger' : ''" x-text="testMsg ? (testMsg.pending ? 'Testing…' : testMsg.text) : ''"></span>
+        </div>
+      </div>
+    </template>
+  </section>
+
+  <section class="panel p-3 mb-3" aria-label="Routing table">
+    <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-2">
+      <h2 class="h6 mb-0">Routing: which model answers which task</h2>
+      <button type="button" class="btn btn-outline-danger btn-sm" @click="resetAll()" :disabled="!d || !Object.keys(d.routes).length">Send every task back to Claude</button>
+    </div>
+    <div class="alert alert-info small" role="note"><strong>Privacy:</strong> if the first model fails, or its answer fails the check, the <strong>same request</strong> is sent to the next one. A "local, then Claude" route can therefore send the same text to Claude that the local model already saw. A task with a route never quietly uses the default model: if no model on its route can answer, it stops with an error.</div>
+    <div class="table-responsive"><table class="table table-sm align-middle"><thead><tr><th>Task</th><th>First try</th><th>If that fails</th></tr></thead><tbody>
+      <template x-for="r in rows" :key="r.id">
+        <tr>
+          <td><div x-text="r.label"></div><div class="small muted" x-text="(r.kind === 'light' ? 'Light task. ' : 'Heavy task: a weaker model can lower quality. ') + r.note"></div></td>
+          <td><select class="form-select form-select-sm" :aria-label="'First model for ' + r.label" x-model="r.first"><template x-for="o in optionsFor(r, false)" :key="o.v"><option :value="o.v" x-text="o.t" :selected="o.v === r.first"></option></template></select></td>
+          <td><select class="form-select form-select-sm" :aria-label="'Fallback model for ' + r.label" x-model="r.then"><template x-for="o in optionsFor(r, true)" :key="o.v"><option :value="o.v" x-text="o.t" :selected="o.v === r.then"></option></template></select></td>
+        </tr>
+      </template>
+    </tbody></table></div>
+    <div class="d-flex flex-wrap gap-2 align-items-center">
+      <button type="button" class="btn btn-primary" @click="saveRoutes()">Save routing</button>
+      <span class="small muted">or</span>
+      <label class="visually-hidden" for="rec-profile">Model for the recommended set</label>
+      <select id="rec-profile" class="form-select form-select-sm w-auto" x-model="recommendedProfile"><option value="">Choose a model…</option><template x-for="p in customProfiles" :key="p.name"><option :value="p.name" x-text="p.name"></option></template></select>
+      <button type="button" class="btn btn-outline-secondary btn-sm" :disabled="!recommendedProfile" @click="applyRecommended()">Light tasks: this model first, then Claude</button>
+    </div>
+    <p class="small muted mt-2 mb-0">The recommended set covers help answers, chat summaries, translations and SEO suggestions. Tasks that edit the site, write code or need long context stay on Claude. After a change, watch the Usage tab; if quality drops, send every task back to Claude.</p>
+  </section>
+</div>
+
+<!-- Usage -->
+<div x-show="tab === 'usage'" role="tabpanel">
+  <div class="mb-3 d-flex flex-wrap gap-2 align-items-end">
+    <div><label class="form-label small" for="agu-from">From</label><input id="agu-from" type="date" class="form-control form-control-sm" x-model="from" @change="loadReport()"></div>
+    <div><label class="form-label small" for="agu-to">To</label><input id="agu-to" type="date" class="form-control form-control-sm" x-model="to" @change="loadReport()"></div>
+  </div>
+  <div class="row g-2 mb-3" x-show="report">
+    <div class="col-6 col-lg-3"><div class="panel p-3"><div class="muted small">Calls</div><div class="bigver" x-text="report ? n(report.totals.calls) : '–'"></div></div></div>
+    <div class="col-6 col-lg-3"><div class="panel p-3"><div class="muted small">Cloud cost</div><div class="bigver" x-text="report ? money(report.totals.cost) : '–'"></div></div></div>
+    <div class="col-6 col-lg-3"><div class="panel p-3"><div class="muted small">Saved by local models (estimate)</div><div class="bigver" x-text="report ? money(report.totals.savedEstimate) : '–'"></div></div></div>
+  </div>
+  <section class="panel">
+    <div class="panel-h">By task and model</div>
+    <div class="empty" x-show="report && !report.rows.length">No AI calls in this range yet.</div>
+    <div class="table-responsive"><table class="table table-sm mb-0" x-show="report && report.rows.length"><thead><tr><th>Task</th><th>Model</th><th class="text-end">Calls</th><th class="text-end">Succeeded</th><th class="text-end">Usable</th><th class="text-end">Quality</th><th class="text-end">Tokens</th><th class="text-end">Cost</th><th class="text-end">Saved (est.)</th></tr></thead><tbody>
+      <template x-for="r in (report ? report.rows : [])" :key="r.feature + '/' + r.profile">
+        <tr>
+          <td x-text="r.label"></td>
+          <td><span x-text="r.profile"></span> <span class="badge text-bg-secondary" x-show="r.isLocal">local</span></td>
+          <td class="text-end" x-text="n(r.calls)"></td>
+          <td class="text-end" x-text="pct(r.successRate)"></td>
+          <td class="text-end" x-text="pct(r.usableRate)"></td>
+          <td class="text-end" x-text="r.quality === null ? '–' : r.quality + ' / 100'"></td>
+          <td class="text-end" x-text="n(r.inputTokens + r.outputTokens)"></td>
+          <td class="text-end" x-text="money(r.cost)"></td>
+          <td class="text-end" x-text="r.isLocal ? money(r.savedEstimate) : '–'"></td>
+        </tr>
+      </template>
+    </tbody></table></div>
+    <p class="small muted p-2 mb-0" x-show="report" x-text="report ? report.note + (report.pricesSet ? '' : ' Set your Claude prices on the Settings tab to see costs and savings.') : ''"></p>
+  </section>
+</div>

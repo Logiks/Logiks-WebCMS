@@ -24,6 +24,13 @@ const schema = z.object({
   REDIS_QUEUE_URL: z.string().optional().default(''),
 
   APP_MASTER_KEY: z.string().optional().default(''),
+  // Master switch for every AI feature (D-146). Env-only on purpose: an admin account that is compromised must not be able to
+  // turn it back on, and a server that must never call a model can be started with it set.
+  AI_DISABLED: z
+    .string()
+    .optional()
+    .default('')
+    .transform((v) => /^(1|true|yes|on)$/i.test(v.trim())),
   APP_MASTER_KEY_OLD: z.string().optional().default(''),
 
   TRUST_PROXY_HOPS: z.coerce.number().int().min(0).default(0),

@@ -1,4 +1,3 @@
-import Anthropic from '@anthropic-ai/sdk';
 import { HttpError } from '../../core/http/errors.js';
 import { languageName } from './i18n.js';
 
@@ -20,7 +19,7 @@ const tokens = (s) =>
 
 /**
  * Translates site strings with Claude. Only the strings go out, never a secret or a page.
- * @param {{ settings: any, aiUsage?: any }} ctx
+ * @param {{ settings: any, aigov?: any }} ctx
  * @param {{ client?: any }} [opts] `client` is injectable so tests never call the paid API (as in the Page Designer).
  */
 export function createAiTranslator(ctx, { client: injectedClient } = {}) {
@@ -31,21 +30,37 @@ export function createAiTranslator(ctx, { client: injectedClient } = {}) {
      * @returns {Promise<{ translated: Record<string, string>, skipped: {key: string, reason: string}[] }>}
      */
     async translate({ from, to, entries }) {
-      const { anthropic_api_key, model } = settings.ns('ai');
-      if (!injectedClient && !anthropic_api_key)
+      const { model } = settings.ns('ai');
+      if (!ctx.aigov.configured('translations', { injected: injectedClient }))
         throw new HttpError(
           422,
           'ai_not_configured',
           'Set an Anthropic API key under Settings → AI first.',
         );
-      const rawClient = injectedClient ?? new Anthropic({ apiKey: anthropic_api_key });
-      const client = ctx.aiUsage?.wrap(rawClient, { feature: 'translations' }) ?? rawClient;
       const translated = {};
       const skipped = [];
       for (let i = 0; i < entries.length; i += BATCH) {
         const batch = entries.slice(i, i + BATCH);
         let out;
         try {
+          // A translation that dropped a string or changed a {{placeholder}} / tag is unusable. When the task is routed to a
+          // local model, that sends the same batch to the next profile (Claude) instead of skipping the strings.
+          const client = ctx.aigov.client({
+            feature: 'translations',
+            injected: injectedClient,
+            validate: (r) => {
+              const raw = r.content?.find((b) => b.type === 'text')?.text ?? '';
+              try {
+                const o = JSON.parse(raw.slice(raw.indexOf('{'), raw.lastIndexOf('}') + 1));
+                return batch.every((e) => {
+                  const t = typeof o?.[e.key] === 'string' ? o[e.key].trim() : '';
+                  return t && t.length <= MAX_LEN && tokens(t) === tokens(e.text);
+                });
+              } catch {
+                return false;
+              }
+            },
+          });
           const res = await client.messages.create({
             model: model || 'claude-sonnet-5',
             max_tokens: 8000,

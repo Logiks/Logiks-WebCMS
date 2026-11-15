@@ -450,6 +450,10 @@
       <section x-data="logManagerPage"></section>
     </template>
 
+    <template x-if="route === 'aigov'">
+      <section x-data="aigovPage"></section>
+    </template>
+
     <template x-if="route === 'ai-usage-text'">
       <section x-data="aiUsagePage('text')"></section>
     </template>
