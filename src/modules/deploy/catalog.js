@@ -25,7 +25,7 @@ import { DATA_PREFIX } from '../backup/service.js';
  *  addOnly   only ever added, never updated (history rows)
  *  requires  tables that must be carried for this one to make sense
  * @type {Record<string, { group: string, label: string, key: string[], fks?: Record<string,string>, optFks?: Record<string,string>,
- *   self?: string, who?: string[], secret?: string[], ignore?: string[], addOnly?: boolean, requires?: string[], strId?: boolean }>}
+ *   self?: string, who?: string[], secret?: string[], ignore?: string[], addOnly?: boolean, requires?: string[], strId?: boolean, cascade?: boolean }>}
  */
 export const SPECS = {
   roles: { group: 'people', label: 'Roles and their permissions', key: ['name'] },
@@ -183,7 +183,7 @@ export const GROUPS = [
   {
     id: 'plugins',
     label: 'Plugin tables',
-    help: 'Tables a plugin created. A plugin keeps its own records on each server, so these are off by default.',
+    help: 'Tables a plugin created. A plugin keeps its own records on each server, so these are off by default. Sync is offered for a table with a unique id column: a record is found by id, then by another unique column, then by all its columns. A table without one can only add missing records.',
   },
 ];
 

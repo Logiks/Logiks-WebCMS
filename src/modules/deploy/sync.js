@@ -101,8 +101,38 @@ export function createDeploySync(ctx) {
   }
   const knownSettings = () => new Set(settingChoices().flatMap((d) => d.fields.map((f) => f.id)));
 
+  /**
+   * The id column of a plugin table is unique (primary key or a unique index): that alone makes Sync possible, because a
+   * record can then be found by id, by another unique column, or by its whole content (see `syncTable`).
+   */
+  async function hasUniqueId(table) {
+    const cols = await dia.columnDetails(table);
+    if (cols.some((c) => c.name === 'id' && c.primaryKey)) return true;
+    if (!cols.some((c) => c.name === 'id')) return false;
+    return (await dia.indexList(table)).some(
+      (i) => i.unique && i.columns.length === 1 && i.columns[0] === 'id',
+    );
+  }
+
+  /** The rules a plugin table is synced by: match on id, then another unique column, then every column. */
+  async function pluginSpec(table) {
+    if (!(await hasUniqueId(table))) return null;
+    return {
+      group: 'plugins',
+      label: table,
+      key: ['id'],
+      cascade: true,
+      strId: true, // a new record keeps dev's id (it is free here, or it would have matched)
+      who: ['created_by', 'edited_by'],
+      ignore: ['created_on', 'edited_on'],
+    };
+  }
+
   async function catalog() {
-    return buildCatalog(await presentTables());
+    const cat = buildCatalog(await presentTables());
+    for (const e of cat)
+      if (e.group === 'plugins' && (await hasUniqueId(e.table))) e.modes = ['skip', 'add', 'sync'];
+    return cat;
   }
 
   /** The saved choice, made safe against what exists now. */
@@ -263,6 +293,8 @@ export function createDeploySync(ctx) {
       'id',
       'created_at',
       'updated_at',
+      'created_on',
+      'edited_on',
       ...(spec.ignore ?? []),
       ...(spec.who ?? []),
       ...(spec.secret ?? []),
@@ -278,8 +310,7 @@ export function createDeploySync(ctx) {
    * when this server's copy is exactly what the deployment last left (nobody edited it here); otherwise it is a conflict.
    * Re-running after a failure is safe: every chunk is idempotent and its state is written with it.
    */
-  async function syncTable(table, mode, file, maps, report, ref) {
-    const spec = SPECS[table];
+  async function syncTable(table, mode, file, maps, report, ref, spec = SPECS[table]) {
     const cols = (await dia.columnDetails(table)).map((c) => c.name);
     const hasId = cols.includes('id');
     const cmp = compareCols(spec, cols);
@@ -302,7 +333,8 @@ export function createDeploySync(ctx) {
           withSelf && r[spec.self] != null ? (idMap.get(String(r[spec.self])) ?? null) : null;
       return m;
     };
-    const labelOf = (m) => `${table}: ${spec.key.map((c) => m[c]).join(' / ')}`;
+    const labelOf = (m) =>
+      `${table}: ${spec.cascade ? `record ${m.id}` : spec.key.map((c) => m[c]).join(' / ')}`;
     const rowKeyOf = (m) => sha(JSON.stringify(spec.key.map((c) => String(m[c]))), 40);
 
     // This server's records, by key (just the key columns and the id).
@@ -329,6 +361,43 @@ export function createDeploySync(ctx) {
     const seen = new Set();
     const inserted = new Set();
 
+    // Plugin tables: when the id is not here, the same record may still be (2) a unique column's value, or (3) all of it.
+    // Read before any transaction opens: SQLite has one connection, and a query outside the transaction would wait for it.
+    const uniqueIdx = spec.cascade
+      ? (await dia.indexList(table)).filter(
+          (i) => i.unique && !i.columns.includes('id') && i.columns.every((c) => cols.includes(c)),
+        )
+      : [];
+    /** @type {{ cols: string[], map: Map<string, any> }[] | null} */
+    let uniq = null;
+    /** @type {Map<string, any> | null} */
+    let whole = null;
+    const tupleKey = (r, cs) =>
+      cs.some((c) => r[c] == null) ? null : JSON.stringify(cs.map((c) => norm(r[c])));
+    async function cascadeFind(m, q) {
+      if (!uniq) {
+        uniq = [];
+        for (const i of uniqueIdx) {
+          const map = new Map();
+          for (const r of await q(table).select(['id', ...i.columns])) {
+            const k = tupleKey(r, i.columns);
+            if (k !== null) map.set(k, r.id);
+          }
+          uniq.push({ cols: i.columns, map });
+        }
+      }
+      for (const u of uniq) {
+        const k = tupleKey(m, u.cols);
+        if (k !== null && u.map.has(k)) return u.map.get(k);
+      }
+      if (!cmp.length) return undefined;
+      if (!whole) {
+        whole = new Map();
+        for (const r of await q(table).select(['id', ...cmp])) whole.set(hashRow(r, cmp), r.id);
+      }
+      return whole.get(hashRow(m, cmp));
+    }
+
     // Pass 1 — find, or add, every record; remember dev's id → this server's id.
     for await (const chunk of chunksOf(file)) {
       await db.transaction(async (trx) => {
@@ -340,6 +409,10 @@ export function createDeploySync(ctx) {
           }
           const rk = rowKeyOf(m);
           seen.add(rk);
+          if (spec.cascade && !index.has(rk)) {
+            const hit = await cascadeFind(m, trx);
+            if (hit !== undefined) index.set(rk, hit);
+          }
           if (index.has(rk)) {
             if (hasId) idMap.set(String(r.id), index.get(rk));
             continue;
@@ -407,6 +480,7 @@ export function createDeploySync(ctx) {
             if (was === cur) {
               const patch = Object.fromEntries(usable.map((c) => [c, m[c]]));
               if (cols.includes('updated_at')) patch.updated_at = now();
+              if (cols.includes('edited_on')) patch.edited_on = now();
               await trx(table).where(where).update(patch);
               await upsertState(trx, table, rk, labelOf(m), inc);
               t.updated++;
@@ -431,6 +505,14 @@ export function createDeploySync(ctx) {
           }
         });
       }
+
+    if (spec.cascade && t.added && dia.kind === 'pg')
+      for (const c of await dia.columnDetails(table))
+        if (c.autoIncrement)
+          await db.raw(
+            `select setval(pg_get_serial_sequence(?, ?), coalesce((select max("${c.name}") from "${table}"), 1), true)`,
+            [`"${table}"`, c.name],
+          );
 
     if (mode === 'sync') {
       const gone = [...state.keys()].filter((k) => !seen.has(k));
@@ -616,14 +698,15 @@ export function createDeploySync(ctx) {
           report.problems.push(`${table}: the deployment has no records for it.`);
           continue;
         }
-        if (SPECS[table]) {
+        const spec = SPECS[table] ?? (mode === 'sync' ? await pluginSpec(table) : null);
+        if (spec) {
           if (!(await presentTables()).includes(table)) {
             report.problems.push(
               `${table}: this server does not have the table yet, so nothing was added.`,
             );
             continue;
           }
-          await syncTable(table, mode, file, maps, report, ref);
+          await syncTable(table, mode, file, maps, report, ref, spec);
         } else await addTable(table, file, report);
       } catch (e) {
         report.problems.push(`${table}: ${e.message}`);
@@ -683,15 +766,19 @@ export function createDeploySync(ctx) {
             sha(JSON.stringify(inc.value ?? null)),
           );
         } else {
-          const spec = SPECS[c.tbl];
+          const spec = SPECS[c.tbl] ?? (await pluginSpec(c.tbl));
           if (!spec) throw new Error('that table is not one a deployment can update.');
           const cols = (await dia.columnDetails(c.tbl)).map((x) => x.name);
-          const keyObj = Object.fromEntries(spec.key.map((k) => [k, inc[k]]));
+          // A plugin record may have been found by a unique column or its content, so its id here is the one that was stored.
+          const keyObj = spec.cascade
+            ? { id: c.target_id }
+            : Object.fromEntries(spec.key.map((k) => [k, inc[k]]));
           const current = await db(c.tbl).where(keyObj).first();
           if (!current) throw new Error('the record is no longer here, so nothing was changed.');
           const cmp = compareCols(spec, cols).filter((k) => !secretish(current[k]) && k in inc);
           const patch = Object.fromEntries(cmp.map((k) => [k, inc[k]]));
           if (cols.includes('updated_at')) patch.updated_at = now();
+          if (cols.includes('edited_on')) patch.edited_on = now();
           await db(c.tbl).where(keyObj).update(patch);
           await upsertState(db, c.tbl, c.row_key, c.label, hashRow({ ...current, ...patch }, cmp));
           touched.add(c.tbl);
@@ -722,7 +809,7 @@ export function createDeploySync(ctx) {
       let hash;
       if (c.tbl === 'settings') hash = sha(JSON.stringify(inc.value ?? null));
       else {
-        const spec = SPECS[c.tbl];
+        const spec = SPECS[c.tbl] ?? (await pluginSpec(c.tbl));
         const cols = (await dia.columnDetails(c.tbl)).map((x) => x.name);
         const cmp = compareCols(spec, cols).filter((k) => k in inc);
         hash = hashRow(inc, cmp);

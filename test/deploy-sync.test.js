@@ -81,7 +81,11 @@ test('the default choice: what you built syncs, your own tables and media add, c
       assert.equal(sel.tables[t], 'skip', `${t} is off by default`);
     const view = await dev.ctx.deploySync.overview();
     assert.equal(view.tables.find((t) => t.table === 'acme_log').group, 'plugins');
-    assert.deepEqual(view.tables.find((t) => t.table === 'acme_log').modes, ['skip', 'add']);
+    assert.deepEqual(view.tables.find((t) => t.table === 'acme_log').modes, [
+      'skip',
+      'add',
+      'sync',
+    ]); // it has a unique id, so Sync is offered
     assert.ok(!view.tables.some((t) => ['sessions', 'audit_logs', 'api_keys'].includes(t.table)));
     assert.ok(sel.settings.includes('site.theme') && sel.settings.includes('mail.host'));
     assert.ok(
@@ -617,6 +621,91 @@ test('libraries: each one is chosen on its own and travels with its chosen files
     assert.equal(all.libraries, null);
   } finally {
     await prod?.close();
+    await dev.close();
+    fx.cleanup();
+  }
+});
+
+test('plugin tables with a unique id sync: matched by id, then a unique column, then the whole record; a new record keeps its id; a record edited here is a conflict', async () => {
+  const fx = fixture();
+  const dev = await devNode(fx);
+  let prod;
+  try {
+    const make = (n) =>
+      n.ctx.db.schema.createTable('plugin_t_items', (t) => {
+        t.bigIncrements('id');
+        t.string('code', 40).unique();
+        t.string('label');
+        t.integer('sort_order').defaultTo(0);
+        t.bigInteger('edited_on');
+      });
+    await make(dev);
+    prod = await startNode({ seed: true });
+    await make(prod);
+    const view = await dev.ctx.deploySync.overview();
+    assert.deepEqual(view.tables.find((t) => t.table === 'plugin_t_items').modes, [
+      'skip',
+      'add',
+      'sync',
+    ]);
+    await dev.ctx.db('plugin_t_items').insert([
+      { id: 1, code: 'a', label: 'dev a' }, // same id on prod
+      { id: 2, code: 'b', label: 'dev b' }, // other id on prod, same unique code
+      { id: 3, code: 'c', label: 'same' }, // other id and code on prod, identical otherwise? no: matched by whole-record below
+      { id: 7, code: 'g', label: 'dev new' }, // not on prod: arrives with id 7
+    ]);
+    await prod.ctx.db('plugin_t_items').insert([
+      { id: 1, code: 'a', label: 'dev a' },
+      { id: 20, code: 'b', label: 'old b' },
+    ]);
+    const clone = await deployFrom(dev, fx, { plugin_t_items: 'sync' });
+    const r = await bring(prod, clone);
+    const rows = await prod.ctx.db('plugin_t_items').orderBy('id');
+    assert.deepEqual(
+      rows.map((x) => [x.id, x.code]),
+      [
+        [1, 'a'],
+        [3, 'c'],
+        [7, 'g'],
+        [20, 'b'],
+      ],
+      'found by id (1), by unique code (b is still id 20), new ones keep dev ids',
+    );
+    assert.equal(r.tables.plugin_t_items.added, 2);
+    // b was never synced and differs: a person decides, nothing is overwritten
+    assert.equal(rows.find((x) => x.code === 'b').label, 'old b');
+    assert.equal(r.tables.plugin_t_items.conflicts, 1);
+
+    // dev edits record 1; prod has not touched it: it updates. Prod edits record 7; dev edits it too: conflict.
+    await dev.ctx.db('plugin_t_items').where({ id: 1 }).update({ label: 'dev a2' });
+    await dev.ctx.db('plugin_t_items').where({ id: 7 }).update({ label: 'dev new2' });
+    await prod.ctx.db('plugin_t_items').where({ id: 7 }).update({ label: 'prod new' });
+    const clone2 = await deployFrom(dev, fx, { plugin_t_items: 'sync' });
+    const r2 = await bring(prod, clone2);
+    const after = Object.fromEntries(
+      (await prod.ctx.db('plugin_t_items')).map((x) => [x.id, x.label]),
+    );
+    assert.equal(after[1], 'dev a2');
+    assert.equal(after[7], 'prod new');
+    assert.ok(r2.tables.plugin_t_items.conflicts >= 1);
+    assert.equal((await prod.ctx.db('plugin_t_items')).length, 4, 'nothing is ever deleted');
+  } finally {
+    await prod?.close();
+    await dev.close();
+    fx.cleanup();
+  }
+});
+
+test('a plugin table with no unique id is offered Add missing only', async () => {
+  const fx = fixture();
+  const dev = await devNode(fx);
+  try {
+    await dev.ctx.db.schema.createTable('plugin_t_loose', (t) => {
+      t.string('line');
+    });
+    const view = await dev.ctx.deploySync.overview();
+    assert.deepEqual(view.tables.find((t) => t.table === 'plugin_t_loose').modes, ['skip', 'add']);
+  } finally {
     await dev.close();
     fx.cleanup();
   }

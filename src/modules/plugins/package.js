@@ -2,6 +2,7 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import AdmZip from 'adm-zip';
 import { z } from 'zod';
+import { assertTableRules } from './table-rules.js';
 import { HttpError } from '../../core/http/errors.js';
 
 export const PLUGIN_SLUG = /^[a-z0-9]([a-z0-9-]{0,60}[a-z0-9])?$/;
@@ -82,6 +83,9 @@ export const manifestSchema = z.object({
   config: z.record(z.string().regex(/^[a-z][a-z0-9_]*$/), configField).default({}),
   // Other plugins this one needs: they must be installed and on, or this one doesn't load (D-070).
   depends: z.array(z.string().regex(PLUGIN_SLUG)).max(20).default([]),
+  // On for every new plugin (D-135): its migrations may only create plugin_* tables with id, created_on, edited_on,
+  // created_by and edited_by. Off for older plugins, which keep working exactly as they did.
+  tableRules: z.boolean().default(false),
   // Built-in modules this one needs (ids as shown at Settings → Modules), e.g. ["services"]. Same rule.
   requires: z
     .array(z.string().regex(/^[a-z][a-z0-9-]{0,79}$/))
@@ -217,11 +221,28 @@ export function readPluginZip(buffer) {
  */
 export async function dryRun(files) {
   const entry = files.get('plugin.js');
-  if (!entry) return;
-  const code = entry.content;
-  const mod = await import(`data:text/javascript;base64,${Buffer.from(code).toString('base64')}`);
-  if (typeof mod.default !== 'function')
-    throw bad('plugin.js must have a default export: (ctx) => an Express router.');
+  if (entry) {
+    const mod = await import(
+      `data:text/javascript;base64,${Buffer.from(entry.content).toString('base64')}`
+    );
+    if (typeof mod.default !== 'function')
+      throw bad('plugin.js must have a default export: (ctx) => an Express router.');
+  }
+  // New plugins (tableRules) may only create tables of the agreed shape. Checked here, when the plugin is made, so a
+  // wrong table is refused before it exists, not when somebody enables the plugin (D-147).
+  const migrate = files.get('migrate.js');
+  let manifest = null;
+  try {
+    manifest = JSON.parse(String(files.get('plugin.json')?.content ?? 'null'));
+  } catch {
+    /* the manifest check reports an unreadable plugin.json */
+  }
+  if (migrate && manifest?.tableRules === true) {
+    const mod = await import(
+      `data:text/javascript;base64,${Buffer.from(migrate.content).toString('base64')}`
+    );
+    await assertTableRules(mod, bad);
+  }
 }
 
 /** One hash for the whole plugin package (the zip bytes themselves, not the extracted files — see service.js). */
